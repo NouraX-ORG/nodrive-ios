@@ -1,0 +1,54 @@
+# SPDX-FileCopyrightText: 2026 Nourax
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Allowlist for tools/check-branding.py (spec section 6, "the no-Nextcloud rule").
+#
+# Format, one entry per line, fields separated by " | ":
+#   <path glob> | <regex searched in the hit text, case-insensitive> | <class> | <reason>
+# class: internal = an identifier the server, the OS or a library depends on (never shown)
+#        legal    = a copyright or licence notice that must stay
+# A hit is classified by the first entry whose glob matches its path and whose regex
+# matches its text. Everything else fails the sweep. Keep regexes tight (anchor them):
+# a user-visible text must never be covered by an entry.
+
+# --- Swift module, Xcode internals --------------------------------------------------
+*.storyboard | ^customModule="Nextcloud"$ | internal | Swift module name of the app target (internal product/module name, kept like NextcloudKit); Interface Builder uses it to find classes; never shown
+*.xib | ^customModule="Nextcloud"$ | internal | Swift module name of the app target; Interface Builder uses it to find classes; never shown
+iOSClient/NCBridgeSwift.h | ^Nextcloud-Swift\.h$ | internal | Objective-C header that Xcode generates for the Swift module "Nextcloud"
+
+# --- server protocol ----------------------------------------------------------------
+*.swift | ^(DAV:\\"( xmlns:\w+=\\"http://(own|next)cloud\.org/ns\\")+>|http://(own|next)cloud\.org/ns(\\"/>)?)$ | internal | WebDAV XML namespaces oc: and nc: that the server requires in PROPFIND/SEARCH requests
+Brand/NCBrand.swift | ^Mozilla/5\.0 \(iOS\) Nextcloud-iOS/\\\(appVersion\)\\\(suffixBrand\)$ | internal | user agent: Nextcloud server 35 recognises the iOS client only by "Mozilla/5.0 (iOS) Nextcloud-iOS/<version>" (USER_AGENT_CLIENT_IOS); NoDrive sends ".../35.2.1 NoDrive"
+iOSClient/Viewer/NCViewerDirectEditing/NCDirectEditorAdapter.swift | ^Mozilla/5\.0 \((iPad|iPhone)\)( Mobile)? Nextcloud-iOS/\\\(appVersion\)$ | internal | user agent for the document editors served by the server, which match the Nextcloud-iOS token
+iOSClient/NCGlobal.swift | ^twofactor_nextcloud_notification$ | internal | app id of a server app (two-factor by notification) as sent by the server
+iOSClient/Networking/NCService.swift | ^owncloud$ | internal | detects an ownCloud server from the product name in the server status
+Brand/NCBrand.swift | ^Nextcloud$ | internal | comparison brand == "Nextcloud": only upstream's own brand gets Nextcloud's push proxy; NoDrive's brand is "NoDrive"
+iOSClient/Settings/Advanced/Capabilities/NCCapabilitiesModel.swift | ^Nextcloud$ | internal | comparison brand != "Nextcloud" (adds one capability row for branded apps)
+
+# --- names and ids inside NoDrive's own sandbox ----------------------------------------
+Brand/Database.swift | ^nextcloud\.realm$ | internal | database file name inside NoDrive's own app-group container
+iOSClient/Data/NCLocalDatabase.swift | ^nextcloud(-debug)?\.sqlite$ | internal | database file name inside NoDrive's own app-group container
+iOSClient/NCGlobal.swift | ^Library/Application Support/Nextcloud$ | internal | folder inside NoDrive's own app-group container
+iOSClient/NCGlobal.swift | ^text/com\.nextcloud\.ocId$ | internal | drag-and-drop type id used inside the app
+iOSClient/NCGlobal.swift | ^it\.twsweb\.nextcloud\.metadata$ | internal | unused upstream constant (archiver name), never shown
+*.swift | ^com\.nextcloud\.(bgTaskQueue|realmQueue|timerProcess|ThreadSafeArray|ThreadSafeDictionary|networking\.certificate-trust-status|keychain)$ | internal | dispatch-queue labels and the keychain service name; scoped to NoDrive's process and keychain group
+* | ^(<string>)?com\.nextcloud\.(refresh|processing)Task(</string>)?$ | internal | BGTaskScheduler identifiers (Info.plist + NCGlobal); scoped per app, never shown
+iOSClient/Settings/NCPreferences.swift | ^Crypto Cloud$ | internal | legacy keychain service name, read once to migrate old settings
+iOSClient/Data/NCManageDatabase.swift | ^(\w+ )?(https://cloudtest\.nextcloud\.com|cloudtest@nextcloud\.com)$ | internal | SwiftUI preview fixture, created only when isXcodeRunningForPreviews (never at run time, no network)
+iOSClient/Networking/E2EE/* | ^Nextcloud( a safe home for all your data)?$ | internal | end-to-end encryption: organisation field of the certificate request and the key self-test string; never shown, changing them could break key checks
+
+# --- other apps on the device ---------------------------------------------------------
+* | ^(<string>)?nextcloud(talk|notes)(://[^ ]*)?(</string>)?$ | internal | URL schemes of the separate Talk and Notes apps: only used to open them when installed (LSApplicationQueriesSchemes); never shown, no network
+
+# --- localization keys ---------------------------------------------------------------
+*.swift | ^_(apps_nextcloud_detect|create_nextcloudtext_document|warning_owncloud)_$ | internal | localization key names, never shown (their values are checked by this sweep)
+
+# --- comments in the translation files (not shown) ------------------------------------
+iOSClient/Supporting Files/*.lproj/Localizable.strings | ^//  Nextcloud$ | legal | upstream file header (copyright block) of each translation file; a comment, never shown; kept untouched
+iOSClient/Supporting Files/*.lproj/Localizable.strings | ^//  Author Marino Faggiana <marino\.faggiana@nextcloud\.com>$ | legal | upstream copyright header (author line); a comment, never shown; kept untouched
+iOSClient/Supporting Files/*.lproj/Localizable.strings | ^// MARK: File name validator \(used by NextcloudKit, don't remove\)$ | internal | developer comment naming the NextcloudKit library; never shown
+
+# --- the one text-only licences page (spec section 6 legal exception) -----------------
+iOSClient/Settings/Acknowledgements.rtf | ^Copyright \(C\) Nextcloud GmbH and contributors\. Modifications copyright \(C\) 2026 Nourax\.\\$ | legal | GPL-3.0 copyright notice of the app on Settings > Information > Acknowledgements (text only)
+iOSClient/Settings/Acknowledgements.rtf | ^GNU General Public License v3\.0 or later\. Copyright \(C\) Nextcloud GmbH and Marino Faggiana\\$ | legal | copyright line of the GPL-3.0 library NextcloudKit on the licences page
+iOSClient/Settings/Acknowledgements.rtf | ^\\f1\\b NextcloudKit\\f0\\b0 \\$ | legal | name of the GPL-3.0 library NextcloudKit on the licences page
