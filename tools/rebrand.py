@@ -21,6 +21,7 @@ What it changes (see docs/branding.md and plans/ios-plan.md):
   * xcschemes                BundleIdentifier of the remote runnable
   * *.lproj/*.strings        the few values that name Nextcloud, in every language
   * storyboards / XIBs       launch colour, placeholder texts
+  * folder SVGs, glyph PDFs  Nextcloud blues in the folder, directory and document glyphs
   * a few Swift files        URL scheme, links to Nextcloud services, privacy link guard
   * Acknowledgements.rtf     text-only licence page from tools/legal/third-party.json
   * Brand/NoDriveBlank.pdf   replaces "Reasons to use Nextcloud.pdf" (scan preview fallback)
@@ -40,6 +41,7 @@ import os
 import plistlib
 import re
 import sys
+import zlib
 from collections import Counter
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -163,16 +165,16 @@ class Store:
     def path(self, rel):
         return os.path.join(self.root, rel)
 
-    def _load(self, rel):
+    def _load(self, rel, binary=False):
         if rel not in self.files:
             p = self.path(rel)
             if os.path.exists(p):
                 with open(p, 'rb') as f:
                     data = f.read()
-                codec, text = decode(data)
+                codec, text = ('bytes', data) if binary else decode(data)
                 self.files[rel] = {'orig': data, 'codec': codec, 'text': text}
             else:
-                self.files[rel] = {'orig': None, 'codec': 'utf-8', 'text': None}
+                self.files[rel] = {'orig': None, 'codec': 'bytes' if binary else 'utf-8', 'text': None}
         return self.files[rel]
 
     def exists(self, rel):
@@ -182,6 +184,17 @@ class Store:
         f = self._load(rel)
         if f['text'] is None:
             fail(f'{rel}: file not found')
+        if f['codec'] == 'bytes':
+            fail(f'internal: {rel} is a binary file (use get_bytes)')
+        return f['text']
+
+    def get_bytes(self, rel):
+        """Raw bytes of a binary file (a PDF), never decoded."""
+        f = self._load(rel, binary=True)
+        if f['text'] is None:
+            fail(f'{rel}: file not found')
+        if f['codec'] != 'bytes':
+            fail(f'internal: {rel} was loaded as text')
         return f['text']
 
     def set(self, rel, text, codec=None):
@@ -191,7 +204,7 @@ class Store:
             f['codec'] = codec
 
     def set_bytes(self, rel, data):
-        f = self._load(rel)
+        f = self._load(rel, binary=True)
         f['codec'] = 'bytes'
         f['text'] = data
 
@@ -845,6 +858,92 @@ def folder_svgs(st):
         sub_regex(st, f'iOSClient/Images.xcassets/{name}', r'#(?:00679[Ee]|2563EB)', hex_colour(PRIMARY), count=None, flags=0)
 
 
+# ---- glyph PDFs ------------------------------------------------------------
+# Vector PDFs in the asset catalog filled with a Nextcloud blue. UIImage(named:) loads them by
+# NextcloudKit's icon names (NKTypeIconFile.directory = "directory", .document = "document"),
+# e.g. in the upload-conflict dialog; "directory" is also the placeholder of NCShareHeader.xib.
+# (file, upstream colour, NoDrive colour)
+GLYPH_PDFS = [
+    ('iOSClient/Images.xcassets/directory.imageset/directory.pdf', (0x00, 0x82, 0xC9), PRIMARY),
+    ('iOSClient/Images.xcassets/document.imageset/document.pdf', (0x49, 0xAB, 0xEA), PRIMARY_LIGHT),  # = documentIconColor
+]
+PDF_WS = rb'[ \t\r\n]'
+PDF_NUM = rb'(?:\d+(?:\.\d*)?|\.\d+)'
+PDF_RGB_OP = re.compile(rb'(?<![\w.])(' + PDF_NUM + rb')' + PDF_WS + rb'+(' + PDF_NUM + rb')' + PDF_WS + rb'+('
+                        + PDF_NUM + rb')' + PDF_WS + rb'+(RG|rg)(?!\w)')
+PDF_STREAM = re.compile(rb'(?:^|[\r\n])\d+ 0 obj' + PDF_WS + rb'*<<([^<>]*)>>' + PDF_WS + rb'*stream\r?\n')
+
+
+def pdf_number(v):
+    """0..255 -> a PDF colour operand with 3 decimals, Skia style (.145), that maps back to v."""
+    s = ('%.3f' % (v / 255)).rstrip('0').rstrip('.')
+    s = s[1:] if s.startswith('0.') else s
+    if round(float(s) * 255) != v:
+        fail(f'internal: colour operand {s} does not map back to {v}')
+    return s.encode('ascii')
+
+
+def pdf_rgb(m):
+    return tuple(round(float(m.group(i)) * 255) for i in (1, 2, 3))
+
+
+def pdf_recolour(st, rel, old, new):
+    """Change the one colour of a single-content-stream PDF (Skia output) from `old` to `new`.
+    Only the "r g b RG" / "r g b rg" operands change; the stream is compressed again and the
+    xref table rewritten. A PDF that already has `new` is left byte for byte as it is."""
+    data = st.get_bytes(rel)
+    streams = list(PDF_STREAM.finditer(data))
+    if len(streams) != 1:
+        fail(f'{rel}: expected 1 content stream, found {len(streams)} (upstream changed?)')
+    sm = streams[0]
+    lm = re.fullmatch(rb'/Filter /FlateDecode' + PDF_WS + rb'*/Length (\d+)' + PDF_WS + rb'*', sm.group(1))
+    if not lm:
+        fail(f'{rel}: stream dictionary is not "/Filter /FlateDecode /Length n" (upstream changed?): {sm.group(1)[:80]!r}')
+    start, length = sm.end(), int(lm.group(1))
+    if not re.match(rb'\r?\nendstream', data[start + length:start + length + 11]):
+        fail(f'{rel}: /Length {length} does not end at endstream')
+    content = zlib.decompress(data[start:start + length])
+    found = {pdf_rgb(m) for m in PDF_RGB_OP.finditer(content)}
+    if found == {new}:
+        return
+    if old not in found or not found <= {old, new}:
+        fail(f'{rel}: colours {sorted(hex_colour(c) for c in found)}, expected {hex_colour(old)} (upstream changed?)')
+    operands = b' '.join(pdf_number(v) for v in new)
+    content = PDF_RGB_OP.sub(lambda m: operands + b' ' + m.group(4) if pdf_rgb(m) == old else m.group(0), content)
+    if {pdf_rgb(m) for m in PDF_RGB_OP.finditer(content)} != {new}:
+        fail(f'internal: {rel}: recolour left other colours')
+    stream = zlib.compress(content, 9)
+    out = (data[:sm.start(1)] + b'/Filter /FlateDecode\n/Length %d' % len(stream) + data[sm.end(1):start]
+           + stream + data[start + length:])
+    st.set_bytes(rel, pdf_rewrite_xref(rel, out))
+
+
+def pdf_rewrite_xref(rel, data):
+    """Recompute a classic xref table (one subsection from object 0) and startxref."""
+    xms = list(re.finditer(rb'[\r\n]xref\r?\n0 (\d+)\r?\n', data))
+    if len(xms) != 1:
+        fail(f'{rel}: expected one classic xref table, found {len(xms)}')
+    xm = xms[0]
+    count = int(xm.group(1))
+    end = xm.end() + 20 * count
+    if not re.fullmatch(rb'(?:\d{10} \d{5} [nf](?: \n|\r\n| \r))+', data[xm.end():end]):
+        fail(f'{rel}: xref table is not {count} entries of 20 bytes')
+    offsets = {int(m.group(2)): m.start(2) for m in re.finditer(rb'(^|[\r\n])(\d+) 0 obj\b', data)}
+    if sorted(offsets) != list(range(1, count)):
+        fail(f'{rel}: objects {sorted(offsets)} do not match xref size {count}')
+    entries = b'0000000000 65535 f \n' + b''.join(b'%010d 00000 n \n' % offsets[i] for i in range(1, count))
+    data = data[:xm.end()] + entries + data[end:]
+    data, n = re.subn(rb'startxref\r?\n\d+', b'startxref\n%d' % (xm.start() + 1), data)
+    if n != 1:
+        fail(f'{rel}: expected one startxref, found {n}')
+    return data
+
+
+def glyph_pdfs(st):
+    for rel, old, new in GLYPH_PDFS:
+        pdf_recolour(st, rel, old, new)
+
+
 # ---- translations --------------------------------------------------------
 STRINGS_LINE = re.compile(r'^(?P<pre>[ \t]*"(?P<key>(?:[^"\\]|\\.)*)"[ \t]*=[ \t]*")(?P<val>(?:[^"\\]|\\.)*)(?P<post>"[ \t]*;.*)$')
 
@@ -997,6 +1096,7 @@ def run(st, base):
     project(st, base)
     storyboards(st)
     folder_svgs(st)
+    glyph_pdfs(st)
     translations(st)
     acknowledgements(st)
     st.set_bytes('Brand/NoDriveBlank.pdf', blank_pdf())

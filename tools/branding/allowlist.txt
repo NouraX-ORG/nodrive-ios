@@ -7,6 +7,9 @@
 #   <path glob> | <regex searched in the hit text, case-insensitive> | <class> | <reason>
 # class: internal = an identifier the server, the OS or a library depends on (never shown)
 #        legal    = a copyright or licence notice that must stay
+#        artwork  = a generic image whose colour is close to a Nextcloud blue by chance; it was
+#                   looked at and shows no Nextcloud logo or art. Applies to colour and pixel hits
+#                   only; pin the exact colour or share, so a changed image is looked at again
 # A hit is classified by the first entry whose glob matches its path and whose regex
 # matches its text. Everything else fails the sweep. Keep regexes tight (anchor them):
 # a user-visible text must never be covered by an entry.
@@ -52,3 +55,7 @@ iOSClient/Supporting Files/*.lproj/Localizable.strings | ^// MARK: File name val
 iOSClient/Settings/Acknowledgements.rtf | ^Copyright \(C\) Nextcloud GmbH and contributors\. Modifications copyright \(C\) 2026 Nourax\.\\$ | legal | GPL-3.0 copyright notice of the app on Settings > Information > Acknowledgements (text only)
 iOSClient/Settings/Acknowledgements.rtf | ^GNU General Public License v3\.0 or later\. Copyright \(C\) Nextcloud GmbH and Marino Faggiana\\$ | legal | copyright line of the GPL-3.0 library NextcloudKit on the licences page
 iOSClient/Settings/Acknowledgements.rtf | ^\\f1\\b NextcloudKit\\f0\\b0 \\$ | legal | name of the GPL-3.0 library NextcloudKit on the licences page
+
+# --- generic artwork (colour close to a Nextcloud blue by chance; looked at) -----------------
+iOSClient/Images.xcassets/rgb.imageset/rgb.svg | ^#0b88da$ | artwork | colour picker "custom colour" button (NCColorPicker.swift): a multi-colour wheel of 16 segments; one segment is this mid blue
+iOSClient/Images.xcassets/mac.imageset/mac.png | ^10\.8% of the opaque pixels are close to #49ABEA$ | artwork | picture of a classic Macintosh whose light-blue screen says "hello"; no Nextcloud logo or art

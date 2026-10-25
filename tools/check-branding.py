@@ -14,7 +14,11 @@ What is searched (source mode, the default):
   * storyboards and XIBs (text, and colours close to Nextcloud blue)
   * Info.plist files, entitlements, intent definitions, privacy manifest, RTF, JSON, SVG, TXT
   * image and resource file names (+ SVG content); images must also be looked at (--list-images)
-  * Swift / Objective-C string literals (comments skipped) and UIColor values
+  * colours close to a Nextcloud blue (#0082C9, #00679E, #49ABEA): hex and rgb() colours in
+    SVG/HTML/CSS, asset-catalog colour sets, colour operators (rg/RG/sc/scn/k) in the
+    decompressed content streams of PDFs, and the pixels of PNG/JPEG/GIF images
+    (RASTER_SHARE of the opaque pixels; needs Pillow)
+  * Swift / Objective-C string literals (comments skipped), hex-colour literals and UIColor values
   * project.pbxproj: bundle ids, INFOPLIST_KEY_* values, team, NOURAX_* settings, the
     resources copied into each target; xcschemes: BundleIdentifier
   in the folders of the app and its extensions (Brand, iOSClient, Share, File Provider
@@ -42,6 +46,7 @@ import re
 import shutil
 import subprocess
 import sys
+import zlib
 from collections import Counter, defaultdict
 
 TOOLS = os.path.dirname(os.path.abspath(__file__))
@@ -77,13 +82,19 @@ KEYWORDS = [
     ('name-he', r'נקסט\s?קלאוד'),
 ]
 KEYWORD_RE = [(name, re.compile(p, re.I)) for name, p in KEYWORDS]
-NEXTCLOUD_BLUES = [(0x00, 0x82, 0xC9), (0x00, 0x67, 0x9E)]
+# Nextcloud's brand blue, its dark blue (folder glyphs) and its document-icon blue
+# (upstream document.pdf #49ABEA, NCBrand.documentIconColor #49abe9)
+NEXTCLOUD_BLUES = [(0x00, 0x82, 0xC9), (0x00, 0x67, 0x9E), (0x49, 0xAB, 0xEA)]
 COLOUR_DISTANCE = 32
+# Raster images: a hit when at least this share of the opaque pixels is a Nextcloud blue
+RASTER_SHARE = 0.01
+RASTER_MAX_SIDE = 512
 
 TEXT_EXT = {'.plist', '.entitlements', '.intentdefinition', '.xcprivacy', '.storyboard', '.xib', '.json', '.svg',
             '.rtf', '.txt', '.md', '.html', '.css', '.js', '.stringsdict', '.xcstrings', '.strings', '.xcscheme'}
 CODE_EXT = {'.swift', '.m', '.h'}
 IMAGE_EXT = {'.png', '.jpg', '.jpeg', '.gif', '.pdf', '.svg', '.heic', '.icon', '.car'}
+RASTER_EXT = {'.png', '.jpg', '.jpeg', '.gif'}
 
 
 # ------------------------------------------------------------------ helpers
@@ -122,6 +133,140 @@ def colour_hit(rgb):
         if sum((a - b) ** 2 for a, b in zip(rgb, blue)) ** 0.5 <= COLOUR_DISTANCE:
             return '#%02X%02X%02X' % blue
     return None
+
+
+def colour_hits(rel, line, text, rgb):
+    c = colour_hit(rgb)
+    return [Hit(rel, line, 'colour', f'~{c}', text)] if c else []
+
+
+# colours written as text: #rgb / #rrggbb (SVG, HTML, CSS), rgb(r, g, b), and a Swift/ObjC
+# string literal that is only a hex colour (UIColor(hex: "#49abe9"))
+HEX_COLOUR = re.compile(r'(?<![\w&#])#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})(?!\w)')
+CSS_RGB = re.compile(r'rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*[,)]')
+HEX_LITERAL = re.compile(r'(?:#|0x)?([0-9A-Fa-f]{6})(?:[0-9A-Fa-f]{2})?')
+
+
+def hex_rgb(h):
+    if len(h) == 3:
+        h = ''.join(c * 2 for c in h)
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def text_colour_hits(rel, n, line):
+    hits = []
+    for m in HEX_COLOUR.finditer(line):
+        hits += colour_hits(rel, n, m.group(0), hex_rgb(m.group(1)))
+    for m in CSS_RGB.finditer(line):
+        hits += colour_hits(rel, n, m.group(0), tuple(int(v) for v in m.groups()))
+    return hits
+
+
+def colorset_hits(rel, text):
+    """Asset-catalog colour sets: components are 0-1 floats ("0.510"), 8-bit hex ("0x82") or integers."""
+    def value(v):
+        v = str(v).strip()
+        if v.lower().startswith('0x'):
+            return int(v, 16)
+        return round(float(v) * 255) if '.' in v else int(v)
+    hits = []
+    try:
+        colours = json.loads(text).get('colors', [])
+    except ValueError:
+        return [Hit(rel, 0, 'colour', 'unreadable-colorset', 'not JSON')]
+    for i, c in enumerate(colours):
+        comp = (c.get('color') or {}).get('components') or {}
+        if all(k in comp for k in ('red', 'green', 'blue')):
+            try:
+                rgb = tuple(value(comp[k]) for k in ('red', 'green', 'blue'))
+            except ValueError:
+                continue    # a system colour name, not a value
+            hits += colour_hits(rel, 0, f'colors[{i}] = #%02X%02X%02X' % rgb, rgb)
+    return hits
+
+
+# ---- PDF: colour operators in content streams (compressed, so a text search cannot see them)
+PDF_NUM = rb'[-+]?(?:\d+(?:\.\d*)?|\.\d+)'
+PDF_COLOUR_OP = re.compile(rb'(?<![\w.+-])((?:' + PDF_NUM + rb'[ \t\r\n\f\x00]+){3,})(rg|RG|scn|SCN|sc|SC|k|K)(?!\w)')
+PDF_STREAM_START = re.compile(rb'(?<!end)stream\r?\n')
+
+
+def pdf_streams(data):
+    """Yield (dictionary, content) for every stream; content is None when it cannot be decoded here."""
+    for m in PDF_STREAM_START.finditer(data):
+        obj = data.rfind(b' obj', 0, m.start())
+        head = data[obj:m.start()] if obj >= 0 else b''
+        end = data.find(b'endstream', m.end())
+        if end < 0:
+            continue
+        if re.search(rb'/Subtype\s*/Image|/Length[123]\b', head):
+            continue    # images and embedded fonts carry no colour operators
+        fm = re.search(rb'/Filter\s*(\[[^\]]*\]|/\w+)', head)
+        filters = re.findall(rb'/(\w+)', fm.group(1)) if fm else []
+        body = data[m.end():end]
+        if not filters:
+            yield head, body
+        elif filters == [b'FlateDecode']:
+            try:
+                yield head, zlib.decompressobj().decompress(body)
+            except zlib.error:
+                yield head, None
+        else:
+            yield head, None
+
+
+def pdf_colours(content):
+    """Yield (operator text, (r, g, b)) for every RGB or CMYK colour operator."""
+    for m in PDF_COLOUR_OP.finditer(content):
+        nums = [float(v) for v in re.findall(PDF_NUM, m.group(1))]
+        op = m.group(2).decode()
+        if op in ('rg', 'RG') or (op.lower() in ('sc', 'scn') and len(nums) == 3):
+            rgb = nums[-3:]
+        elif (op in ('k', 'K') and len(nums) >= 4) or (op.lower() in ('sc', 'scn') and len(nums) == 4):
+            c, mg, y, k = nums[-4:]
+            rgb = ((1 - c) * (1 - k), (1 - mg) * (1 - k), (1 - y) * (1 - k))
+        else:
+            continue
+        rgb = tuple(max(0, min(255, round(v * 255))) for v in rgb)
+        yield ' '.join(m.group(1).decode().split()[-len(nums):]) + ' ' + op, rgb
+
+
+def scan_pdf(rel, data):
+    hits, seen = [], set()
+    for head, content in pdf_streams(data):
+        if content is None:
+            hits.append(Hit(rel, 0, 'colour', 'unreadable-pdf-stream', head.decode('latin-1')[:120]))
+            continue
+        for op, rgb in pdf_colours(content):
+            if rgb not in seen:
+                seen.add(rgb)
+                hits += colour_hits(rel, 0, f'{op} = #%02X%02X%02X' % rgb, rgb)
+    return hits
+
+
+def scan_raster(rel, path, image_module):
+    """A hit when RASTER_SHARE or more of the opaque pixels (every frame) is close to a Nextcloud blue."""
+    near, total = Counter(), 0
+    try:
+        with image_module.open(path) as im:
+            for i in range(min(getattr(im, 'n_frames', 1), 64)):
+                im.seek(i)
+                frame = im.convert('RGBA')
+                frame.thumbnail((RASTER_MAX_SIDE, RASTER_MAX_SIDE), image_module.Resampling.BOX)
+                for count, (r, g, b, a) in frame.getcolors(frame.width * frame.height):
+                    if a < 128:
+                        continue
+                    total += count
+                    c = colour_hit((r, g, b))
+                    if c:
+                        near[c] += count
+    except Exception as e:  # noqa: BLE001
+        return [Hit(rel, 0, 'pixels', 'unreadable-image', f'{type(e).__name__}: {e}')]
+    hits = []
+    for c, count in near.most_common():
+        if total and count / total >= RASTER_SHARE:
+            hits.append(Hit(rel, 0, 'pixels', f'~{c}', f'{count / total:.1%} of the opaque pixels are close to {c}'))
+    return hits
 
 
 STRINGS_LINE = re.compile(r'^\s*"(?:[^"\\]|\\.)*"\s*=\s*"((?:[^"\\]|\\.)*)"\s*;')
@@ -247,6 +392,10 @@ def scan_text_file(rel, text, ext):
                 c = colour_hit(rgb)
                 if c:
                     hits.append(Hit(rel, n, 'colour', f'~{c}', cm.group(0)))
+        elif ext in ('.svg', '.html', '.css'):
+            hits += text_colour_hits(rel, n, line)
+    if rel.endswith('.colorset/Contents.json'):
+        hits += colorset_hits(rel, text)
     return hits
 
 
@@ -255,6 +404,9 @@ def scan_code_file(rel, text):
     for n, lit, code in code_literals(text):
         if lit is not None:
             hits += keyword_hits(rel, n, 'literal', lit)
+            hm = HEX_LITERAL.fullmatch(lit.strip())
+            if hm:
+                hits += colour_hits(rel, n, f'"{lit}"', hex_rgb(hm.group(1)))
         for rx in SWIFT_COLOUR:
             for cm in rx.finditer(code if lit is None else code):
                 vals = [float(v) for v in cm.groups()]
@@ -309,6 +461,11 @@ def shipped_files(root, project):
 
 
 def scan_source(root):
+    try:
+        from PIL import Image   # the pixel check needs Pillow (python -m pip install pillow)
+    except ImportError:
+        sys.exit('check-branding: Pillow is required for the pixel check of raster images '
+                 '(python -m pip install pillow)')
     project = Project(root)
     hits, scanned = [], Counter()
     for rel in shipped_files(root, project):
@@ -317,7 +474,14 @@ def scan_source(root):
         if ext not in CODE_EXT:
             name_part = rel.split('/', 1)[1] if '/' in rel else rel
             hits += keyword_hits(rel, 0, 'name', name_part)
-        if ext in TEXT_EXT:
+        if ext == '.pdf':
+            with open(os.path.join(root, rel), 'rb') as f:
+                hits += scan_pdf(rel, f.read())
+            scanned['.pdf (colour operators)'] += 1
+        elif ext in RASTER_EXT:
+            hits += scan_raster(rel, os.path.join(root, rel), Image)
+            scanned[ext + ' (pixels)'] += 1
+        elif ext in TEXT_EXT:
             with open(os.path.join(root, rel), 'rb') as f:
                 hits += scan_text_file(rel, decode(f.read()), ext)
             scanned[ext] += 1
@@ -401,6 +565,13 @@ def scan_app(app):
 
 
 # ------------------------------------------------------------------ allowlist
+# internal = an identifier the server, the OS or a library depends on (never shown)
+# legal    = a copyright or licence notice that must stay
+# artwork  = a generic image whose colour is close to a Nextcloud blue by chance; looked at, it
+#            shows no Nextcloud logo or art (classifies colour and pixel hits only)
+CLASSES = ('internal', 'legal', 'artwork')
+
+
 def load_allowlist(path):
     entries = []
     with open(path, encoding='utf-8') as f:
@@ -412,8 +583,8 @@ def load_allowlist(path):
             if len(parts) != 4:
                 sys.exit(f'{path}:{n}: expected "path glob | regex | class | reason", got {line!r}')
             glob, regex, cls, reason = parts
-            if cls not in ('internal', 'legal'):
-                sys.exit(f'{path}:{n}: class must be internal or legal, got {cls!r}')
+            if cls not in CLASSES:
+                sys.exit(f'{path}:{n}: class must be one of {", ".join(CLASSES)}, got {cls!r}')
             if not reason:
                 sys.exit(f'{path}:{n}: a reason is required')
             try:
@@ -427,6 +598,8 @@ def load_allowlist(path):
 def classify(hits, entries):
     for h in hits:
         for e in entries:
+            if e['cls'] == 'artwork' and not h.keyword.startswith('~'):
+                continue    # artwork entries cover colour and pixel hits only, never text
             if fnmatch.fnmatchcase(h.path, e['glob']) and e['rx'].search(h.text):
                 h.cls, h.reason = e['cls'], e['reason']
                 e['used'] += 1
@@ -483,7 +656,7 @@ def main():
     kinds = ', '.join(f'{k} {v}' for k, v in sorted(scanned.items()))
     print(f'check-branding: swept {files} files in {where} ({kinds})')
     print(f'check-branding: {len(hits)} hits: {by_cls.get("internal", 0)} internal, {by_cls.get("legal", 0)} legal, '
-          f'{len(open_hits)} unclassified')
+          f'{by_cls.get("artwork", 0)} artwork, {len(open_hits)} unclassified')
     print(f'check-branding: hits by keyword: ' + ', '.join(f'{k} {v}' for k, v in Counter(h.keyword for h in hits).most_common()))
     sys.exit(1 if open_hits else 0)
 
