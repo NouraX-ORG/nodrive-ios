@@ -1,0 +1,184 @@
+# SPDX-FileCopyrightText: 2026 Nourax
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# NoDrive for iOS: branding gate, simulator build of the app and all extensions,
+# unit tests on the simulator. No secrets, no signing (CODE_SIGNING_ALLOWED=NO).
+# Upstream's workflows are kept for reference in .github/upstream-workflows/.
+
+name: iOS
+
+on:
+  push:
+    branches:
+      - main
+      - platform/ios
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash   # bash --noprofile --norc -eo pipefail
+
+env:
+  PROJECT: Nextcloud.xcodeproj
+  SCHEME: Nextcloud
+  # The project needs Xcode 27 (iOS 27 SDK; BackgroundUploadExtension targets iOS 27).
+  # macos-latest (macOS 26) only has Xcode 26.x, so the build runs on GitHub's
+  # hosted "xcode-27" image, as upstream does.
+  XCODE_APP: /Applications/Xcode_27.1.app
+  DESTINATION: platform=iOS Simulator,name=iPhone 17,OS=27.0
+
+jobs:
+  branding:
+    name: Branding gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install Pillow (for make-icons --check)
+        run: python -m pip install --disable-pip-version-check pillow
+
+      - name: rebrand.py --check (the tree is fully rebranded)
+        run: python tools/rebrand.py --check
+
+      - name: make-icons.py --check (icons come from the Nourax logo)
+        run: python tools/make-icons.py --check
+
+      - name: check-branding.py (no unclassified Nextcloud strings in the source)
+        run: python tools/check-branding.py
+
+  ios:
+    name: Build and unit tests (iOS Simulator)
+    needs: branding
+    runs-on: xcode-27
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          xcodebuild -version
+          xcrun --sdk iphonesimulator --show-sdk-version
+          xcrun simctl list runtimes
+          xcrun simctl list devices available | grep -E "iPhone 17 " || true
+
+      - name: Check xcodebuild options used below
+        run: |
+          xcodebuild -help > xcodebuild-help.txt 2>&1 || true
+          for opt in -resolvePackageDependencies -clonedSourcePackagesDirPath -disableAutomaticPackageResolution \
+                     -derivedDataPath -resultBundlePath -only-testing -xctestrun -enableThreadSanitizer -enableCodeCoverage; do
+            if grep -q -- "$opt" xcodebuild-help.txt; then echo "ok   $opt"; else echo "MISSING $opt"; exit 1; fi
+          done
+
+      - name: Validate project file
+        run: |
+          plutil -lint "$PROJECT/project.pbxproj"
+          xcodebuild -list -project "$PROJECT"
+
+      - name: Cache Swift packages
+        uses: actions/cache@v6
+        with:
+          path: SourcePackages
+          key: spm-xcode27-${{ hashFiles('Nextcloud.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+
+      - name: Resolve Swift packages (from Package.resolved only)
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project "$PROJECT" -scheme "$SCHEME" \
+            -clonedSourcePackagesDirPath SourcePackages \
+            -disableAutomaticPackageResolution
+
+      - name: Build app, all extensions and test bundles (iphonesimulator, unsigned)
+        run: |
+          mkdir -p results
+          set -o pipefail
+          xcodebuild build-for-testing \
+            -project "$PROJECT" -scheme "$SCHEME" -configuration Debug \
+            -sdk iphonesimulator -destination "$DESTINATION" \
+            -derivedDataPath DerivedData \
+            -clonedSourcePackagesDirPath SourcePackages \
+            -disableAutomaticPackageResolution \
+            -enableThreadSanitizer NO -enableCodeCoverage NO \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee results/build.log | xcbeautify --quieter --renderer github-actions
+
+      - name: Package the simulator app (NoDrive.app)
+        run: |
+          mkdir -p package
+          ditto DerivedData/Build/Products/Debug-iphonesimulator/Nextcloud.app package/NoDrive.app
+          cd package
+          ditto -c -k --sequesterRsrc --keepParent NoDrive.app ../nodrive-ios-simulator-app.zip
+          ls -l ../nodrive-ios-simulator-app.zip
+
+      - name: Upload simulator app
+        uses: actions/upload-artifact@v7
+        with:
+          name: nodrive-ios-simulator-app
+          path: nodrive-ios-simulator-app.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Inspect built products (ids, names, URL schemes, entitlements, Nextcloud links)
+        run: |
+          APP=DerivedData/Build/Products/Debug-iphonesimulator/Nextcloud.app
+          {
+            for p in "$APP/Info.plist" "$APP"/PlugIns/*.appex/Info.plist "$APP"/Extensions/*.appex/Info.plist; do
+              echo "=== $p"; plutil -p "$p"
+            done
+            echo "=== entitlement files written by the build (.xcent)"
+            find DerivedData/Build/Intermediates.noindex -name "*.xcent" -print -exec plutil -p {} \; 2>/dev/null || true
+          } > results/products-plists.txt
+          python3 tools/ci/inspect-products.py "$APP" --json results/products.json | tee results/products.txt
+
+      - name: Branding sweep of the built app (report)
+        continue-on-error: true
+        run: |
+          python3 tools/check-branding.py --app DerivedData/Build/Products/Debug-iphonesimulator/Nextcloud.app \
+            --json results/check-branding-app.json > results/check-branding-app.txt 2>&1
+        # report only in the build stage; the sweep stage turns this into a gate
+
+      - name: Show app sweep summary
+        if: ${{ !cancelled() }}
+        run: tail -n 3 results/check-branding-app.txt || true
+
+      - name: Unit tests on the simulator
+        run: |
+          XCTESTRUN=$(find DerivedData/Build/Products -maxdepth 1 -name "*.xctestrun" | head -n 1)
+          echo "xctestrun: $XCTESTRUN"
+          set -o pipefail
+          xcodebuild test-without-building \
+            -xctestrun "$XCTESTRUN" \
+            -destination "$DESTINATION" \
+            -only-testing:NextcloudUnitTests \
+            -resultBundlePath results/unit-tests.xcresult \
+            2>&1 | tee results/unit-tests.log | xcbeautify --renderer github-actions
+
+      - name: Test summary
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -d results/unit-tests.xcresult ]; then
+            xcrun xcresulttool get test-results summary --path results/unit-tests.xcresult > results/unit-tests-summary.json || true
+            head -c 3000 results/unit-tests-summary.json || true
+          fi
+
+      - name: Upload test results and build reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: nodrive-ios-test-results
+          path: results/
+          if-no-files-found: warn
+          retention-days: 14
