@@ -33,6 +33,10 @@ env:
   # hosted "xcode-27" image, as upstream does.
   XCODE_APP: /Applications/Xcode_27.1.app
   DESTINATION: platform=iOS Simulator,name=iPhone 17,OS=27.0
+  # Swift packages must sit in DerivedData/SourcePackages (Xcode's default for
+  # -derivedDataPath DerivedData): BackgroundUploadExtension's HEADER_SEARCH_PATHS
+  # point at $(BUILD_DIR)/../../SourcePackages/checkouts/...
+  SPM_DIR: DerivedData/SourcePackages
 
 jobs:
   branding:
@@ -90,29 +94,33 @@ jobs:
       - name: Cache Swift packages
         uses: actions/cache@v6
         with:
-          path: SourcePackages
+          path: ${{ env.SPM_DIR }}
           key: spm-xcode27-${{ hashFiles('Nextcloud.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
 
       - name: Resolve Swift packages (from Package.resolved only)
         run: |
           xcodebuild -resolvePackageDependencies \
             -project "$PROJECT" -scheme "$SCHEME" \
-            -clonedSourcePackagesDirPath SourcePackages \
+            -clonedSourcePackagesDirPath "$SPM_DIR" \
             -disableAutomaticPackageResolution
 
       - name: Build app, all extensions and test bundles (iphonesimulator, unsigned)
+        # The scheme's test action turns on Thread Sanitizer; -enableThreadSanitizer NO
+        # alone did not switch it off (run 40156412030), so the build setting is set too.
         run: |
           mkdir -p results
           set -o pipefail
           xcodebuild build-for-testing \
             -project "$PROJECT" -scheme "$SCHEME" -configuration Debug \
-            -sdk iphonesimulator -destination "$DESTINATION" \
+            -destination "$DESTINATION" \
             -derivedDataPath DerivedData \
-            -clonedSourcePackagesDirPath SourcePackages \
+            -clonedSourcePackagesDirPath "$SPM_DIR" \
             -disableAutomaticPackageResolution \
             -enableThreadSanitizer NO -enableCodeCoverage NO \
+            ENABLE_THREAD_SANITIZER=NO \
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee results/build.log | xcbeautify --quieter --renderer github-actions
+          echo "Thread Sanitizer objects in the build (expected 0): $(grep -c 'Objects-normal-tsan' results/build.log || true)"
 
       - name: Package the simulator app (NoDrive.app)
         run: |
@@ -121,6 +129,8 @@ jobs:
           cd package
           ditto -c -k --sequesterRsrc --keepParent NoDrive.app ../nodrive-ios-simulator-app.zip
           ls -l ../nodrive-ios-simulator-app.zip
+          echo "sanitizer runtimes in the bundle (expected none):"
+          find NoDrive.app -name "libclang_rt.*" -print
 
       - name: Upload simulator app
         uses: actions/upload-artifact@v7
