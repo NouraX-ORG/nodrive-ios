@@ -68,7 +68,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "C0046CD92A17B98400D87C9D"
-               BuildableName = "NextcloudUITests.xctest"
+               BuildableName = "NoDriveUITests.xctest"
                BlueprintName = "NextcloudUITests"
                ReferencedContainer = "container:Nextcloud.xcodeproj">
             </BuildableReference>

@@ -107,6 +107,10 @@ TEST_FILES = [
     ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveBrandingTests.swift'),
     ('NextcloudUITests', 'NextcloudUITests', 'NoDriveScreenshotUITests.swift'),
 ]
+# Product of the UI-test target. Its runner app ("<product>-Runner") sits on the simulator's home
+# screen during the screenshot walk, so it must not carry the Nextcloud name. The target name
+# (NextcloudUITests, used by -only-testing) stays.
+UI_TEST_PRODUCT = 'NoDriveUITests'
 
 # Translations: keys whose values name the product, and what replaces the name.
 STRINGS_APP_KEYS = ['_access_photo_not_enabled_msg_', '_privacy_footer_', '_no_client_cert_found_desc_']
@@ -801,11 +805,20 @@ def project(st, base):
     pbx.repoint_file('Reasons to use Nextcloud.pdf', 'Brand/NoDriveBlank.pdf')
     for target, group, name in TEST_FILES:
         pbx.add_source_file(target, group, name)
+    # UI-test product (and so its runner app) named after NoDrive; see UI_TEST_PRODUCT
+    for cfg in pbx.config_ids('NextcloudUITests'):
+        pbx.set_setting(cfg, 'PRODUCT_NAME', UI_TEST_PRODUCT)
+    sub_exact(st, PBX.REL, 'path = NextcloudUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR;',
+              f'path = {UI_TEST_PRODUCT}.xctest; sourceTree = BUILT_PRODUCTS_DIR;')
+    sub_exact(st, PBX.REL, '/* NextcloudUITests.xctest */', f'/* {UI_TEST_PRODUCT}.xctest */', count=3)
     # Every scheme that launches the app (system hosts such as com.apple.springboard stay)
     for name in sorted(os.listdir(st.path('Nextcloud.xcodeproj/xcshareddata/xcschemes'))):
         rel = f'Nextcloud.xcodeproj/xcshareddata/xcschemes/{name}'
         if re.search(r'BundleIdentifier = "(?!com\.apple\.)', st.get(rel)):
             sub_regex(st, rel, r'(BundleIdentifier = )"(?!com\.apple\.)[^"]*"', r'\1"' + base + '"', count=None)
+        if 'BuildableName = "NextcloudUITests.xctest"' in st.get(rel):
+            sub_exact(st, rel, 'BuildableName = "NextcloudUITests.xctest"',
+                      f'BuildableName = "{UI_TEST_PRODUCT}.xctest"', count=None)
 
 
 def storyboards(st):

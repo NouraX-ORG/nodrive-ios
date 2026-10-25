@@ -10,9 +10,10 @@
 #   screens.sh capture-start <results-dir>  DNS capture on all interfaces (tcpdump -i pktap,all)
 #   screens.sh capture-stop <results-dir>   stop it, write dns.txt (and dns-processes.txt)
 #   screens.sh device                       UDID of "iPhone 17" with iOS $IOS_VERSION (default 27.0)
-#   screens.sh prepare <udid> <lang> <locale> <light|dark>
-#        erase, set the system language, boot, trust $CA_CER, appearance, fixed status bar,
-#        add $SAMPLE_PHOTO to Photos
+#   screens.sh prepare-first <udid>         erase and boot once, trust $CA_CER (the CI root), let it settle
+#   screens.sh switch <udid> <lang> <locale> <light|dark>
+#        remove NoDrive and the test runner (fresh permissions), set the system language
+#        (reboot), appearance and a fixed status bar
 #   screens.sh launch <udid> <NoDrive.app> <shots-dir> <results-dir>
 #        simctl install + launch, screenshots, check that the app keeps running
 #   screens.sh walk <udid> <variant> <lang> <locale>
@@ -31,7 +32,7 @@ need() {   # need <help-file> <text>...: fail when an option is not in the tool'
 check_tools() {
   local out=$1
   mkdir -p "$out"
-  for sub in erase boot bootstatus shutdown keychain ui status_bar addmedia install launch terminate io spawn list; do
+  for sub in erase boot bootstatus shutdown keychain ui status_bar install uninstall privacy get_app_container launch terminate io spawn list; do
     xcrun simctl help "$sub" > "$out/simctl-$sub.txt" 2>&1 || true
   done
   need "$out/simctl-keychain.txt" add-root-cert
@@ -39,7 +40,8 @@ check_tools() {
   need "$out/simctl-status_bar.txt" override --time --batteryState --batteryLevel --cellularBars --wifiBars
   need "$out/simctl-io.txt" screenshot --type
   need "$out/simctl-bootstatus.txt" -b
-  need "$out/simctl-addmedia.txt" addmedia
+  need "$out/simctl-privacy.txt" reset
+  need "$out/simctl-get_app_container.txt" data
   need "$out/simctl-launch.txt" launch
   need "$out/simctl-list.txt" -j
   xcodebuild -help > "$out/xcodebuild-help.txt" 2>&1 || true
@@ -142,22 +144,31 @@ boot_wait() {
   xcrun simctl bootstatus "$1" -b > /dev/null
 }
 
-prepare() {
-  local udid=$1 lang=$2 locale=$3 appearance=$4
+prepare_first() {   # once per job: a clean simulator that trusts the CI root
+  local udid=$1
   xcrun simctl shutdown "$udid" > /dev/null 2>&1 || true
   xcrun simctl erase "$udid"
   boot_wait "$udid"
+  xcrun simctl keychain "$udid" add-root-cert "$CA_CER"
+  sleep 45   # the first boot after an erase keeps the simulator busy for a while
+  echo "prepared $udid (erased, CI root trusted)"
+}
+
+switch() {   # per variant, without an erase (much faster than a first boot)
+  local udid=$1 lang=$2 locale=$3 appearance=$4
+  xcrun simctl terminate "$udid" com.apple.mobileslideshow > /dev/null 2>&1 || true
+  for app in "$APP_ID" "$APP_ID.ui-tests.xctrunner"; do
+    xcrun simctl uninstall "$udid" "$app" > /dev/null 2>&1 || true
+    xcrun simctl privacy "$udid" reset all "$app" > /dev/null 2>&1 || true
+  done
   xcrun simctl spawn "$udid" defaults write "Apple Global Domain" AppleLanguages -array "$lang"
   xcrun simctl spawn "$udid" defaults write "Apple Global Domain" AppleLocale -string "$locale"
   xcrun simctl shutdown "$udid"
   boot_wait "$udid"
-  xcrun simctl keychain "$udid" add-root-cert "$CA_CER"
   xcrun simctl ui "$udid" appearance "$appearance"
   xcrun simctl status_bar "$udid" override --time 9:41 --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3
-  if [ -n "${SAMPLE_PHOTO:-}" ]; then
-    xcrun simctl addmedia "$udid" "$SAMPLE_PHOTO"
-  fi
-  echo "prepared $udid: language $(xcrun simctl spawn "$udid" defaults read "Apple Global Domain" AppleLanguages | tr -d ' \n'), locale $locale, $appearance"
+  sleep 10
+  echo "switched $udid: language $(xcrun simctl spawn "$udid" defaults read "Apple Global Domain" AppleLanguages | tr -d ' \n'), locale $locale, $appearance"
 }
 
 alive() {   # alive <pid> <when>
@@ -208,6 +219,15 @@ walk() {
   status=$?
   set -e
   xcbeautify --renderer github-actions < "$RESULTS/ui-$variant.log" || true
+  if ! grep -Eq "Executed [1-9][0-9]* tests?" "$RESULTS/ui-$variant.log"; then
+    echo "walk $variant: no test ran (check -only-testing and the .xctestrun)"
+    status=1
+  fi
+  local data
+  data=$(xcrun simctl get_app_container "$udid" "$APP_ID" data 2>/dev/null || true)
+  if [ -n "$data" ] && [ -f "$data/Documents/Logs/log.txt" ]; then
+    cp "$data/Documents/Logs/log.txt" "$RESULTS/ui-$variant-nextcloudkit.log"   # NextcloudKit's own request log
+  fi
   xcrun xcresulttool get test-results summary --path "$RESULTS/ui-$variant.xcresult" \
     > "$RESULTS/ui-$variant-summary.json" 2>/dev/null || true
   xcrun simctl spawn "$udid" log show --last 6m --style compact \
@@ -223,7 +243,8 @@ case "$cmd" in
   capture-start) capture_start "$@" ;;
   capture-stop) capture_stop "$@" ;;
   device) device ;;
-  prepare) prepare "$@" ;;
+  prepare-first) prepare_first "$@" ;;
+  switch) switch "$@" ;;
   launch) launch "$@" ;;
   walk) walk "$@" ;;
   *) echo "usage: see the header of $0" >&2; exit 2 ;;

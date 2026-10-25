@@ -261,7 +261,6 @@ jobs:
       SHOTS: ${{ github.workspace }}/screenshots
       RESULTS: ${{ github.workspace }}/results
       IOS_VERSION: '27.0'
-      SAMPLE_PHOTO: ${{ github.workspace }}/Brand/Custom.xcassets/AppIcon.appiconset/Icon-App-1024x1024@1x.png
       SIGN_IN: '1'
     steps:
       - uses: actions/checkout@v7
@@ -359,38 +358,40 @@ jobs:
 
       - name: simctl install, launch and screenshots (shipped NoDrive.app)
         run: |
-          bash tools/ci/screens.sh prepare "$UDID" en en_US light
+          bash tools/ci/screens.sh prepare-first "$UDID"
+          bash tools/ci/screens.sh switch "$UDID" en en_US light
           bash tools/ci/screens.sh launch "$UDID" app/NoDrive.app "$SHOTS/simctl" "$RESULTS"
 
       - name: UI walk, English (en-light)
         if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
         run: |
-          bash tools/ci/screens.sh prepare "$UDID" en en_US light
+          bash tools/ci/screens.sh switch "$UDID" en en_US light
           bash tools/ci/screens.sh walk "$UDID" en-light en en_US
 
       - name: UI walk, German (de-light)
         if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
         run: |
-          bash tools/ci/screens.sh prepare "$UDID" de de_DE light
+          bash tools/ci/screens.sh switch "$UDID" de de_DE light
           bash tools/ci/screens.sh walk "$UDID" de-light de de_DE
 
       - name: UI walk, Arabic right-to-left (ar-light)
         if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
         run: |
-          bash tools/ci/screens.sh prepare "$UDID" ar ar_SA light
+          bash tools/ci/screens.sh switch "$UDID" ar ar_SA light
           bash tools/ci/screens.sh walk "$UDID" ar-light ar ar_SA
 
       - name: UI walk, English dark mode (en-dark)
         if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
         run: |
-          bash tools/ci/screens.sh prepare "$UDID" en en_US dark
+          bash tools/ci/screens.sh switch "$UDID" en en_US dark
           bash tools/ci/screens.sh walk "$UDID" en-dark en en_US
 
       - name: Network gate (no Nextcloud hosts; sign-in opened drive.nourax.org)
         if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
         run: |
           bash tools/ci/screens.sh capture-stop "$RESULTS"
-          python3 tools/ci/network-gate.py --dns-text "$RESULTS/dns.txt" --stand-in-log "$RESULTS/stand-in.jsonl" \
+          python3 tools/ci/network-gate.py --dns-text "$RESULTS/dns.txt" --dns-processes "$RESULTS/dns-processes.txt" \
+            --stand-in-log "$RESULTS/stand-in.jsonl" \
             --expect-sign-ins 4 --control www.apple.com --json "$RESULTS/network.json"
 
       - name: Screenshot report (Nourax colours, no Nextcloud text) and docs copies

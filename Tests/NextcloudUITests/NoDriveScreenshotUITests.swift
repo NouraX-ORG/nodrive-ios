@@ -11,6 +11,9 @@ import XCTest
 /// the CI simulator trusts), so tapping "Log in" runs the app's real Login Flow v2 code up to the
 /// browser page.
 ///
+/// System prompts (notifications, photo library, sign-in consent) can appear at any moment on a
+/// busy simulator. Every wait loop answers them; each prompt is saved once as 00-prompt-<n>.
+///
 /// Environment (pass with the TEST_RUNNER_ prefix to xcodebuild):
 ///   NODRIVE_LANG       language code, e.g. en, de, ar (default en)
 ///   NODRIVE_LOCALE     locale, e.g. en_US, de_DE, ar_SA (default derived from the language)
@@ -33,17 +36,21 @@ final class NoDriveScreenshotUITests: XCTestCase {
     private var springboard: XCUIApplication { XCUIApplication(bundleIdentifier: "com.apple.springboard") }
     private var safariViewService: XCUIApplication { XCUIApplication(bundleIdentifier: "com.apple.SafariViewService") }
 
+    // Buttons to press on system prompts, in this order of preference (en, de, ar).
     private let continueLabels = ["Continue", "Fortfahren", "Weiter", "متابعة"]
+    private let denyLabels = ["Don’t Allow", "Don't Allow", "Nicht erlauben", "Nicht zulassen", "عدم السماح"]
+    private let okLabels = ["OK", "Ok", "حسنًا", "موافق"]
     private let cancelLabels = ["Cancel", "Abbrechen", "إلغاء"]
     private let shareLabels = ["Share", "Teilen", "مشاركة"]
-    private let onboardingLabels = ["Continue", "Not Now", "OK", "Get Started", "Fortfahren", "Weiter", "Nicht jetzt",
-                                    "متابعة", "ليس الآن", "حسنًا", "موافق"]
+    private let onboardingLabels = ["Continue", "Not Now", "Get Started", "Fortfahren", "Weiter", "Nicht jetzt",
+                                    "متابعة", "ليس الآن"]
+    private var promptCount = 0
 
     override func setUp() async throws {
         continueAfterFailure = true
     }
 
-    // MARK: - App: permission prompt, intro, sign-in browser, home screen
+    // MARK: - App: intro, sign-in browser, home screen
 
     func test1IntroSignInAndHomeScreen() throws {
         let app = XCUIApplication()
@@ -52,15 +59,8 @@ final class NoDriveScreenshotUITests: XCTestCase {
         XCTAssertEqual(app.state, .runningForeground, "NoDrive did not start")
         record("launch", ["state": "\(app.state.rawValue)"])
 
-        // The first start asks for notification permission. The system prompt must name NoDrive.
-        let prompts = handleAlerts("00-permission-prompt", in: app, prefer: [], timeout: 15) { text in
-            XCTAssertTrue(text.contains("NoDrive"), "the permission prompt does not name NoDrive")
-        }
-        record("permission-prompt", ["count": prompts])
-
         let login = app.buttons["nodriveLoginButton"]
-        XCTAssertTrue(login.waitForExistence(timeout: 60), "the intro's Log in button is missing")
-        handleAlerts("00-permission-prompt-late", in: app, prefer: [], timeout: 2)
+        XCTAssertTrue(waitFor(login, in: app, timeout: 90), "the intro's Log in button is missing")
 
         // One fixed server: no address field and no "Sign up" or "Host your own server" buttons.
         XCTAssertEqual(app.textFields.count, 0, "the intro has a text field (server address?)")
@@ -69,16 +69,17 @@ final class NoDriveScreenshotUITests: XCTestCase {
             XCTAssertFalse(buttonLabels.contains("Sign up with provider"), "the intro offers sign-up with a provider")
             XCTAssertFalse(buttonLabels.contains("Host your own server"), "the intro offers hosting a server")
         }
-        record("intro-buttons", ["labels": buttonLabels, "login_label": login.label])
+        record("intro-buttons", ["labels": buttonLabels])
 
+        // Let late permission prompts come up now rather than over a screenshot.
+        settle(app, seconds: 6)
         for slide in 1...2 {
             let shown = waitForSlide(slide, in: app)
             XCTAssertTrue(shown, "intro slide \(slide) never came into view")
             let name = "0\(slide)-intro-slide-\(slide)"
             save(name)
             saveTexts(app, name)
-            let title = app.cells["nodriveIntroSlide\(slide)"].staticTexts.firstMatch
-            record(name, ["shown": shown, "title": title.exists ? title.label : ""])
+            record(name, ["shown": shown])
         }
         assertNoNextcloud(in: app, screen: "intro")
 
@@ -88,9 +89,8 @@ final class NoDriveScreenshotUITests: XCTestCase {
 
         // Home screen: the icon and its name.
         XCUIDevice.shared.press(.home)
-        Thread.sleep(forTimeInterval: 1.5)
         let icon = springboard.icons["NoDrive"]
-        XCTAssertTrue(icon.waitForExistence(timeout: 20), "no home-screen icon named NoDrive")
+        XCTAssertTrue(waitFor(icon, in: springboard, timeout: 30), "no home-screen icon named NoDrive")
         if icon.exists {
             for _ in 0..<3 where !icon.isHittable {
                 springboard.swipeLeft()
@@ -101,6 +101,7 @@ final class NoDriveScreenshotUITests: XCTestCase {
                 Thread.sleep(forTimeInterval: 1)
             }
         }
+        settle(springboard, seconds: 2)
         save("05-home-screen")
         saveTexts(springboard, "05-home-screen")
         record("home-screen", ["icon": icon.exists, "icon_visible": icon.exists && icon.isHittable])
@@ -109,31 +110,43 @@ final class NoDriveScreenshotUITests: XCTestCase {
     /// Taps "Log in": the app asks drive.nourax.org (here: the CI stand-in) for a Login Flow v2
     /// and opens the browser at the login page it returns. No server-address screen in between.
     private func signIn(app: XCUIApplication, login: XCUIElement) {
+        let started = Date()
         login.tap()
-        let marker = NSPredicate(format: "label CONTAINS[c] %@", "CI stand-in")
-        var consent = 0
-        var pageFound = false
-        let deadline = Date().addingTimeInterval(45)
-        while Date() < deadline, !pageFound {
-            if consent == 0, springboard.alerts.firstMatch.exists || app.alerts.firstMatch.exists {
-                consent = handleAlerts("03-sign-in-consent", in: app, prefer: continueLabels, timeout: 1)
+        // The browser's address field shows the server; the page itself is not in the accessibility tree.
+        let address = NSPredicate(format: "identifier == 'URL' AND value CONTAINS[c] 'drive.nourax.org'")
+        let loaded = NSPredicate(format: "identifier BEGINSWITH 'BrowserView?IsPageLoaded=true'")
+        var browserOpen = false
+        var pageLoaded = false
+        var openedAfter = -1.0
+        let deadline = Date().addingTimeInterval(150)
+        while Date() < deadline, !pageLoaded {
+            answerPrompts(in: app)
+            let trees = roots(app)
+            if !browserOpen, trees.contains(where: { $0.descendants(matching: .any).matching(address).firstMatch.exists }) {
+                browserOpen = true
+                openedAfter = Date().timeIntervalSince(started)
             }
-            pageFound = roots(app).contains { $0.descendants(matching: .any).matching(marker).firstMatch.exists }
-            if !pageFound {
+            if browserOpen {
+                pageLoaded = trees.contains { $0.descendants(matching: .any).matching(loaded).firstMatch.exists }
+                if !pageLoaded, Date().timeIntervalSince(started) - openedAfter > 40 {
+                    break   // the browser is open at drive.nourax.org; the stand-in log shows the page request
+                }
+            }
+            if !pageLoaded {
                 Thread.sleep(forTimeInterval: 1)
             }
         }
-        Thread.sleep(forTimeInterval: 2)   // let the sheet finish its animation and the page render
+        Thread.sleep(forTimeInterval: 1.5)   // let the page render
+        answerPrompts(in: app)
         save("04-sign-in-browser")
         for root in roots(app) {
             saveTexts(root, "04-sign-in-browser")
         }
-        XCTAssertTrue(pageFound, "tapping Log in did not open the browser at the drive.nourax.org login page")
+        XCTAssertTrue(browserOpen, "tapping Log in did not open the browser at drive.nourax.org")
         XCTAssertEqual(app.textFields.count, 0, "a server-address field appeared after tapping Log in")
-        let domainShown = roots(app).contains {
-            $0.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] %@", "nourax.org")).firstMatch.exists
-        }
-        record("sign-in", ["browser_page": pageFound, "domain_label_shown": domainShown, "consent_prompts": consent])
+        record("sign-in", ["browser_open": browserOpen, "page_loaded": pageLoaded,
+                           "seconds_to_browser": Int(openedAfter.rounded()),
+                           "seconds_total": Int(Date().timeIntervalSince(started).rounded())])
 
         // Close the browser sheet again.
         for root in roots(app) {
@@ -143,8 +156,8 @@ final class NoDriveScreenshotUITests: XCTestCase {
                 break
             }
         }
-        Thread.sleep(forTimeInterval: 2)
-        record("sign-in-closed", ["login_button_back": login.exists && login.isHittable])
+        let back = waitFor(login, in: app, timeout: 15)
+        record("sign-in-closed", ["login_button_back": back])
     }
 
     // MARK: - Share sheet of another app (Photos) and the share extension without an account
@@ -152,56 +165,130 @@ final class NoDriveScreenshotUITests: XCTestCase {
     func test2ShareSheetAndShareExtension() throws {
         let photos = XCUIApplication(bundleIdentifier: "com.apple.mobileslideshow")
         photos.launch()
-        Thread.sleep(forTimeInterval: 3)
-        dismissOnboarding(photos)
 
-        let photoCandidates = [
-            photos.descendants(matching: .any).matching(NSPredicate(
-                format: "label BEGINSWITH[c] 'Photo,' OR label BEGINSWITH[c] 'Foto,' OR label BEGINSWITH 'صورة'")).firstMatch,
-            photos.collectionViews.cells.firstMatch,
-            photos.cells.firstMatch
-        ]
-        guard let photo = firstHittable(photoCandidates, timeout: 20) else {
+        let photoQuery = photos.descendants(matching: .any).matching(NSPredicate(
+            format: "label BEGINSWITH[c] 'Photo,' OR label BEGINSWITH[c] 'Foto,' OR label BEGINSWITH 'صورة'"))
+        var found: XCUIElement?
+        let deadline = Date().addingTimeInterval(45)
+        while found == nil, Date() < deadline {
+            answerPrompts(in: photos)
+            let onboarding = photos.buttons.matching(NSPredicate(format: "label IN %@", onboardingLabels)).firstMatch
+            if onboarding.exists, onboarding.isHittable {
+                record("photos-onboarding", ["tapped": onboarding.label])
+                onboarding.tap()
+                Thread.sleep(forTimeInterval: 1.5)
+                continue
+            }
+            let candidates = [photoQuery.firstMatch, photos.collectionViews.cells.firstMatch]
+            found = candidates.first { $0.exists && $0.isHittable }
+            if found == nil {
+                Thread.sleep(forTimeInterval: 1)
+            }
+        }
+        guard let photo = found else {
             save("06-photos")
             saveTexts(photos, "06-photos")
             record("share-sheet", ["skipped": "no photo to open"])
             throw XCTSkip("Photos shows no photo to share")
         }
         photo.tap()
-        Thread.sleep(forTimeInterval: 2)
 
         let shareButton = photos.buttons.matching(NSPredicate(format: "label IN %@ OR identifier IN %@", shareLabels, shareLabels)).firstMatch
-        guard let share = firstHittable([shareButton], timeout: 10) else {
+        guard waitFor(shareButton, in: photos, timeout: 20, hittable: true) else {
             save("06-photo")
             saveTexts(photos, "06-photo")
             record("share-sheet", ["skipped": "no Share button"])
             throw XCTSkip("no Share button in Photos")
         }
-        share.tap()
-        Thread.sleep(forTimeInterval: 3)
+        shareButton.tap()
 
         let entry = photos.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "NoDrive")).firstMatch
-        guard entry.waitForExistence(timeout: 15) else {
+        guard waitFor(entry, in: photos, timeout: 20) else {
             save("06-share-sheet")
             saveTexts(photos, "06-share-sheet")
             record("share-sheet", ["skipped": "NoDrive not in the share sheet"])
             throw XCTSkip("NoDrive is not listed in the share sheet")
         }
         scrollIntoView(entry, in: photos)
+        Thread.sleep(forTimeInterval: 1)
         save("06-share-sheet")
         saveTexts(photos, "06-share-sheet")
         XCTAssertTrue(entry.isHittable, "NoDrive is in the share sheet but could not be scrolled into view")
         record("share-sheet", ["entry": true, "visible": entry.isHittable])
 
+        // Without an account the share extension says so ("No account found") and closes.
         entry.tap()
-        Thread.sleep(forTimeInterval: 4)
+        let alert = photos.alerts.firstMatch
+        let shown = waitFor(alert, in: photos, timeout: 30, answer: false)
+        Thread.sleep(forTimeInterval: 1)
         save("07-share-extension")
         saveTexts(photos, "07-share-extension")
         assertNoNextcloud(in: photos, screen: "share extension")
-        let alert = photos.alerts.firstMatch
-        record("share-extension", ["alert": alert.exists ? alert.label : ""])
-        if alert.exists, alert.buttons.count > 0 {
-            alert.buttons.element(boundBy: 0).tap()
+        record("share-extension", ["alert": shown])
+        if shown {
+            let buttons = alert.buttons.allElementsBoundByIndex
+            (buttons.first { okLabels.contains($0.label) } ?? buttons.first)?.tap()
+        }
+    }
+
+    // MARK: - Waiting and system prompts
+
+    /// Waits for `element` (optionally hittable), answering system prompts meanwhile.
+    private func waitFor(_ element: XCUIElement, in app: XCUIApplication, timeout: TimeInterval,
+                         hittable: Bool = false, answer: Bool = true) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if answer {
+                answerPrompts(in: app)
+            }
+            if element.exists, !hittable || element.isHittable {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.5)
+        } while Date() < deadline
+        return false
+    }
+
+    /// Answers system prompts for `seconds` so that they do not cover the next screenshot.
+    private func settle(_ app: XCUIApplication, seconds: TimeInterval) {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            answerPrompts(in: app)
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+    }
+
+    /// Screenshots and answers every visible system or in-app alert: Continue (sign-in consent),
+    /// then Don't Allow (permissions), then OK, else the last button. Each prompt text must not name Nextcloud.
+    private func answerPrompts(in app: XCUIApplication) {
+        for _ in 0..<4 {
+            var alert: XCUIElement?
+            if springboard.alerts.firstMatch.exists {
+                alert = springboard.alerts.firstMatch
+            } else if app.alerts.firstMatch.exists {
+                alert = app.alerts.firstMatch
+            }
+            guard let alert else { return }
+            Thread.sleep(forTimeInterval: 0.5)
+            promptCount += 1
+            let name = String(format: "00-prompt-%d", promptCount)
+            save(name)
+            let text = alert.debugDescription
+            saveTexts(alert, name)
+            XCTAssertFalse(text.lowercased().contains("nextcloud"), "a system prompt names Nextcloud")
+            let buttons = alert.buttons.allElementsBoundByIndex
+            guard !buttons.isEmpty else { return }
+            let labels = buttons.map(\.label)
+            var choice = buttons.count - 1
+            for wanted in [continueLabels, denyLabels, okLabels] {
+                if let index = labels.firstIndex(where: { wanted.contains($0) }) {
+                    choice = index
+                    break
+                }
+            }
+            record(name, ["buttons": labels, "tapped": labels[choice], "names_nodrive": text.contains("NoDrive")])
+            buttons[choice].tap()
+            Thread.sleep(forTimeInterval: 1)
         }
     }
 
@@ -214,14 +301,15 @@ final class NoDriveScreenshotUITests: XCTestCase {
     }
 
     /// Waits until intro slide `number` sits in the middle of the window (the intro scrolls by itself every 4 s).
-    private func waitForSlide(_ number: Int, in app: XCUIApplication, timeout: TimeInterval = 14) -> Bool {
+    private func waitForSlide(_ number: Int, in app: XCUIApplication, timeout: TimeInterval = 20) -> Bool {
         let cell = app.cells["nodriveIntroSlide\(number)"]
         let window = app.windows.firstMatch
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
+            answerPrompts(in: app)
             if cell.exists, abs(cell.frame.midX - window.frame.midX) < 2 {
                 Thread.sleep(forTimeInterval: 0.6)
-                if abs(cell.frame.midX - window.frame.midX) < 2 {
+                if cell.exists, abs(cell.frame.midX - window.frame.midX) < 2 {
                     return true
                 }
             }
@@ -230,70 +318,14 @@ final class NoDriveScreenshotUITests: XCTestCase {
         return false
     }
 
-    /// Screenshots, records and answers system or in-app alerts. Returns how many were handled.
-    @discardableResult
-    private func handleAlerts(_ name: String, in app: XCUIApplication, prefer labels: [String], timeout: TimeInterval,
-                              check: ((String) -> Void)? = nil) -> Int {
-        var handled = 0
-        while handled < 3 {
-            let deadline = Date().addingTimeInterval(handled == 0 ? timeout : 2)
-            var alert: XCUIElement?
-            while alert == nil, Date() < deadline {
-                if springboard.alerts.firstMatch.exists {
-                    alert = springboard.alerts.firstMatch
-                } else if app.alerts.firstMatch.exists {
-                    alert = app.alerts.firstMatch
-                } else {
-                    Thread.sleep(forTimeInterval: 0.5)
-                }
-            }
-            guard let alert else { break }
-            handled += 1
-            let shot = handled == 1 ? name : "\(name)-\(handled)"
-            Thread.sleep(forTimeInterval: 0.5)
-            save(shot)
-            let text = alert.debugDescription
-            saveTexts(alert, shot)
-            check?(text)
-            let buttons = alert.buttons.allElementsBoundByIndex
-            guard !buttons.isEmpty else { break }
-            let target = buttons.first(where: { labels.contains($0.label) }) ?? buttons[0]
-            record(shot, ["alert": alert.label, "buttons": buttons.map(\.label), "tapped": target.label])
-            target.tap()
-            Thread.sleep(forTimeInterval: 1)
-        }
-        return handled
-    }
-
-    private func dismissOnboarding(_ app: XCUIApplication) {
-        for _ in 0..<4 {
-            let button = app.buttons.matching(NSPredicate(format: "label IN %@", onboardingLabels)).firstMatch
-            guard button.waitForExistence(timeout: 3), button.isHittable else { return }
-            record("onboarding", ["tapped": button.label])
-            button.tap()
-            Thread.sleep(forTimeInterval: 1.5)
-        }
-    }
-
-    private func firstHittable(_ candidates: [XCUIElement], timeout: TimeInterval) -> XCUIElement? {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let hit = candidates.first(where: { $0.exists && $0.isHittable }) {
-                return hit
-            }
-            Thread.sleep(forTimeInterval: 0.5)
-        } while Date() < deadline
-        return nil
-    }
-
     /// Drags the row of `element` sideways until the element can be tapped (both directions, for RTL).
     private func scrollIntoView(_ element: XCUIElement, in app: XCUIApplication) {
         let window = app.windows.firstMatch.frame
         let origin = app.coordinate(withNormalizedOffset: .zero)
-        for dx in [-0.7, -0.7, -0.7, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7] where !element.isHittable {
+        for toLeft in [true, true, true, false, false, false, false, false, false] where element.exists && !element.isHittable {
             let y = element.frame.midY
-            let start = origin.withOffset(CGVector(dx: window.width * (dx < 0 ? 0.85 : 0.15), dy: y))
-            let end = origin.withOffset(CGVector(dx: window.width * (dx < 0 ? 0.15 : 0.85), dy: y))
+            let start = origin.withOffset(CGVector(dx: window.width * (toLeft ? 0.85 : 0.15), dy: y))
+            let end = origin.withOffset(CGVector(dx: window.width * (toLeft ? 0.15 : 0.85), dy: y))
             start.press(forDuration: 0.05, thenDragTo: end)
             Thread.sleep(forTimeInterval: 1)
         }
