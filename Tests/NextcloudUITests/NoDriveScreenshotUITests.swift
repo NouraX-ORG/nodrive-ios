@@ -112,6 +112,10 @@ final class NoDriveScreenshotUITests: XCTestCase {
     private func signIn(app: XCUIApplication, login: XCUIElement) {
         let started = Date()
         login.tap()
+        // Leave the app alone for a moment: accessibility queries run on its main thread, where the
+        // network replies are handled too (run 40167283812: 19-92 s from status.php to the Login Flow
+        // request while the test polled every second).
+        Thread.sleep(forTimeInterval: 20)
         // The browser's address field shows the server; the page itself is not in the accessibility tree.
         let address = NSPredicate(format: "identifier == 'URL' AND value CONTAINS[c] 'drive.nourax.org'")
         let loaded = NSPredicate(format: "identifier BEGINSWITH 'BrowserView?IsPageLoaded=true'")
@@ -166,39 +170,40 @@ final class NoDriveScreenshotUITests: XCTestCase {
         let photos = XCUIApplication(bundleIdentifier: "com.apple.mobileslideshow")
         photos.launch()
 
+        // Photos may show its "What's New" sheet at any point; handle it, open a photo, find Share.
         let photoQuery = photos.descendants(matching: .any).matching(NSPredicate(
             format: "label BEGINSWITH[c] 'Photo,' OR label BEGINSWITH[c] 'Foto,' OR label BEGINSWITH 'صورة'"))
-        var found: XCUIElement?
-        let deadline = Date().addingTimeInterval(45)
-        while found == nil, Date() < deadline {
+        let shareButton = photos.buttons.matching(NSPredicate(format: "label IN %@ OR identifier IN %@", shareLabels, shareLabels)).firstMatch
+        let onboarding = photos.buttons.matching(NSPredicate(format: "label IN %@", onboardingLabels)).firstMatch
+        var shareReady = false
+        var photoTaps = 0
+        let deadline = Date().addingTimeInterval(75)
+        while !shareReady, Date() < deadline {
             answerPrompts(in: photos)
-            let onboarding = photos.buttons.matching(NSPredicate(format: "label IN %@", onboardingLabels)).firstMatch
             if onboarding.exists, onboarding.isHittable {
                 record("photos-onboarding", ["tapped": onboarding.label])
                 onboarding.tap()
                 Thread.sleep(forTimeInterval: 1.5)
                 continue
             }
-            let candidates = [photoQuery.firstMatch, photos.collectionViews.cells.firstMatch]
-            found = candidates.first { $0.exists && $0.isHittable }
-            if found == nil {
-                Thread.sleep(forTimeInterval: 1)
+            if shareButton.exists, shareButton.isHittable {
+                shareReady = true
+                break
             }
+            if let photo = [photoQuery.firstMatch, photos.collectionViews.cells.firstMatch].first(where: { $0.exists && $0.isHittable }),
+               photoTaps < 3 {
+                photo.tap()
+                photoTaps += 1
+                Thread.sleep(forTimeInterval: 2)
+                continue
+            }
+            Thread.sleep(forTimeInterval: 1)
         }
-        guard let photo = found else {
+        guard shareReady else {
             save("06-photos")
             saveTexts(photos, "06-photos")
-            record("share-sheet", ["skipped": "no photo to open"])
-            throw XCTSkip("Photos shows no photo to share")
-        }
-        photo.tap()
-
-        let shareButton = photos.buttons.matching(NSPredicate(format: "label IN %@ OR identifier IN %@", shareLabels, shareLabels)).firstMatch
-        guard waitFor(shareButton, in: photos, timeout: 20, hittable: true) else {
-            save("06-photo")
-            saveTexts(photos, "06-photo")
-            record("share-sheet", ["skipped": "no Share button"])
-            throw XCTSkip("no Share button in Photos")
+            record("share-sheet", ["skipped": "no photo with a Share button", "photo_taps": photoTaps])
+            throw XCTSkip("could not open a photo with a Share button in Photos")
         }
         shareButton.tap()
 
@@ -218,9 +223,11 @@ final class NoDriveScreenshotUITests: XCTestCase {
 
         // Without an account the share extension says so ("No account found") and closes.
         entry.tap()
+        // The extension's alert is in the accessibility tree before its sheet has slid in: wait until
+        // it can be tapped, and then a little longer, before the screenshot.
         let alert = photos.alerts.firstMatch
-        let shown = waitFor(alert, in: photos, timeout: 30, answer: false)
-        Thread.sleep(forTimeInterval: 1)
+        let shown = waitFor(alert, in: photos, timeout: 40, hittable: true, answer: false)
+        Thread.sleep(forTimeInterval: 3)
         save("07-share-extension")
         saveTexts(photos, "07-share-extension")
         assertNoNextcloud(in: photos, screen: "share extension")
@@ -271,7 +278,7 @@ final class NoDriveScreenshotUITests: XCTestCase {
             guard let alert else { return }
             Thread.sleep(forTimeInterval: 0.5)
             promptCount += 1
-            let name = String(format: "00-prompt-%d", promptCount)
+            let name = "00-prompt-\(promptCount)"
             save(name)
             let text = alert.debugDescription
             saveTexts(alert, name)

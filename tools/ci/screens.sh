@@ -189,9 +189,12 @@ launch() {
   out=$(xcrun simctl launch "$udid" "$APP_ID" -AppleLanguages "(en)" -AppleLocale en_US)
   echo "simctl launch: $out"
   pid=${out##*: }
-  sleep 1
-  xcrun simctl io "$udid" screenshot --type=png "$shots/01-launch-1s.png" || true
-  sleep 7
+  # the launch screen shows only briefly: take frames as fast as simctl allows; the report picks it
+  mkdir -p "$res/launch-burst"
+  for i in $(seq -w 1 14); do
+    xcrun simctl io "$udid" screenshot --type=png "$res/launch-burst/frame-$i.png" > /dev/null 2>&1 || true
+  done
+  sleep 3
   xcrun simctl io "$udid" screenshot --type=png "$shots/02-launch-8s.png"
   alive "$pid" "8 s after launch"
   sleep 22

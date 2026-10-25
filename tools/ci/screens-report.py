@@ -146,6 +146,23 @@ def main():
                 v['walk'] = [json.loads(line) for line in f if line.strip()]
         report['variants'][variant] = v
 
+    # The launch screen (Brand/LaunchScreen.storyboard: cobalt, logo tile, no button) from the burst of
+    # frames taken right after `simctl launch`: the first frame that is cobalt at the edges and has no
+    # white "Log in" button (the intro has one at about 76 % of the height).
+    burst = sorted(glob.glob(os.path.join(args.results, 'launch-burst', '*.png')))
+    report['launch_screen'] = None
+    for p in burst:
+        info = check_colours(p)
+        rgb = Image.open(p).convert('RGB')
+        w, h = rgb.size
+        button = rgb.getpixel((w // 2, int(h * 0.76)))
+        if info['cobalt_matches'] >= 8 and any(close(button, c) for c in COBALT.values()):
+            os.makedirs(os.path.join(args.shots, 'simctl'), exist_ok=True)
+            shutil.copy2(p, os.path.join(args.shots, 'simctl', '01-launch-screen.png'))
+            report['launch_screen'] = os.path.basename(p)
+            break
+    print(f'launch screen: {report["launch_screen"] or "not caught"} ({len(burst)} frames)')
+
     for p in sorted(glob.glob(os.path.join(args.shots, 'simctl', '*.png'))):
         report['simctl'][os.path.splitext(os.path.basename(p))[0]] = check_colours(p)
 
