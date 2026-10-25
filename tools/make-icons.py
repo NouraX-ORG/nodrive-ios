@@ -19,7 +19,8 @@ Outputs (all committed):
   Brand/Custom.xcassets/intro1.imageset/intro1{,@2x,@3x}.png          150/300/450 px tile
   + the matching Contents.json files.
 Removed (Nextcloud artwork): logo.svg, intro1.svg, intro2/3/4.imageset,
-  the Action Assistant "Senza titolo*.png" icons (incl. dark/tinted variants).
+  the Action Assistant "Senza titolo*.png" icons (incl. dark/tinted variants),
+  iOSClient/Images.xcassets/talk-template.imageset (Nextcloud Talk logo).
 
 Usage:
   python3 tools/make-icons.py           write the images (idempotent)
@@ -61,6 +62,9 @@ REMOVE = [
     'Action Assistant/Images.xcassets/AppIcon.appiconset/Senza titolo.png',
     'Action Assistant/Images.xcassets/AppIcon.appiconset/Senza titolo 1.png',
     'Action Assistant/Images.xcassets/AppIcon.appiconset/Senza titolo 2.png',
+    # Nextcloud Talk logo; only referenced by the sidebar "Apps" section, which NoDrive switches off
+    # (unified-search Talk results use a system symbol, see tools/rebrand.py)
+    'iOSClient/Images.xcassets/talk-template.imageset',
 ]
 
 ICON_NAME = 'Icon-App-1024x1024@1x.png'
