@@ -5,8 +5,10 @@ SPDX-License-Identifier: GPL-3.0-or-later
 # NoDrive for iOS: screenshots before sign-in
 
 Made by CI: job "Simulator screens" of `.github/workflows/ios.yml`, run
-[40180930594](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40180930594) (commit `79868cb2c2`),
-iPhone 17 simulator, iOS 27.0, Xcode 27.1, unsigned simulator build. The full-size originals, the
+[40206804804](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40206804804) on `main` (commit `b03563c3c9`),
+iPhone 17 simulator, iOS 27.0, Xcode 27.1, unsigned simulator build. Only
+`simctl/01-first-start-optimization.png` is from the earlier run
+[40180930594](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40180930594) (commit `79868cb2c2`, same screens). The full-size originals, the
 accessibility texts of every screen and the walk log are in the run's artifacts
 `nodrive-ios-screenshots` and `nodrive-ios-screens-results`. These copies are 1200 px high.
 
@@ -32,6 +34,7 @@ Nextcloud blue, no "Nextcloud" in any recorded screen text).
 | `07-share-extension.png` | The NoDrive share extension without an account ("No account found"). |
 | `simctl/01-first-start-optimization.png` | First start after installing: "Optimization in progress …" (a frame from a screen recording). |
 | `simctl/02-launch-8s.png` | 8 s after `simctl launch`, with the notification prompt. |
+| `simctl/03-launch-later.png` | A few seconds later: the same prompt over the intro (NoDrive is still running). |
 
 Notes:
 - CI never contacts the real drive.nourax.org. In the screenshot job, drive.nourax.org points to a
@@ -40,11 +43,9 @@ Notes:
 - NoDrive ships the same languages as Nextcloud iOS 35.2.1. Arabic is not one of them (no
   right-to-left language is), so on an Arabic iPhone NoDrive's own texts are English while the
   system prompts, the share sheet and the browser are Arabic.
-- `en-dark/07-share-extension.png` is from run
-  [40167283812](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40167283812) (same app code);
-  in run 40180930594 the dark and German extension screenshots were taken after the alert had closed.
 - The launch screen (`Brand/LaunchScreen.storyboard`: cobalt background, Nourax logo) did not show
-  in the screen recording: right after installing, the simulator showed black for about 5 s, then
-  "Optimization in progress …". Its colours and image are checked in the source by `tools/rebrand.py --check`.
+  in the screen recordings: right after installing, the simulator showed black, then
+  "Optimization in progress …" or the intro. Its colours and image are checked in the source by
+  `tools/rebrand.py --check`; the owner sees it on the Mac.
 - Screens after sign-in (file list, settings, about and licences, Files app location, widgets) need
   an account and are owner tests.

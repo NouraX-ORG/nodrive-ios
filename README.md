@@ -1,102 +1,116 @@
-# [Nextcloud](https://nextcloud.com) iOS app 
-[![Releases](https://img.shields.io/github/release/nextcloud/ios.svg)](https://github.com/nextcloud/ios/releases/latest) [![Build](https://github.com/nextcloud/ios/actions/workflows/xcode.yml/badge.svg)](https://github.com/nextcloud/ios/actions/workflows/xcode.yml) [![SwiftLint](https://github.com/nextcloud/ios/actions/workflows/lint.yml/badge.svg)](https://github.com/nextcloud/ios/actions/workflows/lint.yml)
-[![irc](https://img.shields.io/badge/IRC-%23nextcloud--mobile%20on%20freenode-blue.svg)](https://webchat.freenode.net/?channels=nextcloud-mobile)
+<!--
+SPDX-FileCopyrightText: 2026 Nourax
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+# NoDrive for iOS
 
-<img src="Animation.gif" alt="Demo of the Nextcloud iOS files app" width="277" height="600">
+NoDrive is the file app for iPhone and iPad made by **Nourax**. It connects to one server only:
+**Nourax Workspace** at `https://drive.nourax.org`.
 
-[<img src="https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg"
-alt="Demo of the Nextcloud iOS files app"
-height="40">](https://itunes.apple.com/us/app/nextcloud/id1125420102)
+With NoDrive you can:
+- browse, open, upload, download, rename, move and delete your files;
+- share files with public links (with expiry date and password);
+- keep files offline;
+- upload new photos automatically;
+- reach your files from the Files app, the share sheet and widgets.
 
-Check out https://nextcloud.com and follow us on [twitter.com/nextclouders](https://twitter.com/nextclouders)
+Sign-in happens in the browser ("Log in with Nourax"). There is no server address to type in.
 
-## How to contribute
-If you want to [contribute](https://nextcloud.com/contribute/) to Nextcloud, you are very welcome:
+| | |
+|---|---|
+| Version | `35.2.1-nourax.1` (shown in the app as "NoDrive 35.2.1-nourax.1") |
+| App id | `org.nourax.nodrive` (all ids: [docs/branding.md](docs/branding.md)) |
+| Based on | Nextcloud iOS, tag [`35.2.1`](https://github.com/nextcloud/ios/tree/35.2.1) |
+| Licence | GNU GPL v3.0 or later (see below) |
+| Status | Test builds only. Not signed, not on the App Store, not on TestFlight |
 
-- our forum at https://help.nextcloud.com/c/clients/ios
-- for translations of the app on [Transifex](https://www.transifex.com/nextcloud/nextcloud/dashboard/)
-- opening issues and PRs (including a corresponding issue)
+## Based on Nextcloud iOS (thank you)
 
-## Contribution Guidelines & License
+NoDrive is a rebranded build of the **Nextcloud iOS app**:
+[https://github.com/nextcloud/ios](https://github.com/nextcloud/ios).
 
-[GPLv3](LICENSE.txt) with [Apple app store exception](COPYING.iOS).
+Almost all of the code in this repository was written by Nextcloud GmbH, Marino Faggiana and the
+Nextcloud community. Thank you for building it and for publishing it as free software.
+Nourax changed the name, the logo, the colours, the ids and the fixed server, and switched off
+the services that only Nextcloud's own app may use. [NOTICE.md](NOTICE.md) lists every change.
 
-Nextcloud doesn't require a CLA (Contributor License Agreement). The copyright belongs to all the individual contributors. Therefore we recommend that every contributor adds following line to the header of a file, if they changed it substantially:
+Upstream's own README is kept unchanged in [docs/upstream-README.md](docs/upstream-README.md)
+(its relative links point to the repository root).
 
+"Nextcloud" is a trademark of Nextcloud GmbH. NoDrive is not made or endorsed by Nextcloud GmbH.
+
+## Licence
+
+- The app is licensed under the **GNU General Public License v3.0 or later**: [LICENSE.txt](LICENSE.txt).
+- [COPYING.iOS](COPYING.iOS): the upstream copyright holders commit not to pursue a licence
+  violation that comes only from the conflict between the GPL and the Apple App Store terms.
+- Other licences used in this repository are in [LICENSES/](LICENSES/), and [REUSE.toml](REUSE.toml)
+  says which files they cover. Upstream's copyright headers, licence files and [AUTHORS.md](AUTHORS.md)
+  are unchanged.
+- Third-party libraries inside the app, the trademarks, and the decision about the in-app licence
+  page: [NOTICE.md](NOTICE.md).
+
+## How to build
+
+You need a Mac with **macOS Tahoe 26.6 or newer** and **Xcode 27.1 or newer** with the
+**iOS 27 simulator**. The project needs the iOS 27 SDK, so older Xcode versions cannot build it.
+No Apple account, no certificate and no `GoogleService-Info.plist` are needed for the simulator.
+
+In Xcode:
+1. `git clone https://github.com/NouraX-ORG/nodrive-ios.git`
+2. Open `Nextcloud.xcodeproj` (the project keeps its upstream file name; the app it builds is NoDrive).
+   Wait until "Resolving Package Graph" has finished.
+3. In the toolbar pick the scheme **Nextcloud** and a simulator such as **iPhone 17**.
+4. Press **Run** (⌘R).
+
+From the command line, unsigned, the way CI builds it (`CODE_SIGNING_ALLOWED=NO`):
+
+```bash
+python3 tools/ci/simulated-entitlements.py /tmp/nodrive-ents
+xcodebuild build \
+  -project Nextcloud.xcodeproj -scheme Nextcloud -configuration Debug \
+  -destination 'platform=iOS Simulator,name=iPhone 17' \
+  -derivedDataPath DerivedData -clonedSourcePackagesDirPath DerivedData/SourcePackages \
+  -xcconfig /tmp/nodrive-ents/simulated-entitlements.xcconfig \
+  ENABLE_THREAD_SANITIZER=NO CODE_SIGNING_ALLOWED=NO
 ```
-@copyright Copyright (c) <year>, <your name> (<your email address>)
-```
 
-Please read the [Code of Conduct](https://nextcloud.com/code-of-conduct/). This document offers some guidance to ensure Nextcloud participants can cooperate effectively in a positive and inspiring atmosphere, and to explain how together we can strengthen and support each other.
+The first line is needed only for an unsigned build: it gives the simulator app its app group
+and keychain group without signing. Details, the reasons behind each option, unit tests, and how to
+run the app on your own iPhone: [docs/build.md](docs/build.md).
 
-More information how to contribute: [https://nextcloud.com/contribute/](https://nextcloud.com/contribute/)
+## Test builds
 
-## Start contributing
+Test builds exist only as **GitHub Actions artifacts**. There are no GitHub releases and no
+store uploads.
 
-You can start by forking this repository and creating pull requests on the develop
-branch. Maybe start working on [starter issues](https://github.com/nextcloud/ios/labels/good%20first%20issue). 
+1. Open the repository's **Actions** tab, workflow **iOS**.
+2. Open the newest green run on `main`.
+3. Download the artifact **`nodrive-ios-simulator-app`** (you must be signed in to GitHub).
+   It holds `NoDrive.app` for the iOS Simulator on a Mac with Apple silicon. It cannot be installed
+   on a real iPhone. Artifacts are deleted after 14 days.
 
-Easy starting points are also reviewing [pull requests](https://github.com/nextcloud/ios/pulls)
+The same run also has `nodrive-ios-test-results` (unit tests, build checks),
+`nodrive-ios-screenshots` and `nodrive-ios-screens-results` (screens, network check).
 
-### Xcode 26.1 Project Setup
+## Documents
 
-#### Dependencies
+| File | What it holds |
+|---|---|
+| [NOTICE.md](NOTICE.md) | Licensed software, trademarks, what Nourax changed, the in-app licence page decision |
+| [docs/branding.md](docs/branding.md) | Every id, the colours and icons, and how the branding tools work |
+| [docs/branding-sweep.md](docs/branding-sweep.md) | The "no Nextcloud on any screen" sweep: hits before and after, and what is kept on purpose |
+| [docs/build.md](docs/build.md) | Building in Xcode, on the command line and in CI; running on your own iPhone |
+| [docs/testing.md](docs/testing.md) | Test results (CI and owner tests) and the screenshot index |
+| [docs/upstream-updates.md](docs/upstream-updates.md) | How to merge a new Nextcloud iOS release |
+| [docs/screenshots/ios/](docs/screenshots/ios/) | Screenshots of every screen before sign-in (English, German, Arabic, dark mode) |
 
-In order to build the project in Xcode you will also need a file `GoogleService-Info.plist` at the root of the repository which contains the Firebase configuration. For development work you can use a mock version found [here](https://github.com/firebase/quickstart-ios/blob/master/mock-GoogleService-Info.plist).
+## Branding tools
 
-### Creating Pull requests
+| Tool | What it does |
+|---|---|
+| `tools/rebrand.py` | Applies every NoDrive change to the upstream source. Safe to run again; `--check` changes nothing and fails if anything is missing |
+| `tools/make-icons.py` | Makes every icon and logo image from the one Nourax logo (`branding/nourax-logo.png`) |
+| `tools/check-branding.py` | Fails if a Nextcloud name, link, id or colour can reach a user again |
 
-#### DCO Signoff
-
-Nextcloud enforces the [Developer Certificate of Origin (DCO)](https://developercertificate.org/) on Pull Requests. It requires your commit messages to contain a Signed-off-by line with an email address that matches your GitHub account.
-
-##### How to Sign off
-
-The DCO is a way for contributors to certify that they wrote or otherwise have the right to submit the code they are contributing by adding a Signed-off-by line to commit messages.
-
-```
-My Commit message
-
-Signed-off-by: Random Contributor <random@contributor.dev>
-```
-
-Git even has a `-s | --signoff` command line option to append this to your commit messages automatically.
-
-## Support
-
-If you need assistance or want to ask a question about the iOS app, you are welcome to [ask for support](https://help.nextcloud.com/c/clients/ios) in our Forums. If you have found a bug, feel free to [open a new Issue on GitHub](https://github.com/nextcloud/ios/issues). Keep in mind, that this repository only manages the iOS app. If you find bugs or have problems with the server/backend, you should ask the [Nextcloud server team](https://github.com/nextcloud/server) for help!
-
-## TestFlight 
-
-Do you want to try the latest version in development of Nextcloud iOS ? Simple, follow this simple step
-
-[Apple TestFlight](https://testflight.apple.com/join/RXEJbWj9)
-
-## Testing
-
-**Note: If a unit or integration test exclusively uses and tests NextcloudKit functions and components, then add that test to the NextcloudKit project instead. NextcloudKit is used in many other projects as an API, and it's better if such tests are located there.**
-
-### Unit Tests
-
-There are currently no prerequisites for unit testing.
-Mock everything which is not needed. 
-
-### Integration Tests
-
-In `TestConstants.swift` you must specify your credentials for the server you want to test against.
-For locally running tests and in the GitHub actions we use [this shallow CI server image](https://github.com/nextcloud/docker-ci/pkgs/container/continuous-integration-shallow-server).
-Due to technical constraints the GitHub actions rely on a bare metal installation of Nextcloud on the runner in difference to local tests which can leverage much cleaner and reliable Docker containers.
-
-Currently, you still need to launch the server manually once before running any tests locally.
-This project comes with a convenience script to do so, see or run [Tests/Server.sh](Tests/Server.sh).
-**Please familiarize yourself with its content before running it** to avoid unintended removal of a container named like in the script. 
-
-The same instance is reused for all tests.
-A long term goal is to automatically create and discard container _per test_ to ensure maximum test isolation and a clean test environment.
-Note that plain HTTP is used in this case to circumvent certificate issues and simplify the sign-in flow in automation.
-
-### UI Tests
-
-UI tests also require a Nextcloud server to test against just like integration tests.
-**Important**: Additionally, UI tests assume your test device (regardless whether physical or Simulator) is set to **US English**.
-This is required because in some parts of the user interface the automation has no other choice than to rely on localized texts for control.
+CI (`.github/workflows/ios.yml`) runs all three on every push to `main` and `platform/ios`.
