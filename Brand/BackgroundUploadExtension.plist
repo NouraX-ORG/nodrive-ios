@@ -3,11 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>BackgroundUploadURLBase</key>
-	<string>https://cloud.nextcloud.com</string>
+	<string>https://drive.nourax.org</string>
 	<key>EXAppExtensionAttributes</key>
 	<dict>
 		<key>EXExtensionPointIdentifier</key>
 		<string>com.apple.photos.background-upload</string>
 	</dict>
+	<key>NouraxVersion</key>
+	<string>$(MARKETING_VERSION)$(NOURAX_VERSION_SUFFIX)</string>
 </dict>
 </plist>

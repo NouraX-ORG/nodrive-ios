@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>Nextcloud</string>
+	<string>NoDrive</string>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionMainStoryboard</key>
@@ -29,5 +29,7 @@
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+	<key>NouraxVersion</key>
+	<string>$(MARKETING_VERSION)$(NOURAX_VERSION_SUFFIX)</string>
 </dict>
 </plist>

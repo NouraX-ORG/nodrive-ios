@@ -99,7 +99,7 @@ final class ActionViewController: UIViewController {
     }
 
     private func openMainAppForAssistantSharedText() {
-        guard let url = URL(string: "nextcloud://assistant/shared-text") else {
+        guard let url = URL(string: "nodrive://assistant/shared-text") else {
             extensionContext?.completeRequest(returningItems: nil, completionHandler: nil)
             return
         }

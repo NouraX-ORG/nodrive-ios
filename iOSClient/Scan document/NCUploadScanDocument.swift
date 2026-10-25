@@ -124,7 +124,7 @@ class NCUploadScanDocument: ObservableObject {
                 UIGraphicsEndPDFContext()
                 DispatchQueue.main.async { completion(pdfData as Data) }
             } else {
-                let url = Bundle.main.url(forResource: "Reasons to use Nextcloud", withExtension: "pdf")!
+                let url = Bundle.main.url(forResource: "NoDriveBlank", withExtension: "pdf")!
                 let data = try? Data(contentsOf: url)
                 DispatchQueue.main.async { completion(data!) }
             }

@@ -26,7 +26,7 @@ class NotificationService: UNNotificationServiceExtension {
         guard let bestAttemptContent else { return }
 
         bestAttemptContent.title = ""
-        bestAttemptContent.body = "Nextcloud notification"
+        bestAttemptContent.body = "NoDrive notification"
 
         var matchedAccount: tableAccount?
         var payload: [String: AnyObject]?

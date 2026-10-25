@@ -34,7 +34,7 @@ final class NCGlobal: Sendable {
     // App
     //
     let appName                                     = "files"
-    let appScheme                                   = "nextcloud"
+    let appScheme                                   = "nodrive"
     let talkName                                    = "talk-message"
     let spreedName                                  = "spreed"
     let twoFactorNotificatioName                    = "twofactor_nextcloud_notification"
@@ -308,11 +308,11 @@ final class NCGlobal: Sendable {
 
     // WIDGET ACTION
     //
-    let widgetActionNoAction                                    = "nextcloud://open-action?action=no-action"
-    let widgetActionUploadAsset                                 = "nextcloud://open-action?action=upload-asset"
-    let widgetActionScanDocument                                = "nextcloud://open-action?action=add-scan-document"
-    let widgetActionTextDocument                                = "nextcloud://open-action?action=create-text-document"
-    let widgetActionVoiceMemo                                   = "nextcloud://open-action?action=create-voice-memo"
+    let widgetActionNoAction                                    = "nodrive://open-action?action=no-action"
+    let widgetActionUploadAsset                                 = "nodrive://open-action?action=upload-asset"
+    let widgetActionScanDocument                                = "nodrive://open-action?action=add-scan-document"
+    let widgetActionTextDocument                                = "nodrive://open-action?action=create-text-document"
+    let widgetActionVoiceMemo                                   = "nodrive://open-action?action=create-voice-memo"
 
     // APPCONFIG
     //
@@ -335,9 +335,9 @@ final class NCGlobal: Sendable {
     //
     let talkSchemeUrl                                           = "nextcloudtalk://"
     let notesSchemeUrl                                          = "nextcloudnotes://"
-    let talkAppStoreUrl                                         = "https://apps.apple.com/in/app/nextcloud-talk/id1296825574"
-    let notesAppStoreUrl                                        = "https://apps.apple.com/in/app/nextcloud-notes/id813973264"
-    let moreAppsUrl                                             = "itms-apps://search.itunes.apple.com/WebObjects/MZSearch.woa/wa/search?media=software&term=nextcloud"
+    let talkAppStoreUrl                                         = ""
+    let notesAppStoreUrl                                        = ""
+    let moreAppsUrl                                             = ""
 
     // SNAPSHOT PREVIEW
     //

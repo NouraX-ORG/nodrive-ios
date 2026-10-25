@@ -8,8 +8,17 @@ import NextcloudKit
 let userAgent: String = {
     let appVersion: String = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as! String
     // Original Nextcloud useragent "Mozilla/5.0 (iOS) Nextcloud-iOS/\(appVersion)-Nextcloud"
-    let suffixBrand = NCBrandOptions.shared.brandUserAgent.isEmpty ? "" : "-\(NCBrandOptions.shared.brandUserAgent)"
+    let suffixBrand = NCBrandOptions.shared.brandUserAgent.isEmpty ? "" : " \(NCBrandOptions.shared.brandUserAgent)"
     return "Mozilla/5.0 (iOS) Nextcloud-iOS/\(appVersion)\(suffixBrand)"
+}()
+
+// NoDrive: user-visible version, e.g. "35.2.1-nourax.1".
+// Info.plist NouraxVersion = $(MARKETING_VERSION)$(NOURAX_VERSION_SUFFIX) (set by tools/rebrand.py).
+let nouraxVersion: String = {
+    if let version = Bundle.main.object(forInfoDictionaryKey: "NouraxVersion") as? String, !version.isEmpty {
+        return version
+    }
+    return (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? ""
 }()
 
  /*
@@ -58,22 +67,23 @@ struct NextcloudVersion: Comparable {
     }
 }
 
+// NoDrive: the values in this class are set by tools/rebrand.py; edit the tool, not this file.
 final class NCBrandOptions: @unchecked Sendable {
     static let shared = NCBrandOptions()
 
-    var brand: String = "Nextcloud"
-    var brandUserAgent: String = ""
-    var textCopyrightNextcloudiOS: String = "Nextcloud Matheria for iOS %@ © 2026"
-    var textCopyrightNextcloudServer: String = "Nextcloud Server %@"
-    var loginBaseUrl: String = ""
+    var brand: String = "NoDrive"
+    var brandUserAgent: String = "NoDrive"
+    var textCopyrightNextcloudiOS: String = "NoDrive " + nouraxVersion
+    var textCopyrightNextcloudServer: String = "Nourax Workspace %@"
+    var loginBaseUrl: String = "https://drive.nourax.org"
     var pushNotificationServerProxy: String = ""
-    var linkLoginHost: String = "https://nextcloud.com/install"
-    var linkloginPreferredProviders: String = "https://nextcloud.com/signup-ios"
-    var webLoginAutenticationProtocol: String = "nc://"                                        // example "abc://"
-    var privacy: String = "https://nextcloud.com/privacy"
-    var sourceCode: String = "https://github.com/nextcloud/ios"
+    var linkLoginHost: String = ""
+    var linkloginPreferredProviders: String = ""
+    var webLoginAutenticationProtocol: String = "nodrive://"                                        // example "abc://"
+    var privacy: String = (Bundle.main.object(forInfoDictionaryKey: "NouraxPrivacyURL") as? String ?? "").trimmingCharacters(in: .whitespaces)
+    var sourceCode: String = ""
     var mobileconfig: String = "/remote.php/dav/provisioning/apple-provisioning.mobileconfig"
-    var appStoreUrl: String = "https://apps.apple.com/in/app/nextcloud/id1125420102"
+    var appStoreUrl: String = ""
 
     var doNotAskPasscodeAtStartup: Bool = false
 
@@ -81,26 +91,26 @@ final class NCBrandOptions: @unchecked Sendable {
     var folderDefaultAutoUpload: String = "Photos"
 
     // Capabilities Group
-    var capabilitiesGroup: String = "group.it.twsweb.Crypto-Cloud"
-    var capabilitiesGroupApps: String = "group.com.nextcloud.apps"
+    var capabilitiesGroup: String = "group.org.nourax.nodrive"
+    var capabilitiesGroupApps: String = ""
 
     // BRAND ONLY
     var use_AppConfig: Bool = false
 
     // Use server theming color
-    var use_themingColor: Bool = true
+    var use_themingColor: Bool = false
 
     // MDM settings
     var disable_intro: Bool = false
-    var disable_request_login_url: Bool = false
-    var disable_multiaccount: Bool = false
+    var disable_request_login_url: Bool = true
+    var disable_multiaccount: Bool = true
     var disable_more_external_site: Bool = false
     var disable_openin_file: Bool = false
-    var disable_crash_service: Bool = false
+    var disable_crash_service: Bool = true
     var disable_log: Bool = false
     var disable_mobileconfig: Bool = false  
-    var disable_show_more_nextcloud_apps_in_settings: Bool = false
-    var disable_source_code_in_settings: Bool = false
+    var disable_show_more_nextcloud_apps_in_settings: Bool = true
+    var disable_source_code_in_settings: Bool = true
     var enforce_passcode_lock = false
     var enforce_privacyScreenEnabled = false
 
@@ -158,7 +168,7 @@ final class NCBrandOptions: @unchecked Sendable {
 
         if pushNotificationServerProxy.isEmpty,
             brand == "Nextcloud" {
-            pushNotificationServerProxy = "https://push-notifications.nextcloud.com"
+            pushNotificationServerProxy = ""
             // DEBUG SERVER PUSH
             // pushNotificationServerProxy = "https://c0004.customerpush.nextcloud.com"
         }
@@ -178,7 +188,7 @@ final class NCBrandColor: @unchecked Sendable {
     static let shared = NCBrandColor()
 
     // This is rewrited from customet theme, default is Nextcloud color
-    let customer: UIColor = UIColor(red: 0.0 / 255.0, green: 130.0 / 255.0, blue: 201.0 / 255.0, alpha: 1.0) // Nextcloud default: #0082C9
+    let customer: UIColor = UIColor(red: 37.0 / 255.0, green: 99.0 / 255.0, blue: 235.0 / 255.0, alpha: 1.0) // NoDrive: Nourax cobalt #2563EB
     var customerText: UIColor = .white
 
     // INTERNAL DEFINE COLORS
@@ -202,7 +212,7 @@ final class NCBrandColor: @unchecked Sendable {
 
     var documentIconColor: UIColor {
         get {
-            return UIColor(hex: "#49abe9")!
+            return UIColor(hex: "#3B82F6")!
         }
     }
 
@@ -252,9 +262,9 @@ final class NCBrandColor: @unchecked Sendable {
                 return palette
             }
 
-            let red = UIColor(red: 182 / 255, green: 70 / 255, blue: 157 / 255, alpha: 1).cgColor
-            let yellow = UIColor(red: 221 / 255, green: 203 / 255, blue: 85 / 255, alpha: 1).cgColor
-            let blue = UIColor(red: 0 / 255, green: 130 / 255, blue: 201 / 255, alpha: 1).cgColor
+            let red = UIColor(red: 249 / 255, green: 115 / 255, blue: 22 / 255, alpha: 1).cgColor
+            let yellow = UIColor(red: 59 / 255, green: 130 / 255, blue: 246 / 255, alpha: 1).cgColor
+            let blue = UIColor(red: 37 / 255, green: 99 / 255, blue: 235 / 255, alpha: 1).cgColor
 
             let palette1 = mixPalette(steps: steps, color1: red, color2: yellow)
             let palette2 = mixPalette(steps: steps, color1: yellow, color2: blue)

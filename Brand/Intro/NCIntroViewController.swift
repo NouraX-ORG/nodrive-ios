@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import UIKit
+import NextcloudKit
 
 class NCIntroViewController: UIViewController, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
     @IBOutlet weak var buttonLogin: UIButton!
@@ -17,8 +18,10 @@ class NCIntroViewController: UIViewController, UICollectionViewDataSource, UICol
     var controller: NCMainTabBarController?
 
     private let appDelegate = (UIApplication.shared.delegate as? AppDelegate)!
-    private let titles = [NSLocalizedString("_intro_1_title_", comment: ""), NSLocalizedString("_intro_2_title_", comment: ""), NSLocalizedString("_intro_3_title_", comment: ""), NSLocalizedString("_intro_4_title_", comment: "")]
-    private let images = [UIImage(named: "intro1"), UIImage(named: "intro2"), UIImage(named: "intro3"), UIImage(named: "intro4")]
+    // NoDrive: two slides (Nourax logo; files and sharing). No Nextcloud artwork, no mail/meeting slides.
+    private let titles = [NSLocalizedString("_intro_1_title_", comment: ""), NSLocalizedString("_intro_2_title_", comment: "")]
+    private let images = [UIImage(named: "intro1"),
+                          UIImage(systemName: "folder.badge.person.crop", withConfiguration: UIImage.SymbolConfiguration(pointSize: 120, weight: .regular))?.withTintColor(.white, renderingMode: .alwaysOriginal)]
     private var timer: Timer?
     private var textColor: UIColor = .white
     private var textColorOpponent: UIColor = .black
@@ -74,6 +77,11 @@ class NCIntroViewController: UIViewController, UICollectionViewDataSource, UICol
         buttonHost.layer.cornerRadius = 20
         buttonHost.setTitle(NSLocalizedString("_host_your_own_server", comment: ""), for: .normal)
         buttonHost.setTitleColor(textColor.withAlphaComponent(0.5), for: .normal)
+
+        // NoDrive: one fixed server, so no "Sign up with provider" and no "Host your own server".
+        buttonLogin.accessibilityIdentifier = "nodriveLoginButton"
+        buttonSignUp.isHidden = NCBrandOptions.shared.linkloginPreferredProviders.isEmpty
+        buttonHost.isHidden = NCBrandOptions.shared.linkLoginHost.isEmpty
 
         introCollectionView.register(UINib(nibName: "NCIntroCollectionViewCell", bundle: nil), forCellWithReuseIdentifier: "introCell")
         introCollectionView.dataSource = self
@@ -158,6 +166,11 @@ class NCIntroViewController: UIViewController, UICollectionViewDataSource, UICol
     }
 
     @IBAction func login(_ sender: Any) {
+        // NoDrive: the server is fixed, so start the browser sign-in (Login Flow v2) right away.
+        if NCBrandOptions.shared.disable_request_login_url, !NCBrandOptions.shared.loginBaseUrl.isEmpty {
+            startFixedServerLogin(url: NCBrandOptions.shared.loginBaseUrl)
+            return
+        }
         if let viewController = UIStoryboard(name: "NCLogin", bundle: nil).instantiateViewController(withIdentifier: "NCLogin") as? NCLogin {
             viewController.controller = self.controller
             self.navigationController?.pushViewController(viewController, animated: true)
@@ -176,6 +189,63 @@ class NCIntroViewController: UIViewController, UICollectionViewDataSource, UICol
     @IBAction func host(_ sender: Any) {
         guard let url = URL(string: NCBrandOptions.shared.linkLoginHost) else { return }
         UIApplication.shared.open(url)
+    }
+
+    // MARK: - NoDrive fixed-server sign-in
+
+    /// Login Flow v2 against the one NoDrive server, without the server-address screen.
+    /// Same calls as `NCLogin.startLogin(url:)`.
+    private func startFixedServerLogin(url: String) {
+        buttonLogin.isEnabled = false
+        buttonLogin.hideButtonAndShowSpinner(tint: textColor)
+
+        NextcloudKit.shared.getServerStatus(serverUrl: url) { [weak self] _, serverInfoResult in
+            guard let self else { return }
+            switch serverInfoResult {
+            case .success:
+                if let host = URL(string: url)?.host {
+                    NCNetworking.shared.writeCertificate(host: host)
+                }
+                let loginOptions = NKRequestOptions(customUserAgent: userAgent)
+                NextcloudKit.shared.getLoginFlowV2(serverUrl: url, options: loginOptions) { [weak self] token, endpoint, login, _, error in
+                    guard let self else { return }
+                    if error == .success, let token, let endpoint, let login {
+                        let loginProvider = NCLoginProvider()
+                        loginProvider.initialURLString = login
+                        loginProvider.delegate = self
+                        loginProvider.controller = self.controller
+                        loginProvider.presentingViewController = self
+                        loginProvider.startPolling(loginFlowV2Token: token, loginFlowV2Endpoint: endpoint, loginFlowV2Login: login)
+                        loginProvider.startAuthentication()
+                        self.activeLoginProvider = loginProvider
+                    } else {
+                        self.showFixedServerLoginError(error)
+                    }
+                }
+            case .failure(let error):
+                self.showFixedServerLoginError(error)
+            }
+        }
+    }
+
+    private func showFixedServerLoginError(_ error: NKError) {
+        onBack()
+        Task { @MainActor in
+            let windowScene = SceneManager.shared.getWindowScene(controller: self.controller)
+            await showErrorBanner(windowScene: windowScene, error: error)
+        }
+    }
+}
+
+// MARK: - NCLoginProviderDelegate (NoDrive)
+
+extension NCIntroViewController: NCLoginProviderDelegate {
+    /// Browser sign-in cancelled or failed: show "Log in" again.
+    func onBack() {
+        buttonLogin.isEnabled = true
+        buttonLogin.hideSpinnerAndShowButton()
+        activeLoginProvider?.cancel()
+        activeLoginProvider = nil
     }
 }
 

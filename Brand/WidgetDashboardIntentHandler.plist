@@ -21,5 +21,7 @@
 		<key>NSExtensionPrincipalClass</key>
 		<string>$(PRODUCT_MODULE_NAME).IntentHandler</string>
 	</dict>
+	<key>NouraxVersion</key>
+	<string>$(MARKETING_VERSION)$(NOURAX_VERSION_SUFFIX)</string>
 </dict>
 </plist>

@@ -45,7 +45,7 @@
       queueDebuggingEnabled = "No">
       <RemoteRunnable
          runnableDebuggingMode = "0"
-         BundleIdentifier = "it.twsweb.Nextcloud"
+         BundleIdentifier = "org.nourax.nodrive"
          RemotePath = "/var/containers/Bundle/Application/96505171-B093-46F6-8C0A-C5A40B9B645E/Nextcloud.app">
       </RemoteRunnable>
    </LaunchAction>

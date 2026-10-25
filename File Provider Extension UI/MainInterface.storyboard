@@ -38,7 +38,7 @@
                             </button>
                         </subviews>
                         <viewLayoutGuide key="safeArea" id="zTo-CZ-ppy"/>
-                        <color key="backgroundColor" red="0.0" green="0.46000000000000002" blue="0.89000000000000001" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                        <color key="backgroundColor" red="0.1450980392156863" green="0.38823529411764707" blue="0.9215686274509803" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                         <constraints>
                             <constraint firstItem="gdj-d0-nZ2" firstAttribute="leading" secondItem="zTo-CZ-ppy" secondAttribute="leading" constant="10" id="BRI-CF-hj6"/>
                             <constraint firstItem="kiS-ZU-Z4Y" firstAttribute="centerX" secondItem="zTo-CZ-ppy" secondAttribute="centerX" id="Itg-ba-qVK"/>
@@ -64,6 +64,6 @@
         </scene>
     </scenes>
     <resources>
-        <image name="logo" width="256" height="128"/>
+        <image name="logo" width="150" height="150"/>
     </resources>
 </document>
