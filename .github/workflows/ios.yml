@@ -82,17 +82,13 @@ jobs:
         run: |
           xcodebuild -help > xcodebuild-help.txt 2>&1 || true
           for opt in -resolvePackageDependencies -clonedSourcePackagesDirPath -disableAutomaticPackageResolution \
-                     -derivedDataPath -resultBundlePath -only-testing -xctestrun -enableThreadSanitizer -enableCodeCoverage; do
+                     -derivedDataPath -resultBundlePath -only-testing -xctestrun -xcconfig -enableThreadSanitizer -enableCodeCoverage; do
             if grep -q -- "$opt" xcodebuild-help.txt; then echo "ok   $opt"; else echo "MISSING $opt"; exit 1; fi
           done
 
-      - name: Validate project file
-        run: |
-          plutil -lint "$PROJECT/project.pbxproj"
-          xcodebuild -list -project "$PROJECT"
-
-      - name: Cache Swift packages
-        uses: actions/cache@v6
+      - name: Restore Swift packages cache
+        id: spm-cache
+        uses: actions/cache/restore@v6
         with:
           path: ${{ env.SPM_DIR }}
           key: spm-xcode27-${{ hashFiles('Nextcloud.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
@@ -104,7 +100,31 @@ jobs:
             -clonedSourcePackagesDirPath "$SPM_DIR" \
             -disableAutomaticPackageResolution
 
+      - name: Save Swift packages cache
+        if: steps.spm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.SPM_DIR }}
+          key: ${{ steps.spm-cache.outputs.cache-primary-key }}
+
+      - name: Validate project file
+        run: |
+          plutil -lint "$PROJECT/project.pbxproj"
+          xcodebuild -list -project "$PROJECT" -clonedSourcePackagesDirPath "$SPM_DIR" -disableAutomaticPackageResolution
+
+      - name: Simulated entitlements (no signing)
+        # Without signing the simulator gives the app no app group and no keychain group
+        # (run 40157259840: "App Group container URL not found", OSStatus -34018). Xcode's
+        # own simulator builds link the entitlements into the binary as Mach-O sections;
+        # this does the same through an -xcconfig file. See the tool's docstring.
+        run: |
+          python3 tools/ci/simulated-entitlements.py "$RUNNER_TEMP/sim-entitlements"
+          echo "SIM_ENTS=$RUNNER_TEMP/sim-entitlements" >> "$GITHUB_ENV"
+          mkdir -p results/simulated-entitlements
+          cp "$RUNNER_TEMP"/sim-entitlements/* results/simulated-entitlements/
+
       - name: Build app, all extensions and test bundles (iphonesimulator, unsigned)
+        id: build
         # The scheme's test action turns on Thread Sanitizer; -enableThreadSanitizer NO
         # alone did not switch it off (run 40156412030), so the build setting is set too.
         run: |
@@ -116,6 +136,7 @@ jobs:
             -derivedDataPath DerivedData \
             -clonedSourcePackagesDirPath "$SPM_DIR" \
             -disableAutomaticPackageResolution \
+            -xcconfig "$SIM_ENTS/simulated-entitlements.xcconfig" \
             -enableThreadSanitizer NO -enableCodeCoverage NO \
             ENABLE_THREAD_SANITIZER=NO \
             CODE_SIGNING_ALLOWED=NO \
@@ -126,6 +147,9 @@ jobs:
         run: |
           mkdir -p package
           ditto DerivedData/Build/Products/Debug-iphonesimulator/Nextcloud.app package/NoDrive.app
+          # build-for-testing puts the unit-test bundles into the host app; they do not ship
+          echo "removing test bundles:"; ls -d package/NoDrive.app/PlugIns/*.xctest || true
+          rm -rf package/NoDrive.app/PlugIns/*.xctest
           cd package
           ditto -c -k --sequesterRsrc --keepParent NoDrive.app ../nodrive-ios-simulator-app.zip
           ls -l ../nodrive-ios-simulator-app.zip
@@ -143,7 +167,7 @@ jobs:
 
       - name: Inspect built products (ids, names, URL schemes, entitlements, Nextcloud links)
         run: |
-          APP=DerivedData/Build/Products/Debug-iphonesimulator/Nextcloud.app
+          APP=package/NoDrive.app   # the shipped artifact (test bundles removed)
           {
             for p in "$APP/Info.plist" "$APP"/PlugIns/*.appex/Info.plist "$APP"/Extensions/*.appex/Info.plist; do
               echo "=== $p"; plutil -p "$p"
@@ -156,7 +180,7 @@ jobs:
       - name: Branding sweep of the built app (report)
         continue-on-error: true
         run: |
-          python3 tools/check-branding.py --app DerivedData/Build/Products/Debug-iphonesimulator/Nextcloud.app \
+          python3 tools/check-branding.py --app package/NoDrive.app \
             --json results/check-branding-app.json > results/check-branding-app.txt 2>&1
         # report only in the build stage; the sweep stage turns this into a gate
 
@@ -165,6 +189,8 @@ jobs:
         run: tail -n 3 results/check-branding-app.txt || true
 
       - name: Unit tests on the simulator
+        # also runs when the product inspection above reports a problem
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           XCTESTRUN=$(find DerivedData/Build/Products -maxdepth 1 -name "*.xctestrun" | head -n 1)
           echo "xctestrun: $XCTESTRUN"

@@ -7,8 +7,9 @@ For the app and every embedded extension (PlugIns/*.appex and Extensions/*.appex
   * reads Info.plist (binary or XML) and checks the bundle id, display name and,
     for the app, the URL scheme;
   * reads the entitlements the build put into the executable: the Mach-O
-    section __TEXT,__entitlements (simulator builds) and the entitlements blob
-    of an embedded code signature, if any; checks the app group and keychain group.
+    section __TEXT,__entitlements (simulator builds; required) and the
+    entitlements blob of an embedded code signature, if any; checks the
+    application identifier, app group and keychain group.
 Then it searches every file of the bundle for links to Nextcloud services
 (push proxy, nextcloud.com, App Store links to Nextcloud apps, Firebase hosts)
 and prints what it finds.
@@ -45,17 +46,37 @@ EXPECTED = {
 }
 
 # Links that must not ship (fail) and links that are reported for the record.
+# Each pattern: (label, anchor regex, host chars to add before, printable chars to add
+# after, filter regex on the result or None). Anchors start with a literal, so the
+# scan of a ~700 MB bundle stays fast.
+NEXTCLOUD_STORE = re.compile(rb'nextcloud|id1125420102|id1296825574|id813973264', re.I)
 FAIL_PATTERNS = [
-    ('push-proxy', re.compile(rb'push-notifications\.nextcloud\.com', re.I)),
-    ('appstore-nextcloud', re.compile(rb'apps\.apple\.com/[\x21-\x7e]{0,60}(?:nextcloud|id1125420102|id1296825574|id813973264)', re.I)),
+    ('push-proxy', re.compile(rb'push-notifications\.nextcloud\.com', re.I), 40, 60, None),
+    ('appstore-nextcloud', re.compile(rb'(?:apps|itunes)\.apple\.com/', re.I), 0, 80, NEXTCLOUD_STORE),
 ]
 REPORT_PATTERNS = [
-    ('nextcloud-url', re.compile(rb'https?://[\x21-\x7e]{0,80}next\s?cloud[\x21-\x7e]{0,80}', re.I)),
-    ('nextcloud.com', re.compile(rb'[a-z0-9.-]{0,40}nextcloud\.com[\x21-\x7e]{0,60}', re.I)),
-    ('apps.apple.com', re.compile(rb'https?://(?:apps|itunes)\.apple\.com[\x21-\x7e]{0,80}', re.I)),
-    ('app-store-id', re.compile(rb'(?<![0-9])(?:id)?(?:1125420102|1296825574|813973264)(?![0-9])')),
-    ('firebase-host', re.compile(rb'[a-z0-9.-]{0,40}(?:crashlytics|firebaseio|app-measurement|firebase-settings)\.[a-z.]{2,20}', re.I)),
+    ('nextcloud-url', re.compile(rb'https?://', re.I), 0, 120, re.compile(rb'next\s?cloud', re.I)),
+    ('nextcloud.com', re.compile(rb'nextcloud\.com', re.I), 40, 60, None),
+    ('apps.apple.com', re.compile(rb'https?://(?:apps|itunes)\.apple\.com', re.I), 0, 80, None),
+    ('app-store-id', re.compile(rb'(?<![0-9])(?:id)?(?:1125420102|1296825574|813973264)(?![0-9])'), 0, 0, None),
+    ('firebase-host', re.compile(rb'(?:crashlytics|firebaseio|app-measurement|firebase-settings)\.[a-z]', re.I), 40, 30, None),
 ]
+HOST_CHARS = frozenset(b'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-')
+PRINTABLE = frozenset(range(0x21, 0x7f))
+
+
+def matches(data, pattern):
+    _, rx, back, fwd, flt = pattern
+    for m in rx.finditer(data):
+        lo = m.start()
+        while lo > 0 and m.start() - lo < back and data[lo - 1] in HOST_CHARS:
+            lo -= 1
+        hi = m.end()
+        while hi < len(data) and hi - m.end() < fwd and data[hi] in PRINTABLE:
+            hi += 1
+        text = data[lo:hi]
+        if flt is None or flt.search(text):
+            yield text
 
 MH_MAGIC_64 = 0xfeedfacf
 FAT_MAGIC = 0xcafebabe
@@ -183,6 +204,18 @@ def main():
                 problems.append(f'app: NouraxVersion {info.get("NouraxVersion")!r}')
         if entry['NSExtensionFileProviderDocumentGroup'] not in (None, GROUP):
             problems.append(f'{rel}: file-provider document group {entry["NSExtensionFileProviderDocumentGroup"]!r}')
+        # The simulator reads the entitlements from __TEXT,__entitlements
+        # (tools/ci/simulated-entitlements.py puts them there; no signing).
+        sec = entry['entitlements_section']
+        if not isinstance(sec, dict):
+            problems.append(f'{rel}: no __TEXT,__entitlements section (app group and keychain would be missing)')
+        else:
+            if sec.get('application-identifier') != bid:
+                problems.append(f'{rel}: application-identifier {sec.get("application-identifier")!r}, expected {bid!r}')
+            if sec.get('com.apple.security.application-groups') != [GROUP]:
+                problems.append(f'{rel}: section app groups {sec.get("com.apple.security.application-groups")}')
+            if sec.get('keychain-access-groups') != [BASE]:
+                problems.append(f'{rel}: section keychain groups {sec.get("keychain-access-groups")}')
         for src in ('entitlements_section', 'entitlements_signature'):
             e = entry[src]
             if isinstance(e, dict):
@@ -205,19 +238,19 @@ def main():
             rel = os.path.relpath(full, app).replace(os.sep, '/')
             with open(full, 'rb') as f:
                 data = f.read()
-            for label, rx in FAIL_PATTERNS:
-                for m in rx.findall(data):
-                    fail_found[label].add(f'{rel}: {m.decode("ascii", "replace")}')
-            for label, rx in REPORT_PATTERNS:
-                for m in rx.findall(data):
-                    found[label][m.decode('ascii', 'replace')].add(rel)
-    for label, _ in REPORT_PATTERNS:
+            for pat in FAIL_PATTERNS:
+                for m in matches(data, pat):
+                    fail_found[pat[0]].add(f'{rel}: {m.decode("ascii", "replace")}')
+            for pat in REPORT_PATTERNS:
+                for m in matches(data, pat):
+                    found[pat[0]][m.decode('ascii', 'replace')].add(rel)
+    for label, *_ in REPORT_PATTERNS:
         items = found.get(label, {})
         print(f'-- {label}: {len(items)} distinct')
         for text, files in sorted(items.items()):
             print(f'   {text!r} in {", ".join(sorted(files)[:4])}{" ..." if len(files) > 4 else ""}')
         report['links'][label] = {t: sorted(fs) for t, fs in sorted(items.items())}
-    for label, _ in FAIL_PATTERNS:
+    for label, *_ in FAIL_PATTERNS:
         items = sorted(fail_found.get(label, []))
         print(f'-- {label} (must be none): {len(items)}')
         for it in items:
