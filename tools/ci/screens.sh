@@ -1,0 +1,230 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Nourax
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Simulator steps of the CI screenshot job (.github/workflows/ios.yml, job "screens").
+# Runs on the macOS runner only. No signing, no secrets, no contact with the real drive.nourax.org.
+#
+#   screens.sh check-tools <out-dir>        print and check every simctl/xcodebuild option used here
+#   screens.sh make-certs <dir>             throw-away CI root + certificate for drive.nourax.org
+#   screens.sh capture-start <results-dir>  DNS capture on all interfaces (tcpdump -i pktap,all)
+#   screens.sh capture-stop <results-dir>   stop it, write dns.txt (and dns-processes.txt)
+#   screens.sh device                       UDID of "iPhone 17" with iOS $IOS_VERSION (default 27.0)
+#   screens.sh prepare <udid> <lang> <locale> <light|dark>
+#        erase, set the system language, boot, trust $CA_CER, appearance, fixed status bar,
+#        add $SAMPLE_PHOTO to Photos
+#   screens.sh launch <udid> <NoDrive.app> <shots-dir> <results-dir>
+#        simctl install + launch, screenshots, check that the app keeps running
+#   screens.sh walk <udid> <variant> <lang> <locale>
+#        the UI test walk (needs XCTESTRUN, SHOTS, RESULTS; SIGN_IN=1 taps "Log in")
+set -euo pipefail
+
+APP_ID=org.nourax.nodrive
+
+need() {   # need <help-file> <text>...: fail when an option is not in the tool's own help
+  local file=$1; shift
+  for text in "$@"; do
+    if grep -q -- "$text" "$file"; then echo "ok   $text  ($(basename "$file"))"; else echo "MISSING $text in $(basename "$file")"; return 1; fi
+  done
+}
+
+check_tools() {
+  local out=$1
+  mkdir -p "$out"
+  for sub in erase boot bootstatus shutdown keychain ui status_bar addmedia install launch terminate io spawn list; do
+    xcrun simctl help "$sub" > "$out/simctl-$sub.txt" 2>&1 || true
+  done
+  need "$out/simctl-keychain.txt" add-root-cert
+  need "$out/simctl-ui.txt" appearance
+  need "$out/simctl-status_bar.txt" override --time --batteryState --batteryLevel --cellularBars --wifiBars
+  need "$out/simctl-io.txt" screenshot --type
+  need "$out/simctl-bootstatus.txt" -b
+  need "$out/simctl-addmedia.txt" addmedia
+  need "$out/simctl-launch.txt" launch
+  need "$out/simctl-list.txt" -j
+  xcodebuild -help > "$out/xcodebuild-help.txt" 2>&1 || true
+  need "$out/xcodebuild-help.txt" -xctestrun -only-testing -parallel-testing-enabled -resultBundlePath -destination
+  xcrun xcresulttool help export attachments > "$out/xcresulttool-export-attachments.txt" 2>&1 || true
+  need "$out/xcresulttool-export-attachments.txt" --path --output-path
+  tcpdump --version > "$out/tcpdump-version.txt" 2>&1 || true
+  head -n 2 "$out/tcpdump-version.txt"
+  security verify-cert -h > "$out/security-verify-cert.txt" 2>&1 || true
+  openssl version
+}
+
+make_certs() {
+  local dir=$1
+  mkdir -p "$dir"
+  cat > "$dir/ca.cnf" <<'EOF'
+[req]
+distinguished_name = dn
+prompt = no
+[dn]
+CN = NoDrive CI stand-in root (throw-away)
+[v3_ca]
+basicConstraints = critical, CA:TRUE
+keyUsage = critical, keyCertSign, cRLSign
+subjectKeyIdentifier = hash
+EOF
+  cat > "$dir/leaf.cnf" <<'EOF'
+[req]
+distinguished_name = dn
+prompt = no
+[dn]
+CN = drive.nourax.org
+EOF
+  cat > "$dir/leaf.ext" <<'EOF'
+basicConstraints = critical, CA:FALSE
+keyUsage = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = DNS:drive.nourax.org
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer
+EOF
+  openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 30 -keyout "$dir/ca.key" -out "$dir/ca.pem" \
+    -config "$dir/ca.cnf" -extensions v3_ca
+  openssl req -new -newkey rsa:2048 -nodes -keyout "$dir/leaf.key" -out "$dir/leaf.csr" -config "$dir/leaf.cnf"
+  openssl x509 -req -in "$dir/leaf.csr" -CA "$dir/ca.pem" -CAkey "$dir/ca.key" -CAcreateserial -sha256 -days 30 \
+    -extfile "$dir/leaf.ext" -out "$dir/leaf.pem"
+  cat "$dir/leaf.pem" "$dir/ca.pem" > "$dir/chain.pem"
+  openssl x509 -in "$dir/ca.pem" -outform der -out "$dir/ca.cer"
+  rm -f "$dir/ca.key" "$dir/leaf.csr"   # the root can sign nothing else after this
+  openssl verify -CAfile "$dir/ca.pem" "$dir/leaf.pem"
+  openssl x509 -in "$dir/leaf.pem" -noout -subject -enddate -ext subjectAltName,extendedKeyUsage 2>/dev/null \
+    || openssl x509 -in "$dir/leaf.pem" -noout -subject -enddate
+}
+
+capture_start() {
+  local res=$1
+  mkdir -p "$res"
+  sudo nohup tcpdump -i pktap,all -n -U -w "$res/dns.pcapng" 'udp port 53 or tcp port 53' > "$res/tcpdump.out" 2>&1 &
+  sleep 3
+  if ! pgrep -x tcpdump > /dev/null; then
+    local iface
+    iface=$(route -n get default | awk '/interface:/ {print $2}')
+    echo "pktap capture did not start ($(tr '\n' ' ' < "$res/tcpdump.out")); capturing on $iface"
+    sudo nohup tcpdump -i "$iface" -n -U -w "$res/dns.pcapng" 'udp port 53 or tcp port 53' > "$res/tcpdump.out" 2>&1 &
+    sleep 3
+    pgrep -x tcpdump > /dev/null
+  fi
+  echo "tcpdump running: $(pgrep -x tcpdump | tr '\n' ' ')"
+  scutil --dns | grep -m 3 nameserver || true
+  dig +short www.apple.com | head -n 2   # control lookup; the gate looks for it in the capture
+}
+
+capture_stop() {
+  local res=$1
+  sudo pkill -INT -x tcpdump || true
+  sleep 3
+  sudo chmod a+r "$res/dns.pcapng"
+  tcpdump -n -r "$res/dns.pcapng" > "$res/dns.txt" 2> "$res/dns-read.err" || true
+  tcpdump -n -k -r "$res/dns.pcapng" > "$res/dns-processes.txt" 2>/dev/null || true
+  echo "DNS packets: $(wc -l < "$res/dns.txt")"
+  cat "$res/tcpdump.out" || true
+}
+
+device() {
+  xcrun simctl list devices available -j | python3 -c '
+import json, sys
+want = "iOS-" + sys.argv[1].replace(".", "-")
+for runtime, devices in json.load(sys.stdin)["devices"].items():
+    if runtime.endswith(want):
+        for d in devices:
+            if d["name"] == "iPhone 17":
+                print(d["udid"])
+                sys.exit(0)
+sys.exit("no available iPhone 17 simulator with " + want)
+' "${IOS_VERSION:-27.0}"
+}
+
+boot_wait() {
+  xcrun simctl boot "$1" 2>/dev/null || true
+  xcrun simctl bootstatus "$1" -b > /dev/null
+}
+
+prepare() {
+  local udid=$1 lang=$2 locale=$3 appearance=$4
+  xcrun simctl shutdown "$udid" > /dev/null 2>&1 || true
+  xcrun simctl erase "$udid"
+  boot_wait "$udid"
+  xcrun simctl spawn "$udid" defaults write "Apple Global Domain" AppleLanguages -array "$lang"
+  xcrun simctl spawn "$udid" defaults write "Apple Global Domain" AppleLocale -string "$locale"
+  xcrun simctl shutdown "$udid"
+  boot_wait "$udid"
+  xcrun simctl keychain "$udid" add-root-cert "$CA_CER"
+  xcrun simctl ui "$udid" appearance "$appearance"
+  xcrun simctl status_bar "$udid" override --time 9:41 --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3
+  if [ -n "${SAMPLE_PHOTO:-}" ]; then
+    xcrun simctl addmedia "$udid" "$SAMPLE_PHOTO"
+  fi
+  echo "prepared $udid: language $(xcrun simctl spawn "$udid" defaults read "Apple Global Domain" AppleLanguages | tr -d ' \n'), locale $locale, $appearance"
+}
+
+alive() {   # alive <pid> <when>
+  if ps -p "$1" > /dev/null 2>&1; then
+    echo "NoDrive (pid $1) is running $2"
+  else
+    echo "NoDrive (pid $1) is NOT running $2"
+    ls -lt ~/Library/Logs/DiagnosticReports/ 2>/dev/null | head -n 10 || true
+    return 1
+  fi
+}
+
+launch() {
+  local udid=$1 app=$2 shots=$3 res=$4 out pid
+  mkdir -p "$shots" "$res"
+  xcrun simctl install "$udid" "$app"
+  echo "installed: $(xcrun simctl get_app_container "$udid" "$APP_ID" app)"
+  out=$(xcrun simctl launch "$udid" "$APP_ID" -AppleLanguages "(en)" -AppleLocale en_US)
+  echo "simctl launch: $out"
+  pid=${out##*: }
+  sleep 1
+  xcrun simctl io "$udid" screenshot --type=png "$shots/01-launch-1s.png" || true
+  sleep 7
+  xcrun simctl io "$udid" screenshot --type=png "$shots/02-launch-8s.png"
+  alive "$pid" "8 s after launch"
+  sleep 22
+  xcrun simctl io "$udid" screenshot --type=png "$shots/03-launch-30s.png"
+  alive "$pid" "30 s after launch"
+  xcrun simctl spawn "$udid" launchctl list | grep -F "$APP_ID" || true
+  xcrun simctl spawn "$udid" log show --last 2m --style compact --predicate 'process == "Nextcloud"' \
+    > "$res/simctl-launch-app.log" 2>&1 || true
+  xcrun simctl terminate "$udid" "$APP_ID" || true
+}
+
+walk() {
+  local udid=$1 variant=$2 lang=$3 locale=$4 status=0
+  mkdir -p "$SHOTS/$variant" "$RESULTS"
+  set +e
+  TEST_RUNNER_NODRIVE_LANG="$lang" TEST_RUNNER_NODRIVE_LOCALE="$locale" TEST_RUNNER_NODRIVE_VARIANT="$variant" \
+  TEST_RUNNER_NODRIVE_SHOTS_DIR="$SHOTS" TEST_RUNNER_NODRIVE_SIGN_IN="${SIGN_IN:-1}" \
+    xcodebuild test-without-building \
+      -xctestrun "$XCTESTRUN" \
+      -destination "id=$udid" \
+      -only-testing:NextcloudUITests/NoDriveScreenshotUITests \
+      -parallel-testing-enabled NO \
+      -resultBundlePath "$RESULTS/ui-$variant.xcresult" \
+      > "$RESULTS/ui-$variant.log" 2>&1
+  status=$?
+  set -e
+  xcbeautify --renderer github-actions < "$RESULTS/ui-$variant.log" || true
+  xcrun xcresulttool get test-results summary --path "$RESULTS/ui-$variant.xcresult" \
+    > "$RESULTS/ui-$variant-summary.json" 2>/dev/null || true
+  xcrun simctl spawn "$udid" log show --last 6m --style compact \
+    --predicate 'process == "Nextcloud" OR process == "Share"' 2>/dev/null | tail -n 4000 > "$RESULTS/ui-$variant-app.log" || true
+  echo "walk $variant: xcodebuild exit $status; files: $(ls "$SHOTS/$variant" | tr '\n' ' ')"
+  return $status
+}
+
+cmd=${1:-}; shift || true
+case "$cmd" in
+  check-tools) check_tools "$@" ;;
+  make-certs) make_certs "$@" ;;
+  capture-start) capture_start "$@" ;;
+  capture-stop) capture_stop "$@" ;;
+  device) device ;;
+  prepare) prepare "$@" ;;
+  launch) launch "$@" ;;
+  walk) walk "$@" ;;
+  *) echo "usage: see the header of $0" >&2; exit 2 ;;
+esac

@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # NoDrive for iOS: branding gate, simulator build of the app and all extensions,
-# unit tests on the simulator. No secrets, no signing (CODE_SIGNING_ALLOWED=NO).
+# unit tests on the simulator, and a simulator job that installs, launches and
+# screenshots every screen reachable before sign-in (en, de, ar, dark) with a
+# network check. No secrets, no signing (CODE_SIGNING_ALLOWED=NO), and no contact
+# with the real drive.nourax.org (a local stand-in answers for it in the screens job).
 # Upstream's workflows are kept for reference in .github/upstream-workflows/.
 
 name: iOS
@@ -13,9 +16,15 @@ on:
       - main
       - platform/ios
   workflow_dispatch:
+    inputs:
+      products_run_id:
+        description: 'Run only the screens job with the build products of this earlier run (empty: full build)'
+        required: false
+        default: ''
+        type: string
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 permissions:
@@ -65,6 +74,7 @@ jobs:
   ios:
     name: Build and unit tests (iOS Simulator)
     needs: branding
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.products_run_id == '' }}
     runs-on: xcode-27
     timeout-minutes: 150
     steps:
@@ -165,6 +175,24 @@ jobs:
           compression-level: 0
           retention-days: 14
 
+      - name: Pack build products for the screens job (app, UI-test runner, .xctestrun)
+        # tar keeps symlinks and file modes (an artifact zip does not)
+        run: |
+          cd DerivedData/Build
+          du -sh Products/Debug-iphonesimulator/* 2>/dev/null | sort -h | tail -n 20
+          tar --exclude='*.swiftmodule' --exclude='*.dSYM' --exclude='*.a' --exclude='include' \
+            -czf "$GITHUB_WORKSPACE/build-products.tar.gz" Products/*.xctestrun Products/Debug-iphonesimulator
+          ls -l "$GITHUB_WORKSPACE/build-products.tar.gz"
+
+      - name: Upload build products (screens job input, kept 3 days)
+        uses: actions/upload-artifact@v7
+        with:
+          name: nodrive-ios-build-products
+          path: build-products.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
       - name: Inspect built products (ids, names, URL schemes, entitlements, Nextcloud links)
         run: |
           APP=package/NoDrive.app   # the shipped artifact (test bundles removed)
@@ -215,6 +243,179 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: nodrive-ios-test-results
+          path: results/
+          if-no-files-found: warn
+          retention-days: 14
+
+  screens:
+    name: Simulator screens (install, launch, screenshots, network)
+    needs: [branding, ios]
+    # also after a unit-test failure (the build products exist), or with products of an earlier run
+    if: ${{ !cancelled() && needs.branding.result == 'success' && (needs.ios.result == 'success' || needs.ios.result == 'failure' || (needs.ios.result == 'skipped' && inputs.products_run_id != '')) }}
+    runs-on: xcode-27
+    timeout-minutes: 80
+    permissions:
+      contents: read
+      actions: read   # download-artifact from an earlier run (products_run_id)
+    env:
+      SHOTS: ${{ github.workspace }}/screenshots
+      RESULTS: ${{ github.workspace }}/results
+      IOS_VERSION: '27.0'
+      SAMPLE_PHOTO: ${{ github.workspace }}/Brand/Custom.xcassets/AppIcon.appiconset/Icon-App-1024x1024@1x.png
+      SIGN_IN: '1'
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install Pillow (screenshot report)
+        run: python -m pip install --disable-pip-version-check pillow
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          xcodebuild -version
+          xcrun simctl list runtimes
+
+      - name: Check the simctl, xcodebuild and xcresulttool options used below
+        run: bash tools/ci/screens.sh check-tools "$RESULTS/tool-help"
+
+      - name: Download build products (this run)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.products_run_id == '' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: nodrive-ios-build-products
+          path: artifacts/products
+
+      - name: Download simulator app (this run)
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.products_run_id == '' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: nodrive-ios-simulator-app
+          path: artifacts/app
+
+      - name: Download build products (earlier run)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.products_run_id != '' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: nodrive-ios-build-products
+          path: artifacts/products
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.products_run_id }}
+
+      - name: Download simulator app (earlier run)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.products_run_id != '' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: nodrive-ios-simulator-app
+          path: artifacts/app
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.products_run_id }}
+
+      - name: Unpack app and build products
+        run: |
+          mkdir -p products app "$SHOTS" "$RESULTS"
+          tar -xzf artifacts/products/build-products.tar.gz -C products
+          ditto -x -k artifacts/app/nodrive-ios-simulator-app.zip app
+          ls products/Products products/Products/Debug-iphonesimulator app
+          XCTESTRUN=$(find "$GITHUB_WORKSPACE/products/Products" -maxdepth 1 -name "*.xctestrun" | head -n 1)
+          echo "xctestrun: $XCTESTRUN"
+          echo "XCTESTRUN=$XCTESTRUN" >> "$GITHUB_ENV"
+          plutil -p "$XCTESTRUN" | grep -E '"(BlueprintName|TestHostPath|UITargetAppPath|ProductModuleName)"' | sort -u
+
+      - name: Start DNS capture on all interfaces
+        run: bash tools/ci/screens.sh capture-start "$RESULTS"
+
+      - name: Start the local stand-in for drive.nourax.org (the real server is never contacted)
+        # drive.nourax.org -> 127.0.0.1/::1 in /etc/hosts (the simulator resolves through the Mac),
+        # a throw-away root that only this simulator trusts, and tools/ci/drive-stand-in.py on :443
+        run: |
+          SI="$RUNNER_TEMP/stand-in"
+          bash tools/ci/screens.sh make-certs "$SI"
+          echo "CA_CER=$SI/ca.cer" >> "$GITHUB_ENV"
+          cp "$SI/ca.pem" "$RESULTS/stand-in-root.pem"
+          printf '127.0.0.1 drive.nourax.org\n::1 drive.nourax.org\n' | sudo tee -a /etc/hosts
+          sudo dscacheutil -flushcache
+          sudo killall -HUP mDNSResponder || true
+          sudo nohup "$(command -v python3)" tools/ci/drive-stand-in.py --cert "$SI/chain.pem" --key "$SI/leaf.key" \
+            --log "$RESULTS/stand-in.jsonl" > "$RESULTS/stand-in.out" 2>&1 &
+          for i in $(seq 1 30); do
+            curl -fsS --cacert "$SI/ca.pem" -o /dev/null https://drive.nourax.org/status.php && break
+            sleep 0.5
+          done
+          curl -fsS --cacert "$SI/ca.pem" https://drive.nourax.org/status.php; echo
+          dscacheutil -q host -a name drive.nourax.org
+          security verify-cert -c "$SI/leaf.pem" -r "$SI/ca.pem" -p ssl -s drive.nourax.org \
+            || echo "(report only; options: results/tool-help/security-verify-cert.txt)"
+
+      - name: Pick the simulator (iPhone 17, iOS 27.0)
+        id: sim
+        run: |
+          UDID=$(bash tools/ci/screens.sh device)
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl list devices | grep "$UDID"
+
+      - name: simctl install, launch and screenshots (shipped NoDrive.app)
+        run: |
+          bash tools/ci/screens.sh prepare "$UDID" en en_US light
+          bash tools/ci/screens.sh launch "$UDID" app/NoDrive.app "$SHOTS/simctl" "$RESULTS"
+
+      - name: UI walk, English (en-light)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        run: |
+          bash tools/ci/screens.sh prepare "$UDID" en en_US light
+          bash tools/ci/screens.sh walk "$UDID" en-light en en_US
+
+      - name: UI walk, German (de-light)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        run: |
+          bash tools/ci/screens.sh prepare "$UDID" de de_DE light
+          bash tools/ci/screens.sh walk "$UDID" de-light de de_DE
+
+      - name: UI walk, Arabic right-to-left (ar-light)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        run: |
+          bash tools/ci/screens.sh prepare "$UDID" ar ar_SA light
+          bash tools/ci/screens.sh walk "$UDID" ar-light ar ar_SA
+
+      - name: UI walk, English dark mode (en-dark)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        run: |
+          bash tools/ci/screens.sh prepare "$UDID" en en_US dark
+          bash tools/ci/screens.sh walk "$UDID" en-dark en en_US
+
+      - name: Network gate (no Nextcloud hosts; sign-in opened drive.nourax.org)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        run: |
+          bash tools/ci/screens.sh capture-stop "$RESULTS"
+          python3 tools/ci/network-gate.py --dns-text "$RESULTS/dns.txt" --stand-in-log "$RESULTS/stand-in.jsonl" \
+            --expect-sign-ins 4 --control www.apple.com --json "$RESULTS/network.json"
+
+      - name: Screenshot report (Nourax colours, no Nextcloud text) and docs copies
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        run: |
+          python3 tools/ci/screens-report.py --shots "$SHOTS" --results "$RESULTS" \
+            --variants en-light de-light ar-light en-dark \
+            --docs-out "$GITHUB_WORKSPACE/screenshots-docs" --json "$RESULTS/screens-report.json"
+
+      - name: Upload screenshots
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: nodrive-ios-screenshots
+          path: |
+            screenshots/
+            screenshots-docs/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload screens results (logs, xcresult, network capture summary)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: nodrive-ios-screens-results
           path: results/
           if-no-files-found: warn
           retention-days: 14

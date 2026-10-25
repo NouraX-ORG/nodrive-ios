@@ -621,6 +621,10 @@ def intro_swift(st):
               '        buttonLogin.accessibilityIdentifier = "nodriveLoginButton"\n'
               '        buttonSignUp.isHidden = NCBrandOptions.shared.linkloginPreferredProviders.isEmpty\n'
               '        buttonHost.isHidden = NCBrandOptions.shared.linkLoginHost.isEmpty\n')
+    # The screenshot UI test finds each slide by this identifier (works the same in RTL languages).
+    insert_after(st, rel,
+              '        cell.imageView.image = images[indexPath.row]\n',
+              '        cell.accessibilityIdentifier = "nodriveIntroSlide\\(indexPath.row + 1)" // NoDrive: for the screenshot UI test\n')
     sub_exact(st, rel,
               '    @IBAction func login(_ sender: Any) {\n'
               '        if let viewController',

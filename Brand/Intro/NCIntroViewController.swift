@@ -142,6 +142,7 @@ class NCIntroViewController: UIViewController, UICollectionViewDataSource, UICol
         cell.titleLabel.textColor = textColor
         cell.titleLabel.text = titles[indexPath.row]
         cell.imageView.image = images[indexPath.row]
+        cell.accessibilityIdentifier = "nodriveIntroSlide\(indexPath.row + 1)" // NoDrive: for the screenshot UI test
         return cell
     }
 
