@@ -39,6 +39,8 @@ check_tools() {
   need "$out/simctl-ui.txt" appearance
   need "$out/simctl-status_bar.txt" override --time --batteryState --batteryLevel --cellularBars --wifiBars
   need "$out/simctl-io.txt" screenshot --type
+  grep -q -- "recordVideo" "$out/simctl-io.txt" && echo "ok   recordVideo (launch-screen frames; optional)" || echo "note: no recordVideo"
+  grep -q -- "--codec" "$out/simctl-io.txt" && echo "ok   --codec" || echo "note: no --codec"
   need "$out/simctl-bootstatus.txt" -b
   need "$out/simctl-privacy.txt" reset
   need "$out/simctl-get_app_container.txt" data
@@ -157,6 +159,24 @@ prepare_first() {   # once per job: a clean simulator that trusts the CI root
   echo "prepared $udid (erased, CI root trusted)"
 }
 
+mac_cpu() {   # busy share of all CPUs (user + sys, %), from the second of two top samples
+  top -l 2 -n 0 -s 1 | awk '/^CPU usage/ { u = $3; s = $5 } END { printf "%d", u + s }'
+}
+
+settle_cpu() {   # after a boot the simulator is busy for a while; NextcloudKit's background-QoS
+  # reply queue starves under that load. Wait (up to about 180 s) for 3 calm readings in a row.
+  local calm=0 reading=0 waited=0
+  while [ "$waited" -lt 180 ]; do
+    reading=$(mac_cpu)
+    if [ "$reading" -lt 45 ]; then calm=$((calm + 1)); else calm=0; fi
+    if [ "$calm" -ge 3 ]; then echo "simulator settled after ${waited} s (Mac CPU ${reading} %)"; return 0; fi
+    sleep 4
+    waited=$((waited + 6))
+  done
+  echo "still busy after ${waited} s (Mac CPU ${reading} %); top processes:"
+  top -l 2 -n 8 -o cpu -stats pid,command,cpu | tail -n 9
+}
+
 switch() {   # per variant, without an erase (much faster than a first boot)
   local udid=$1 lang=$2 locale=$3 appearance=$4
   xcrun simctl terminate "$udid" com.apple.mobileslideshow > /dev/null 2>&1 || true
@@ -170,7 +190,7 @@ switch() {   # per variant, without an erase (much faster than a first boot)
   boot_wait "$udid"
   xcrun simctl ui "$udid" appearance "$appearance"
   xcrun simctl status_bar "$udid" override --time 9:41 --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3
-  sleep 10
+  settle_cpu
   echo "switched $udid: language $(xcrun simctl spawn "$udid" defaults read "Apple Global Domain" AppleLanguages | tr -d ' \n'), locale $locale, $appearance"
 }
 
@@ -189,20 +209,27 @@ launch() {
   mkdir -p "$shots" "$res"
   xcrun simctl install "$udid" "$app"
   echo "installed: $(xcrun simctl get_app_container "$udid" "$APP_ID" app)"
+  # The launch screen shows for less time than one simctl screenshot takes, so record the screen
+  # around the launch; tools/ci/video-frames.swift cuts frames, the report picks the launch screen.
+  xcrun simctl io "$udid" recordVideo --codec=h264 --force "$res/launch.mp4" > "$res/record-video.log" 2>&1 &
+  local rec=$!
+  for _ in $(seq 1 20); do grep -qi "recording started" "$res/record-video.log" && break; sleep 0.5; done
   out=$(xcrun simctl launch "$udid" "$APP_ID" -AppleLanguages "(en)" -AppleLocale en_US)
   echo "simctl launch: $out"
   pid=${out##*: }
-  # the launch screen shows only briefly: take frames as fast as simctl allows; the report picks it
-  mkdir -p "$res/launch-burst"
-  for i in $(seq -w 1 14); do
-    xcrun simctl io "$udid" screenshot --type=png "$res/launch-burst/frame-$i.png" > /dev/null 2>&1 || true
-  done
-  sleep 3
+  sleep 7
+  kill -INT "$rec" > /dev/null 2>&1 || true
+  wait "$rec" 2>/dev/null || true
   xcrun simctl io "$udid" screenshot --type=png "$shots/02-launch-8s.png"
   alive "$pid" "8 s after launch"
-  sleep 22
-  xcrun simctl io "$udid" screenshot --type=png "$shots/03-launch-30s.png"
-  alive "$pid" "30 s after launch"
+  if [ -s "$res/launch.mp4" ]; then
+    xcrun swift "$(dirname "$0")/video-frames.swift" "$res/launch.mp4" "$res/launch-frames" 8 0.1 || true
+  else
+    echo "note: no screen recording ($(tr '\n' ' ' < "$res/record-video.log"))"
+  fi
+  sleep 5
+  xcrun simctl io "$udid" screenshot --type=png "$shots/03-launch-later.png"
+  alive "$pid" "at the end (about 30-60 s after launch)"
   xcrun simctl spawn "$udid" launchctl list | grep -F "$APP_ID" || true
   xcrun simctl spawn "$udid" log show --last 2m --style compact --predicate 'process == "Nextcloud"' \
     > "$res/simctl-launch-app.log" 2>&1 || true
@@ -218,7 +245,9 @@ walk() {
   (
     for _ in $(seq 1 900); do [ -f "$SHOTS/$variant/signin-started" ] && break; sleep 1; done
     sleep 25
-    pid=$(pgrep -f '/Nextcloud\.app/Nextcloud$' | head -n 1)
+    top -l 2 -n 15 -o cpu -stats pid,command,cpu,threads > "$RESULTS/ui-$variant-top-25s.txt" 2>&1 || true
+    pid=$(pgrep -f '/Nextcloud\.app/Nextcloud( |$)' | head -n 1)
+    echo "app pid at sign-in +25 s: ${pid:-none}" >> "$RESULTS/ui-$variant-top-25s.txt"
     if [ -n "$pid" ]; then
       sudo sample "$pid" 5 -file "$RESULTS/ui-$variant-sample-25s.txt" > /dev/null 2>&1 || true
     fi

@@ -116,32 +116,43 @@ final class NoDriveScreenshotUITests: XCTestCase {
         }
         let started = Date()
         login.tap()
-        // Leave the app alone for a moment: accessibility queries run on its main thread, where the
-        // network replies are handled too (run 40167283812: 19-92 s from status.php to the Login Flow
-        // request while the test polled every second).
-        Thread.sleep(forTimeInterval: 20)
-        // The browser's address field shows the server; the page itself is not in the accessibility tree.
-        let address = NSPredicate(format: "identifier == 'URL' AND value CONTAINS[c] 'drive.nourax.org'")
+        // NextcloudKit hands every server reply to a queue with background QoS
+        // (com.nextcloud.nextcloudkit.backgroundqueue). On the busy CI simulator that queue starves,
+        // and every accessibility query of this test adds load (runs 40167283812/40175553963:
+        // 9-92 s, sometimes minutes, between status.php and the Login Flow request).
+        // So: leave the app alone for 30 s, then look only every 4 s, with cheap queries.
+        Thread.sleep(forTimeInterval: 30)
+        let address = app.buttons.matching(identifier: "URL").firstMatch          // browser address field
+        let addressInBrowser = safariViewService.buttons.matching(identifier: "URL").firstMatch
         let loaded = NSPredicate(format: "identifier BEGINSWITH 'BrowserView?IsPageLoaded=true'")
         var browserOpen = false
         var pageLoaded = false
         var openedAfter = -1.0
-        let deadline = Date().addingTimeInterval(150)
+        var shownAddress = ""
+        let deadline = Date().addingTimeInterval(300)
         while Date() < deadline, !pageLoaded {
             answerPrompts(in: app)
-            let trees = roots(app)
-            if !browserOpen, trees.contains(where: { $0.descendants(matching: .any).matching(address).firstMatch.exists }) {
-                browserOpen = true
-                openedAfter = Date().timeIntervalSince(started)
+            if !browserOpen {
+                var field: XCUIElement?
+                if address.exists {
+                    field = address
+                } else if roots(app).count > 1, addressInBrowser.exists {
+                    field = addressInBrowser
+                }
+                if let field, let value = field.value as? String, value.contains("drive.nourax.org") {
+                    browserOpen = true
+                    openedAfter = Date().timeIntervalSince(started)
+                    shownAddress = value
+                }
             }
             if browserOpen {
-                pageLoaded = trees.contains { $0.descendants(matching: .any).matching(loaded).firstMatch.exists }
+                pageLoaded = roots(app).contains { $0.otherElements.matching(loaded).firstMatch.exists }
                 if !pageLoaded, Date().timeIntervalSince(started) - openedAfter > 40 {
                     break   // the browser is open at drive.nourax.org; the stand-in log shows the page request
                 }
             }
             if !pageLoaded {
-                Thread.sleep(forTimeInterval: 1)
+                Thread.sleep(forTimeInterval: 4)
             }
         }
         Thread.sleep(forTimeInterval: 1.5)   // let the page render
@@ -152,7 +163,7 @@ final class NoDriveScreenshotUITests: XCTestCase {
         }
         XCTAssertTrue(browserOpen, "tapping Log in did not open the browser at drive.nourax.org")
         XCTAssertEqual(app.textFields.count, 0, "a server-address field appeared after tapping Log in")
-        record("sign-in", ["browser_open": browserOpen, "page_loaded": pageLoaded,
+        record("sign-in", ["browser_open": browserOpen, "page_loaded": pageLoaded, "address_field": shownAddress,
                            "seconds_to_browser": Int(openedAfter.rounded()),
                            "seconds_total": Int(Date().timeIntervalSince(started).rounded())])
 
@@ -194,7 +205,9 @@ final class NoDriveScreenshotUITests: XCTestCase {
                 shareReady = true
                 break
             }
-            if let photo = [photoQuery.firstMatch, photos.collectionViews.cells.firstMatch].first(where: { $0.exists && $0.isHittable }),
+            // Grid cells carry the identifier PXGGridLayout-Info in every language.
+            let gridPhoto = photos.images.matching(identifier: "PXGGridLayout-Info").firstMatch
+            if let photo = [gridPhoto, photoQuery.firstMatch].first(where: { $0.exists && $0.isHittable }),
                photoTaps < 3 {
                 photo.tap()
                 photoTaps += 1

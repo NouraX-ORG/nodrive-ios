@@ -146,22 +146,38 @@ def main():
                 v['walk'] = [json.loads(line) for line in f if line.strip()]
         report['variants'][variant] = v
 
-    # The launch screen (Brand/LaunchScreen.storyboard: cobalt, logo tile, no button) from the burst of
-    # frames taken right after `simctl launch`: the first frame that is cobalt at the edges and has no
-    # white "Log in" button (the intro has one at about 76 % of the height).
-    burst = sorted(glob.glob(os.path.join(args.results, 'launch-burst', '*.png')))
+    # The launch screen (Brand/LaunchScreen.storyboard: cobalt, logo tile in the middle, no button)
+    # from the frames of the screen recording around `simctl launch` (tools/ci/video-frames.swift).
+    # Video colours shift a little (H.264), so the tolerance is wider. A frame counts when the edges
+    # are cobalt, the middle (logo tile) is light, and there is no white "Log in" button at 76 %.
+    # The middle frame of the first such run is kept, away from the fades.
+    frames = sorted(glob.glob(os.path.join(args.results, 'launch-frames', '*.png')))
     report['launch_screen'] = None
-    for p in burst:
-        info = check_colours(p)
-        rgb = Image.open(p).convert('RGB')
+
+    def is_launch(path):
+        rgb = Image.open(path).convert('RGB')
         w, h = rgb.size
+        edges = [rgb.getpixel((int(w * x), int(h * y))) for x in (0.04, 0.96) for y in (0.2, 0.45, 0.7)]
+        cobalt = sum(1 for px in edges if any(close(px, c, 28) for c in COBALT.values()))
+        # the 150 pt logo tile sits in the middle: some near-white pixels in a grid around the centre
+        grid = [rgb.getpixel((int(w * (0.5 + dx / 40)), int(h / 2 + w * dy / 40)))
+                for dx in range(-6, 7, 2) for dy in range(-6, 7, 2)]
+        light = sum(1 for px in grid if min(px) > 200)
         button = rgb.getpixel((w // 2, int(h * 0.76)))
-        if info['cobalt_matches'] >= 8 and any(close(button, c) for c in COBALT.values()):
-            os.makedirs(os.path.join(args.shots, 'simctl'), exist_ok=True)
-            shutil.copy2(p, os.path.join(args.shots, 'simctl', '01-launch-screen.png'))
-            report['launch_screen'] = os.path.basename(p)
+        return cobalt >= 5 and light >= 8 and any(close(button, c, 28) for c in COBALT.values())
+
+    run = []
+    for p in frames:
+        if is_launch(p):
+            run.append(p)
+        elif run:
             break
-    print(f'launch screen: {report["launch_screen"] or "not caught"} ({len(burst)} frames)')
+    if run:
+        pick = run[len(run) // 2]
+        os.makedirs(os.path.join(args.shots, 'simctl'), exist_ok=True)
+        shutil.copy2(pick, os.path.join(args.shots, 'simctl', '01-launch-screen.png'))
+        report['launch_screen'] = f'{os.path.basename(pick)} ({len(run)} frames at 0.1 s show it)'
+    print(f'launch screen: {report["launch_screen"] or "not caught"} ({len(frames)} video frames)')
 
     for p in sorted(glob.glob(os.path.join(args.shots, 'simctl', '*.png'))):
         report['simctl'][os.path.splitext(os.path.basename(p))[0]] = check_colours(p)
