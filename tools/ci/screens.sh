@@ -51,6 +51,9 @@ check_tools() {
   tcpdump --version > "$out/tcpdump-version.txt" 2>&1 || true
   head -n 2 "$out/tcpdump-version.txt"
   security verify-cert -h > "$out/security-verify-cert.txt" 2>&1 || true
+  sample > "$out/sample-usage.txt" 2>&1 || true   # diagnostics only (walk), so report, do not fail
+  grep -q -- "-file" "$out/sample-usage.txt" && echo "ok   sample -file" || echo "note: sample has no -file option"
+  command -v pgrep
   openssl version
 }
 
@@ -209,6 +212,18 @@ launch() {
 walk() {
   local udid=$1 variant=$2 lang=$3 locale=$4 status=0
   mkdir -p "$SHOTS/$variant" "$RESULTS"
+  # Diagnostics for the sign-in: 25 s after the test taps "Log in" (it writes signin-started),
+  # sample the app's threads for 5 s, so a stall between status.php and the Login Flow request
+  # shows where the app waits.
+  (
+    for _ in $(seq 1 900); do [ -f "$SHOTS/$variant/signin-started" ] && break; sleep 1; done
+    sleep 25
+    pid=$(pgrep -f '/Nextcloud\.app/Nextcloud$' | head -n 1)
+    if [ -n "$pid" ]; then
+      sudo sample "$pid" 5 -file "$RESULTS/ui-$variant-sample-25s.txt" > /dev/null 2>&1 || true
+    fi
+  ) &
+  local watcher=$!
   set +e
   TEST_RUNNER_NODRIVE_LANG="$lang" TEST_RUNNER_NODRIVE_LOCALE="$locale" TEST_RUNNER_NODRIVE_VARIANT="$variant" \
   TEST_RUNNER_NODRIVE_SHOTS_DIR="$SHOTS" TEST_RUNNER_NODRIVE_SIGN_IN="${SIGN_IN:-1}" \
@@ -221,15 +236,21 @@ walk() {
       > "$RESULTS/ui-$variant.log" 2>&1
   status=$?
   set -e
+  kill "$watcher" > /dev/null 2>&1 || true
   xcbeautify --renderer github-actions < "$RESULTS/ui-$variant.log" || true
   if ! grep -Eq "Executed [1-9][0-9]* tests?" "$RESULTS/ui-$variant.log"; then
     echo "walk $variant: no test ran (check -only-testing and the .xctestrun)"
     status=1
   fi
-  local data
-  data=$(xcrun simctl get_app_container "$udid" "$APP_ID" data 2>/dev/null || true)
-  if [ -n "$data" ] && [ -f "$data/Documents/Logs/log.txt" ]; then
-    cp "$data/Documents/Logs/log.txt" "$RESULTS/ui-$variant-nextcloudkit.log"   # NextcloudKit's own request log
+  # NextcloudKit's own log (request start/end), in the app group: NCPreferences.sharedLogDirectory
+  local group
+  group=$(xcrun simctl get_app_container "$udid" "$APP_ID" "group.$APP_ID" 2>/dev/null || true)
+  if [ -n "$group" ] && [ -d "$group/Logs" ]; then
+    for f in "$group"/Logs/*; do
+      [ -f "$f" ] && cp "$f" "$RESULTS/ui-$variant-nextcloudkit-$(basename "$f")"
+    done
+  else
+    echo "walk $variant: no NextcloudKit log folder in the app group ($group)"
   fi
   xcrun xcresulttool get test-results summary --path "$RESULTS/ui-$variant.xcresult" \
     > "$RESULTS/ui-$variant-summary.json" 2>/dev/null || true

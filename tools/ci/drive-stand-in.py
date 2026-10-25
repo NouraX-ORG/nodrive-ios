@@ -82,6 +82,7 @@ class Handler(BaseHTTPRequestHandler):
             'user_agent': self.headers.get('User-Agent', ''),
             'sni': getattr(self.connection, 'nodrive_sni', None),
             'status': status,
+            'conn': self.client_address[1] if len(self.client_address) > 1 else None,
         }
         if extra:
             entry.update(extra)
@@ -153,10 +154,17 @@ class DualStackTLSServer(ThreadingHTTPServer):
             f.write(line + '\n')
 
     def finish_request(self, request, client_address):
+        # Connection timing: accepted -> TLS done -> requests (same "conn" = client port). A long gap
+        # before "accepted" is on the client side; a long handshake is the client's certificate check.
+        conn = client_address[1] if len(client_address) > 1 else None
+        accepted = time.time()
+        self.write_log({'t': round(accepted, 3), 'event': 'connection-accepted', 'conn': conn})
         try:
             request = self.context.wrap_socket(request, server_side=True)
+            self.write_log({'t': round(time.time(), 3), 'event': 'tls-ok', 'conn': conn,
+                            'handshake_s': round(time.time() - accepted, 3)})
         except (ssl.SSLError, OSError) as e:
-            self.write_log({'t': round(time.time(), 3), 'event': 'tls-handshake-failed',
+            self.write_log({'t': round(time.time(), 3), 'event': 'tls-handshake-failed', 'conn': conn,
                             'client': str(client_address[0]), 'error': str(e)})
             try:
                 request.close()

@@ -110,6 +110,10 @@ final class NoDriveScreenshotUITests: XCTestCase {
     /// Taps "Log in": the app asks drive.nourax.org (here: the CI stand-in) for a Login Flow v2
     /// and opens the browser at the login page it returns. No server-address screen in between.
     private func signIn(app: XCUIApplication, login: XCUIElement) {
+        // Tells the CI host when to sample the app (tools/ci/screens.sh walk).
+        if let dir = outputDir {
+            append("\(Date().timeIntervalSince1970)\n", to: dir.appendingPathComponent("signin-started"))
+        }
         let started = Date()
         login.tap()
         // Leave the app alone for a moment: accessibility queries run on its main thread, where the
