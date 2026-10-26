@@ -12,7 +12,10 @@ With NoDrive you can:
 - share files with public links (with expiry date and password);
 - keep files offline;
 - upload new photos automatically;
-- reach your files from the Files app, the share sheet and widgets.
+- reach your files from the Files app, the share sheet and widgets;
+- open your Workspace apps (Mail, Calendar, Talk ...) from the side menu: the page opens inside NoDrive, already
+  signed in. The apps come from the server's own list. Links in the notification list that point to your
+  Workspace open there too. Your sign-in is sent only to your own server (`drive.nourax.org`), never to other sites.
 
 Sign-in happens in the browser ("Log in with Nourax"). There is no server address to type in.
 
@@ -103,7 +106,7 @@ The same run also has `nodrive-ios-test-results` (unit tests, build checks),
 | [docs/build.md](docs/build.md) | Building in Xcode, on the command line and in CI; running on your own iPhone |
 | [docs/testing.md](docs/testing.md) | Test results (CI and owner tests) and the screenshot index |
 | [docs/upstream-updates.md](docs/upstream-updates.md) | How to merge a new Nextcloud iOS release |
-| [docs/screenshots/ios/](docs/screenshots/ios/) | Screenshots of every screen before sign-in (English, German, Arabic, dark mode) |
+| [docs/screenshots/ios/](docs/screenshots/ios/) | Screenshots of every screen before sign-in (English, German, Arabic, dark mode) and of the Workspace apps menu (`workspace-light/`, `workspace-dark/`) |
 
 ## Branding tools
 

@@ -230,6 +230,9 @@ python3 tools/rebrand.py --root ../some/checkout                  # work on anot
   have balanced braces, unique object ids and no new dangling references.
 - **Glyph PDFs:** only the colour operators in the drawing streams change; the PDF is recompressed
   and its cross-reference table rebuilt.
+- **Our own source folder:** `iOSClient/Workspace/` (the Workspace apps feature: apps list, origin rules,
+  session hand-off, in-app web view) and its test files are added to the Nextcloud app target and the test
+  targets by the project-file step (`APP_SOURCE_FOLDERS`, `TEST_FILES`), with fixed ids from a hash of the path.
 - Images are **not** made here; that is `make-icons.py`.
 
 ### `tools/make-icons.py`
@@ -295,3 +298,5 @@ python3 tools/check-branding.py --json hits.json   # write all hits as JSON
 | `network-gate.py` | screens | Fails on any DNS query for a Nextcloud, ownCloud, Firebase or Crashlytics host; checks that sign-in opened `drive.nourax.org` and the user agent |
 | `screens-report.py` | screens | Checks every screenshot for the Nourax cobalt, no Nextcloud blue and no "Nextcloud" text; makes the copies for `docs/screenshots/ios/` |
 | `video-frames.swift` | screens | Takes frames from the launch recording |
+| `workspace-check.py` | branding, screens | Reads the stand-in's request log: the app password only went to the account's own server on the app's own requests, the other host got no credential; `--debug-only` checks that the test account exists only in Debug builds |
+| `server-app-login.sh`, `server_login_check.py` | server login | Starts a throwaway Nextcloud 35 in Docker and proves the web-view sign-in (session cookies from an app password, 304 on the apps list, log-out and revoke behaviour) |

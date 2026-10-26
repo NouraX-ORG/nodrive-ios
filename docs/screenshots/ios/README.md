@@ -36,6 +36,19 @@ Nextcloud blue, no "Nextcloud" in any recorded screen text).
 | `simctl/02-launch-8s.png` | 8 s after `simctl launch`, with the notification prompt. |
 | `simctl/03-launch-later.png` | A few seconds later: the same prompt over the intro (NoDrive is still running). |
 
+Workspace apps (`workspace-light/`, `workspace-dark/`): from run
+[40399328940](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40399328940) on `feature/workspace-apps`
+(commit `0585f7e0f7`), same device and settings. The account and the Workspace pages come from the CI stand-in.
+
+| File | Screen |
+|---|---|
+| `02-workspace-menu.png` | Side menu with the "Apps" section: Dashboard, Mail, Calendar, Talk, Contacts (no Files). |
+| `03-workspace-page.png` | The Mail page open inside NoDrive, already signed in (page text `signed-in:Mail`). |
+| `04-foreign-link-panel.png` | A link to another host opens in the system browser panel, not in the app page. |
+| `05-after-panel.png` | Back in the app page after closing the panel. |
+
+Looked at for Nextcloud's name, logo, colours and links: none.
+
 Notes:
 - CI never contacts the real drive.nourax.org. In the screenshot job, drive.nourax.org points to a
   local stand-in (`tools/ci/drive-stand-in.py`) that answers Login Flow v2 and serves a plain page

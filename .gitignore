@@ -41,3 +41,4 @@ DerivedData
 
 ## Claude Code
 .claude/
+tools/ci/__pycache__/
