@@ -15,6 +15,7 @@ on:
     branches:
       - main
       - platform/ios
+      - feature/workspace-apps
   workflow_dispatch:
     inputs:
       products_run_id:
@@ -70,6 +71,48 @@ jobs:
 
       - name: check-branding.py (no unclassified Nextcloud strings in the source)
         run: python tools/check-branding.py
+
+  server-login:
+    name: Server login (a real Nextcloud 35 in Docker; the app's web view sign-in)
+    needs: branding
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Start the throwaway server (Nextcloud 35.0.2 in Docker, never drive.nourax.org)
+        run: bash tools/ci/server-app-login.sh start
+
+      - name: Install Playwright (WebKit)
+        run: |
+          python -m pip install --disable-pip-version-check playwright==1.55.0
+          python -m playwright install --with-deps webkit
+
+      - name: Check how the app's sign-in works against the real server code
+        run: bash tools/ci/server-app-login.sh check
+
+      - name: Stop the server
+        if: ${{ always() }}
+        run: |
+          bash tools/ci/server-app-login.sh stop
+          rm -f build/server-login/server.env
+
+      - name: Upload the server-login report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: server-login-report
+          path: |
+            build/server-login/report.md
+            build/server-login/status.json
+            build/server-login/navigation-apps-*.json
+            build/server-login/webview-ua-primary.png
+          if-no-files-found: warn
+          retention-days: 14
 
   ios:
     name: Build and unit tests (iOS Simulator)
