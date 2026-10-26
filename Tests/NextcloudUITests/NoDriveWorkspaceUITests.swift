@@ -50,6 +50,8 @@ final class NoDriveWorkspaceUITests: XCTestCase {
         let mail = app.descendants(matching: .any)["sidebarWorkspaceApp-mail"]
         let appeared = waitFor(mail, in: app, timeout: 90)
         XCTAssertTrue(appeared, "the sidebar has no Mail entry (the app list was not read from the server)")
+        // Scroll so that the whole Apps section is in view (the last app is Contacts)
+        scrollSidebar(until: app.descendants(matching: .any)["sidebarWorkspaceApp-contacts"], in: app)
         scrollSidebar(until: mail, in: app)
         Thread.sleep(forTimeInterval: 1)
         let files = app.descendants(matching: .any)["sidebarWorkspaceApp-files"]
@@ -81,8 +83,11 @@ final class NoDriveWorkspaceUITests: XCTestCase {
             foreign.tap()
             let opened = safariViewService.wait(for: .runningForeground, timeout: 60)
             XCTAssertTrue(opened, "the link to another host did not open in the in-app browser panel")
-            Thread.sleep(forTimeInterval: 4)
+            let loaded = safariViewService.staticTexts["Another host"].waitForExistence(timeout: 40)
+            Thread.sleep(forTimeInterval: 2)
             save("04-foreign-link-panel")
+            saveTexts(safariViewService, "04-foreign-link-panel")
+            record("foreign-page", ["loaded": loaded])
             record("foreign", ["panel_opened": opened])
             closeBrowserPanel(app)
             XCTAssertTrue(waitFor(signedIn, in: app, timeout: 30), "the Workspace page is gone after the panel closed")
@@ -105,16 +110,20 @@ final class NoDriveWorkspaceUITests: XCTestCase {
     }
 
     private func closeBrowserPanel(_ app: XCUIApplication) {
-        for root in [safariViewService, app] {
-            let done = root.buttons.matching(NSPredicate(format: "label IN %@ OR identifier IN %@", doneLabels, doneLabels)).firstMatch
-            if done.exists, done.isHittable {
-                done.tap()
-                Thread.sleep(forTimeInterval: 2)
-                return
+        let deadline = Date().addingTimeInterval(20)
+        while Date() < deadline {
+            for root in [safariViewService, app] {
+                let done = root.buttons.matching(NSPredicate(format: "label IN %@ OR identifier IN %@", doneLabels, doneLabels)).firstMatch
+                if done.exists, done.isHittable {
+                    done.tap()
+                    Thread.sleep(forTimeInterval: 2)
+                    return
+                }
             }
+            Thread.sleep(forTimeInterval: 1)
         }
-        // Without a Done button: swipe the panel down
-        app.swipeDown(velocity: .fast)
+        // Without a Done button: the panel's top-left corner
+        safariViewService.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.06)).tap()
         Thread.sleep(forTimeInterval: 2)
     }
 

@@ -15,7 +15,7 @@ For each app password (P: created with a login password; S: without one, like a 
   6  controls: no credentials -> login redirect; wrong app password -> 401 and nothing is signed in
   7  (information) the same page with the Basic header directly
   8  a web "Log out" keeps the app signed in; a revoked app password ends the web session at once
-  9  the web view user agents are not sent to /unsupported (Playwright, WebKit)
+  9  the web view user agents are not sent to /unsupported (Playwright, Chrome)
 Writes a Markdown report (names and status codes only) to <out>/report.md and the step summary.
 """
 import argparse
@@ -234,7 +234,7 @@ def run_token(srv, kind, token, out, container, login_password):
 
 
 def ua_check(port, user, token, out):
-    say('\n## 9. Web view user agents (Playwright, WebKit; /unsupported check)')
+    say('\n## 9. Web view user agents (Playwright with Chrome; /unsupported check)')
     srv = Server(port, user)
     _, _, _, sc = srv.request('GET', '/ocs/v2.php/cloud/user?format=json', basic=token)
     jar, _ = jar_from(sc)
@@ -245,7 +245,12 @@ def ua_check(port, user, token, out):
         return
     results = {}
     with sync_playwright() as p:
-        browser = p.webkit.launch()
+        # The runner's own Chrome: no browser download and no system packages (those took 22 minutes of apt once).
+        # The check is about a JavaScript test of navigator.userAgent, so the engine does not matter.
+        try:
+            browser = p.chromium.launch(channel='chrome')
+        except Exception:  # noqa: BLE001
+            browser = p.chromium.launch()
         for label, ua in (('primary', WEB_UA_PRIMARY), ('fallback', WEB_UA_FALLBACK),
                           ('api-ua (expected: rejected)', API_UA)):
             ctx = browser.new_context(user_agent=ua)
