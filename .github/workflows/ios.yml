@@ -23,6 +23,11 @@ on:
         required: false
         default: ''
         type: string
+      only_workspace:
+        description: 'Screens job: run only the Workspace apps UI test (not the four screenshot walks)'
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
@@ -80,7 +85,7 @@ jobs:
     needs: branding
     # ubuntu-24.04, not ubuntu-latest: Playwright's WebKit does not support ubuntu 26.04 yet
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v7
 
@@ -92,6 +97,8 @@ jobs:
         run: bash tools/ci/server-app-login.sh start
 
       - name: Install Playwright (WebKit)
+        # the operating-system packages come from apt and took 22 minutes once
+        timeout-minutes: 35
         run: |
           python -m pip install --disable-pip-version-check playwright==1.55.0
           python -m playwright install --with-deps webkit
@@ -414,29 +421,31 @@ jobs:
       - name: simctl install, launch and screenshots (shipped NoDrive.app)
         run: |
           bash tools/ci/screens.sh prepare-first "$UDID"
-          bash tools/ci/screens.sh switch "$UDID" en en_US light
-          bash tools/ci/screens.sh launch "$UDID" app/NoDrive.app "$SHOTS/simctl" "$RESULTS"
+          if [ "${{ inputs.only_workspace }}" != "true" ]; then
+            bash tools/ci/screens.sh switch "$UDID" en en_US light
+            bash tools/ci/screens.sh launch "$UDID" app/NoDrive.app "$SHOTS/simctl" "$RESULTS"
+          fi
 
       - name: UI walk, English (en-light)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true }}
         run: |
           bash tools/ci/screens.sh switch "$UDID" en en_US light
           bash tools/ci/screens.sh walk "$UDID" en-light en en_US
 
       - name: UI walk, German (de-light)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true }}
         run: |
           bash tools/ci/screens.sh switch "$UDID" de de_DE light
           bash tools/ci/screens.sh walk "$UDID" de-light de de_DE
 
       - name: UI walk, Arabic right-to-left (ar-light)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true }}
         run: |
           bash tools/ci/screens.sh switch "$UDID" ar ar_SA light
           bash tools/ci/screens.sh walk "$UDID" ar-light ar ar_SA
 
       - name: UI walk, English dark mode (en-dark)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true }}
         run: |
           bash tools/ci/screens.sh switch "$UDID" en en_US dark
           bash tools/ci/screens.sh walk "$UDID" en-dark en en_US
@@ -459,7 +468,7 @@ jobs:
           python3 tools/ci/workspace-check.py "$RESULTS/stand-in.jsonl" --json "$RESULTS/workspace-check.json"
 
       - name: Network gate (no Nextcloud hosts; sign-in opened drive.nourax.org)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true }}
         run: |
           bash tools/ci/screens.sh capture-stop "$RESULTS"
           python3 tools/ci/network-gate.py --dns-text "$RESULTS/dns.txt" --dns-processes "$RESULTS/dns-processes.txt" \
@@ -470,7 +479,7 @@ jobs:
         if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
         run: |
           python3 tools/ci/screens-report.py --shots "$SHOTS" --results "$RESULTS" \
-            --variants en-light de-light ar-light en-dark workspace-light workspace-dark \
+            --variants ${{ inputs.only_workspace == true && 'workspace-light workspace-dark' || 'en-light de-light ar-light en-dark workspace-light workspace-dark' }} \
             --docs-out "$GITHUB_WORKSPACE/screenshots-docs" --json "$RESULTS/screens-report.json"
 
       - name: No throwaway password in any result file

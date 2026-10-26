@@ -266,7 +266,7 @@ class Handler(BaseHTTPRequestHandler):
                                             'quota': {'free': 1 << 30, 'used': 0, 'total': 1 << 30, 'relative': 0, 'quota': -3}}),
                        cookies=self._session_cookies())
             return True
-        if path == '/ocs/v2.php/cloud/capabilities':
+        if path in ('/ocs/v1.php/cloud/capabilities', '/ocs/v2.php/cloud/capabilities'):
             if not self._basic_ok():
                 self._record(401)
                 self._json(401, self._ocs(401, []))

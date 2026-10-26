@@ -15,6 +15,15 @@ final class NCWorkspaceWeb {
 
     private var controllers: [WeakController] = []
 
+    /// Everything a site can keep, except the browsing history: asking for the history makes the system query
+    /// Screen Time, which can stall for minutes (seen in the simulator: 3 minutes per call). The Workspace
+    /// screens never write history, so nothing is missed.
+    static let websiteDataTypes: Set<String> = [
+        WKWebsiteDataTypeCookies, WKWebsiteDataTypeLocalStorage, WKWebsiteDataTypeSessionStorage,
+        WKWebsiteDataTypeIndexedDBDatabases, WKWebsiteDataTypeDiskCache, WKWebsiteDataTypeMemoryCache,
+        WKWebsiteDataTypeServiceWorkerRegistrations, WKWebsiteDataTypeFetchCache
+    ]
+
     func register(_ controller: NCWorkspaceWebViewController) {
         controllers.removeAll { $0.controller == nil }
         controllers.append(WeakController(controller: controller))
@@ -47,7 +56,7 @@ final class NCWorkspaceWeb {
 
         guard let host = URL(string: urlBase)?.host?.lowercased(), !host.isEmpty else { return }
         let store = WKWebsiteDataStore.default()
-        let types = WKWebsiteDataStore.allWebsiteDataTypes()
+        let types = Self.websiteDataTypes
         let records = await store.dataRecords(ofTypes: types)
         // A record's display name is the registrable domain ("nourax.org" for "drive.nourax.org").
         let matching = records.filter { record in
