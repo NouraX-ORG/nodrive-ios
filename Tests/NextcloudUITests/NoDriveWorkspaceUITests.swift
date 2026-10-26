@@ -46,7 +46,15 @@ final class NoDriveWorkspaceUITests: XCTestCase {
         save("01-main-screen")
 
         // 2. The sidebar lists the server's apps, and no entry for Files.
-        sidebarButton.tap()
+        // The bar's buttons move while the avatar loads, so a tap can miss: tap again until the sidebar is open.
+        let sidebarOpen = app.descendants(matching: .any)["sidebarFiles"]
+        for attempt in 1...5 where !sidebarOpen.exists {
+            if sidebarButton.exists, sidebarButton.isHittable {
+                sidebarButton.tap()
+            }
+            record("sidebar-tap", ["attempt": attempt])
+            _ = waitFor(sidebarOpen, in: app, timeout: 10)
+        }
         let mail = app.descendants(matching: .any)["sidebarWorkspaceApp-mail"]
         let appeared = waitFor(mail, in: app, timeout: 90)
         XCTAssertTrue(appeared, "the sidebar has no Mail entry (the app list was not read from the server)")
