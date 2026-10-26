@@ -90,6 +90,7 @@ final class NoDriveWorkspaceUITests: XCTestCase {
             record("foreign-page", ["loaded": loaded])
             record("foreign", ["panel_opened": opened])
             closeBrowserPanel(app)
+            save("05-after-panel")
             XCTAssertTrue(waitFor(signedIn, in: app, timeout: 30), "the Workspace page is gone after the panel closed")
         } else {
             XCTFail("the page has no link to another host")
@@ -114,9 +115,10 @@ final class NoDriveWorkspaceUITests: XCTestCase {
         while Date() < deadline {
             for root in [safariViewService, app] {
                 let done = root.buttons.matching(NSPredicate(format: "label IN %@ OR identifier IN %@", doneLabels, doneLabels)).firstMatch
-                if done.exists, done.isHittable {
-                    done.tap()
-                    Thread.sleep(forTimeInterval: 2)
+                if done.exists {
+                    // The panel's Close button overlaps its address field, so isHittable can be false: tap its centre.
+                    done.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                    Thread.sleep(forTimeInterval: 3)
                     return
                 }
             }
