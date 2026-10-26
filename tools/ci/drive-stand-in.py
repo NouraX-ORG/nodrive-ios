@@ -13,15 +13,35 @@ app's own sign-in code then runs unchanged:
   GET  /login/v2/flow/<token>       -> a plain page that the browser shows
   POST /login/v2/poll, /index.php/login/v2/poll -> 404 (sign-in still pending)
 
-Every request (method, path, Host, User-Agent, TLS server name) is written as one
-JSON line to --log, so CI can prove that tapping "Log in" opened the browser at
-https://drive.nourax.org/login/v2/flow/... and which user agent the app sent.
+Every request (method, path without its query, Host, User-Agent, TLS server name, whether an
+Authorization header came, the names of the cookies) is written as one JSON line to --log, so CI can
+prove that tapping "Log in" opened the browser at https://drive.nourax.org/login/v2/flow/... and which
+user agent the app sent. Header values and cookie values are never logged.
 
-  sudo python3 tools/ci/drive-stand-in.py --cert leaf.pem --key leaf.key --log stand-in.jsonl
+With --workspace it also answers for a signed-in account (NODRIVE_WS_USER and NODRIVE_WS_APP_PASSWORD
+in the environment, never on the command line), like the Nextcloud server 35 does in the parts the
+Workspace apps menu uses (tools/ci/server_login_check.py proves those against the real server code):
+
+  GET  /ocs/v2.php/cloud/user         Basic -> the user, and the session cookies (oc_sessionPassphrase,
+                                      the session cookie sent twice, __Host- same-site cookies, a deletion)
+  GET  /ocs/v2.php/cloud/capabilities, PROPFIND /remote.php/dav/files/<user>/   a minimal account
+  GET  /ocs/v2.php/core/navigation/apps   the app list, ETag and 304 (Basic or session cookies)
+  GET  /apps/<app>/, /index.php/apps/<app>/   a page that says signed-in:<name> only with a valid session
+                                      (the cookie pair of the bootstrap answer), else 302 to /login
+  GET  /login (the text LOGIN), /logout (the text LOGOUT)
+  host foreign.nodrive-ci.test: GET /probe   another host, for the link check
+
+  sudo python3 tools/ci/drive-stand-in.py --cert leaf.pem --key leaf.key --log stand-in.jsonl [--workspace]
 """
 
 import argparse
+import base64
+import hashlib
+import hmac
 import json
+import os
+import re
+import secrets
 import socket
 import ssl
 import sys
@@ -43,6 +63,66 @@ LOGIN_V2 = {
     'poll': {'token': POLL_TOKEN, 'endpoint': f'https://{HOST}/login/v2/poll'},
     'login': f'https://{HOST}/login/v2/flow/{FLOW_TOKEN}',
 }
+FOREIGN_HOST = 'foreign.nodrive-ci.test'
+PASSPHRASE = 'oc_sessionPassphrase'
+SESSION_COOKIE = 'ocstandin01'
+USER_ID = 'citest'
+
+# The navigation list of a Nextcloud server 35 (core/ResponseDefinitions.php, CoreNavigationEntry), as
+# GET /ocs/v2.php/core/navigation/apps?absolute=false returns it, with the entries the app must leave out.
+APPS = [
+    ('dashboard', 'Dashboard', 'dashboard', True), ('files', 'Files', 'files', False),
+    ('mail', 'Mail', 'mail', False), ('calendar', 'Calendar', 'calendar', False),
+    ('spreed', 'Talk', 'spreed', False), ('contacts', 'Contacts', 'contacts', False),
+    ('external_index1', 'Wiki', 'external', False), ('evil', 'Foreign', 'evil', False),
+]
+NAV_ENTRIES = []
+for _i, (_id, _name, _app, _default) in enumerate(APPS, start=1):
+    _entry = {'id': _id, 'order': _i, 'href': f'/apps/{_id}/', 'icon': f'/apps/{_id}/img/app.svg', 'type': 'link',
+              'name': _name, 'app': _app, 'active': False, 'classes': '', 'unread': 0}
+    if _default:
+        _entry['default'] = True
+    if _id == 'evil':
+        _entry['href'] = 'https://evil.example/apps/x/'
+        _entry['icon'] = 'https://evil.example/i.svg'
+    NAV_ENTRIES.append(_entry)
+NAV_BODY = json.dumps({'ocs': {'meta': {'status': 'ok', 'statuscode': 200, 'message': 'OK'}, 'data': NAV_ENTRIES}})
+NAV_ETAG = '"' + hashlib.sha256(NAV_BODY.encode()).hexdigest()[:32] + '"'
+APP_NAMES = {a[0]: a[1] for a in APPS}
+
+FAR = 'Fri, 31-Dec-2100 23:59:59 GMT'
+PAGE_HTML = """<!doctype html>
+<html lang="en"><head data-user="{user}" data-requesttoken="ci-stand-in"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{name} - Nourax Workspace</title>
+<style>
+ body {{ font-family: -apple-system, system-ui, sans-serif; background: #F8FAFC; color: #0F172A; margin: 0; line-height: 1.45; }}
+ header {{ background: #2563EB; color: #fff; padding: 18px 20px; }}
+ header h1 {{ margin: 0; font-size: 22px; }}
+ main {{ padding: 20px; }}
+ .card {{ background: #fff; border: 1px solid #E2E8F0; border-radius: 12px; padding: 14px 16px; margin: 0 0 14px; }}
+ a {{ color: #2563EB; }}
+ @media (prefers-color-scheme: dark) {{
+   body {{ background: #0B1220; color: #F8FAFC; }} .card {{ background: #0F172A; border-color: #1E293B; }}
+   a {{ color: #60A5FA; }} }}
+</style></head>
+<body><header><h1>{name}</h1></header>
+<main>
+<div class="card"><p>signed-in:{name}</p></div>
+<div class="card"><p>Nourax Workspace (CI stand-in for the real server)</p>
+<p><a href="https://{foreign}/probe">Open the foreign test site</a></p></div>
+</main></body></html>
+"""
+SIMPLE_HTML = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{t}</title></head><body><h1>{t}</h1></body></html>'
+PROPFIND_BODY = """<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
+<d:response><d:href>/remote.php/dav/files/{user}/</d:href><d:propstat><d:prop>
+<d:getlastmodified>Mon, 26 Oct 2026 09:00:00 GMT</d:getlastmodified><d:resourcetype><d:collection/></d:resourcetype>
+<d:getetag>"ci0"</d:getetag><oc:fileid>00000001occi</oc:fileid><oc:id>00000001occi</oc:id><oc:permissions>RGDNVCK</oc:permissions>
+<oc:size>0</oc:size><d:quota-used-bytes>0</d:quota-used-bytes><d:quota-available-bytes>-3</d:quota-available-bytes>
+<oc:owner-id>{user}</oc:owner-id><oc:owner-display-name>Demo User</oc:owner-display-name>
+</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>
+"""
 FLOW_PAGE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -73,33 +153,174 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):   # keep stderr quiet; we log JSON lines
         pass
 
+    # --- what a request carries (names and facts only; values are never logged) -------------------------
+    def _cookies(self):
+        jar = {}
+        for part in (self.headers.get('Cookie') or '').split(';'):
+            name, _, value = part.strip().partition('=')
+            if name:
+                jar[name] = value
+        return jar
+
+    def _session_id(self):
+        return self._cookies().get(SESSION_COOKIE)
+
     def _record(self, status, extra=None):
+        parts = urlsplit(self.path)
         entry = {
             't': round(time.time(), 3),
             'method': self.command,
-            'path': self.path,
+            'path': parts.path,
             'host': self.headers.get('Host', ''),
             'user_agent': self.headers.get('User-Agent', ''),
             'sni': getattr(self.connection, 'nodrive_sni', None),
             'status': status,
             'conn': self.client_address[1] if len(self.client_address) > 1 else None,
+            'has_authorization': self.headers.get('Authorization') is not None,
+            'cookie_names': sorted(self._cookies()),
         }
+        sid = self._session_id()
+        if sid:
+            entry['session_hash'] = hashlib.sha256(sid.encode()).hexdigest()[:12]
         if extra:
             entry.update(extra)
         self.server.write_log(entry)
 
-    def _send(self, status, body, ctype):
+    def _send(self, status, body, ctype, headers=None, cookies=None):
         data = body.encode('utf-8')
         self.send_response(status)
         self.send_header('Content-Type', ctype)
         self.send_header('Content-Length', str(len(data)))
         self.send_header('Cache-Control', 'no-store')
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
+        for c in cookies or []:
+            self.send_header('Set-Cookie', c)
         self.end_headers()
         if self.command != 'HEAD':
             self.wfile.write(data)
 
-    def _json(self, status, obj):
-        self._send(status, json.dumps(obj), 'application/json; charset=utf-8')
+    def _json(self, status, obj, headers=None, cookies=None):
+        self._send(status, json.dumps(obj), 'application/json; charset=utf-8', headers, cookies)
+
+    # --- workspace mode: the account ---------------------------------------------------------------------
+    def _basic_ok(self):
+        ws = self.server.workspace
+        header = self.headers.get('Authorization') or ''
+        if not ws or not header.startswith('Basic '):
+            return False
+        try:
+            user, _, password = base64.b64decode(header[6:]).decode('utf-8').partition(':')
+        except Exception:   # noqa: BLE001
+            return False
+        return hmac.compare_digest(user, ws['user']) and hmac.compare_digest(password, ws['password'])
+
+    def _session_ok(self):
+        ws = self.server.workspace
+        jar = self._cookies()
+        sid, phrase = jar.get(SESSION_COOKIE), jar.get(PASSPHRASE)
+        return bool(ws and sid and phrase and hmac.compare_digest(ws['sessions'].get(sid, ''), phrase))
+
+    def _ocs(self, status, data):
+        return {'ocs': {'meta': {'status': 'ok' if status == 200 else 'failure', 'statuscode': status,
+                                 'message': 'OK' if status == 200 else 'Not found'}, 'data': data}}
+
+    def _session_cookies(self):
+        """What PHP sends at the sign-in: the session cookie twice (start, then after the new session id),
+        the passphrase, the same-site cookies, and a deletion cookie."""
+        ws = self.server.workspace
+        sid, old, phrase = secrets.token_hex(8), secrets.token_hex(8), secrets.token_hex(16)
+        ws['sessions'][sid] = phrase
+        self.server.write_log({'t': round(time.time(), 3), 'event': 'session-issued',
+                               'issued_hash': hashlib.sha256(sid.encode()).hexdigest()[:12]})
+        flags = 'path=/; secure; HttpOnly; SameSite=Lax'
+        return [
+            f'{SESSION_COOKIE}={old}; {flags}',
+            f'{PASSPHRASE}={phrase}; {flags}',
+            f'{SESSION_COOKIE}={sid}; {flags}',
+            'nc_username=deleted; expires=Thu, 01-Jan-1970 00:00:01 GMT; Max-Age=0; path=/; secure; HttpOnly',
+            f'__Host-nc_sameSiteCookielax=true; path=/; httponly; secure; expires={FAR}; Max-Age=31536000; SameSite=lax',
+            f'__Host-nc_sameSiteCookiestrict=true; path=/; httponly; secure; expires={FAR}; Max-Age=31536000; SameSite=strict',
+        ]
+
+    def _workspace_get(self, path):
+        """True when the request was answered."""
+        ws = self.server.workspace
+        host = (self.headers.get('Host') or '').split(':')[0].lower()
+        if host == FOREIGN_HOST:
+            if path == '/probe':
+                self._record(200, {'event': 'foreign-probe'})
+                self._send(200, SIMPLE_HTML.format(t='Another host'), 'text/html; charset=utf-8')
+            else:
+                self._record(404)
+                self._send(404, SIMPLE_HTML.format(t='Not found'), 'text/html; charset=utf-8')
+            return True
+        if path == '/ocs/v2.php/cloud/user':
+            if not self._basic_ok():
+                self._record(401)
+                self._json(401, self._ocs(401, []))
+                return True
+            self._record(200, {'event': 'bootstrap'})
+            self._json(200, self._ocs(200, {'id': ws['user'], 'enabled': True, 'display-name': 'Demo User', 'email': '',
+                                            'language': 'en', 'locale': 'en_US', 'groups': [],
+                                            'quota': {'free': 1 << 30, 'used': 0, 'total': 1 << 30, 'relative': 0, 'quota': -3}}),
+                       cookies=self._session_cookies())
+            return True
+        if path == '/ocs/v2.php/cloud/capabilities':
+            if not self._basic_ok():
+                self._record(401)
+                self._json(401, self._ocs(401, []))
+                return True
+            self._record(200)
+            self._json(200, self._ocs(200, {
+                'version': {'major': 35, 'minor': 0, 'micro': 2, 'string': '35.0.2', 'edition': '', 'extendedSupport': False},
+                'capabilities': {'core': {'pollinterval': 60, 'webdav-root': 'remote.php/webdav'},
+                                 'files': {'bigfilechunking': True, 'undelete': True, 'versioning': True},
+                                 'dav': {'chunking': '1.0'},
+                                 'theming': {'name': 'Nourax Workspace', 'url': 'https://drive.nourax.org', 'slogan': '',
+                                             'color': '#2563EB', 'color-text': '#ffffff', 'color-element': '#2563EB',
+                                             'color-element-bright': '#2563EB', 'color-element-dark': '#2563EB',
+                                             'logo': '', 'background': '#2563EB', 'background-plain': True,
+                                             'background-default': False, 'logoheader': '', 'favicon': ''}}}))
+            return True
+        if path == '/ocs/v2.php/core/navigation/apps':
+            if not (self._basic_ok() or self._session_ok()):
+                self._record(401)
+                self._json(401, self._ocs(401, []))
+                return True
+            if self.headers.get('If-None-Match') == NAV_ETAG:
+                self._record(304, {'event': 'navigation-304'})
+                self.send_response(304)
+                self.send_header('ETag', NAV_ETAG)
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+                return True
+            self._record(200, {'event': 'navigation'})
+            self._send(200, NAV_BODY, 'application/json; charset=utf-8', {'ETag': NAV_ETAG})
+            return True
+        if path.startswith('/ocs/'):
+            self._record(404)
+            self._json(404, self._ocs(404, []))
+            return True
+        m = re.match(r'^(?:/index\.php)?/apps/([a-z_0-9]+)(?:/.*)?$', path)
+        if m:
+            if self._session_ok() and m.group(1) in APP_NAMES:
+                name = APP_NAMES[m.group(1)]
+                self._record(200, {'event': 'page', 'app': m.group(1)})
+                self._send(200, PAGE_HTML.format(user=ws['user'], name=name, foreign=FOREIGN_HOST), 'text/html; charset=utf-8')
+            else:
+                self._record(302, {'event': 'page-redirect-to-login'})
+                self._send(302, '', 'text/html; charset=utf-8', {'Location': '/login'})
+            return True
+        if path in ('/login', '/index.php/login'):
+            self._record(200, {'event': 'login-page'})
+            self._send(200, SIMPLE_HTML.format(t='LOGIN'), 'text/html; charset=utf-8')
+            return True
+        if path in ('/logout', '/index.php/logout'):
+            self._record(200, {'event': 'logout-page'})
+            self._send(200, SIMPLE_HTML.format(t='LOGOUT'), 'text/html; charset=utf-8')
+            return True
+        return False
 
     def do_GET(self):
         path = urlsplit(self.path).path
@@ -109,11 +330,26 @@ class Handler(BaseHTTPRequestHandler):
         elif path.startswith('/login/v2/flow/') or path.startswith('/index.php/login/v2/flow/'):
             self._record(200, {'event': 'browser-opened-login-page'})
             self._send(200, FLOW_PAGE, 'text/html; charset=utf-8')
+        elif self.server.workspace and self._workspace_get(path):
+            return
         else:
             self._record(404)
             self._json(404, {'message': 'not served by the CI stand-in'})
 
     do_HEAD = do_GET
+
+    def do_PROPFIND(self):
+        length = int(self.headers.get('Content-Length') or 0)
+        if length:
+            self.rfile.read(min(length, 1 << 16))
+        ws = self.server.workspace
+        path = urlsplit(self.path).path
+        if ws and path.startswith('/remote.php/') and self._basic_ok():
+            self._record(207)
+            self._send(207, PROPFIND_BODY.format(user=ws['user']), 'application/xml; charset=utf-8')
+        else:
+            self._record(404)
+            self._json(404, {'message': 'not served by the CI stand-in'})
 
     def do_POST(self):
         length = int(self.headers.get('Content-Length') or 0)
@@ -139,9 +375,10 @@ class DualStackTLSServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, addr, handler, context, log_path):
+    def __init__(self, addr, handler, context, log_path, workspace=None):
         self.context = context
         self.log_path = log_path
+        self.workspace = workspace   # None, or {'user', 'password', 'sessions'}
         super().__init__(addr, handler)
 
     def server_bind(self):
@@ -190,7 +427,15 @@ def main():
     ap.add_argument('--key', required=True, help='PEM private key')
     ap.add_argument('--log', required=True, help='JSON-lines request log (appended)')
     ap.add_argument('--port', type=int, default=443)
+    ap.add_argument('--workspace', action='store_true',
+                    help='also answer for a signed-in account (NODRIVE_WS_USER, NODRIVE_WS_APP_PASSWORD in the environment)')
     args = ap.parse_args()
+    workspace = None
+    if args.workspace:
+        user, password = os.environ.get('NODRIVE_WS_USER', ''), os.environ.get('NODRIVE_WS_APP_PASSWORD', '')
+        if not user or not password:
+            sys.exit('drive-stand-in: --workspace needs NODRIVE_WS_USER and NODRIVE_WS_APP_PASSWORD in the environment')
+        workspace = {'user': user, 'password': password, 'sessions': {}}
 
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
@@ -204,8 +449,8 @@ def main():
             pass
     ctx.sni_callback = sni
 
-    server = DualStackTLSServer(('::', args.port), Handler, ctx, args.log)
-    server.write_log({'t': round(time.time(), 3), 'event': 'listening', 'port': args.port})
+    server = DualStackTLSServer(('::', args.port), Handler, ctx, args.log, workspace)
+    server.write_log({'t': round(time.time(), 3), 'event': 'listening', 'port': args.port, 'workspace': bool(workspace)})
     print(f'drive-stand-in: listening on [::]:{args.port} (IPv4 and IPv6), log {args.log}', flush=True)
     server.serve_forever()
 

@@ -27,6 +27,7 @@ struct NCSidebarView: View {
     let openAutoUpload: () -> Void
     let openScannedImages: () -> Void
     let openExternalSite: (String, String, Int) -> Void
+    var openWorkspaceApp: (NCWorkspaceApp) -> Void = { _ in }
     let openApp: (String, String?) -> Void
     var navigationBarCenterY: () -> CGFloat? = { nil }
     var usesExpandedPhonePortrait: () -> Bool = { false }
@@ -44,6 +45,7 @@ struct NCSidebarView: View {
     @State private var quotaProgress: Double = 0
     @State private var quotaHasLimit = false
     @State private var externalSites: [tableExternalSites] = []
+    @State private var workspaceApps: [NCWorkspaceApp] = []
     @State private var showsShares = false
     @State private var showsGroupfolders = false
     @State private var showsAssistant = false
@@ -119,6 +121,22 @@ struct NCSidebarView: View {
                                 .accessibilityIdentifier("sidebarAutoUpload")
                             sidebarItem("_scanned_images_", systemImage: "doc.text.viewfinder", isSelected: false, action: openScannedImages)
                                 .accessibilityIdentifier("sidebarScannedImages")
+                            if !workspaceApps.isEmpty {
+                                Text("_apps_")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 32)
+                                    .padding(.top, 20)
+                                    .padding(.bottom, 8)
+                                ForEach(workspaceApps) { app in
+                                    sidebarItem(LocalizedStringKey(app.name),
+                                                systemImage: app.symbolName,
+                                                isSelected: selectedDestination == "sidebarWorkspaceApp-\(app.id)") {
+                                        openWorkspaceApp(app)
+                                    }
+                                    .accessibilityIdentifier("sidebarWorkspaceApp-\(app.id)")
+                                }
+                            }
                             if !externalSites.isEmpty {
                                 Text("_external_sites_")
                                     .font(.subheadline.weight(.semibold))
@@ -250,6 +268,7 @@ struct NCSidebarView: View {
             // Hide the previous account's actions while loading the new cached capabilities.
             updatedAccount = account
             externalSites = []
+            workspaceApps = []
             autoUploadEnabled = nil
             autoUploadCounter.stop(reset: true)
             quotaDescription = ""
@@ -300,6 +319,7 @@ struct NCSidebarView: View {
             } else {
                 externalSites = []
             }
+            workspaceApps = NCWorkspaceAppsStore.shared.cached(account: activeAccount)
             showsShares = capabilities?.fileSharingApiEnabled ?? false
             showsGroupfolders = capabilities?.groupfoldersEnabled ?? false
             showsAssistant = capabilities?.assistantEnabled ?? false

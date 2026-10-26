@@ -33,6 +33,7 @@ FORBIDDEN = re.compile(r'next\s?cloud|own\s?cloud|firebase|crashlytics|app-measu
 QUERY_RE = re.compile(r':\s+\d+\+?%?\s+(?:\[[^\]]*\]\s+)?([A-Za-z0-9]+)\?\s+(\S+?)\.?\s+\(')
 SERVER_UA_IOS = re.compile(r'^Mozilla/5\.0 \(iOS\) (?:ownCloud|Nextcloud)\-iOS/([^ ]*).*$')   # server 35 IRequest.php
 DRIVE = 'drive.nourax.org'
+FOREIGN = 'foreign.nodrive-ci.test'   # the other host of the Workspace link test (a name the CI makes up)
 # Executable names of NoDrive's app and extensions (the product names; the app's is still "Nextcloud").
 APP_PROCESSES = ['Nextcloud', 'Share', 'File Provider Extension', 'File Provider Extension UI',
                  'Notification Service Extension', 'Widget', 'WidgetDashboardIntentHandler', 'Action Assistant',
@@ -97,7 +98,7 @@ def main():
         if not by_process:
             problems.append('no process metadata in --dns-processes (capture not on pktap?)')
         for (proc, name), n in sorted(app_queries.items()):
-            if name != DRIVE:
+            if name not in (DRIVE, FOREIGN):
                 problems.append(f'NoDrive process {proc} looked up {name} ({n}x)')
 
     entries = []

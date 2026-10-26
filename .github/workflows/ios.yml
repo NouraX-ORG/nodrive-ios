@@ -72,10 +72,14 @@ jobs:
       - name: check-branding.py (no unclassified Nextcloud strings in the source)
         run: python tools/check-branding.py
 
+      - name: The UI-test account code exists in Debug builds only
+        run: python tools/ci/workspace-check.py --debug-only iOSClient/Workspace/NCUITestAccount.swift
+
   server-login:
     name: Server login (a real Nextcloud 35 in Docker; the app's web view sign-in)
     needs: branding
-    runs-on: ubuntu-latest
+    # ubuntu-24.04, not ubuntu-latest: Playwright's WebKit does not support ubuntu 26.04 yet
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
@@ -381,8 +385,16 @@ jobs:
           printf '127.0.0.1 drive.nourax.org\n::1 drive.nourax.org\n' | sudo tee -a /etc/hosts
           sudo dscacheutil -flushcache
           sudo killall -HUP mDNSResponder || true
-          sudo nohup "$(command -v python3)" tools/ci/drive-stand-in.py --cert "$SI/chain.pem" --key "$SI/leaf.key" \
-            --log "$RESULTS/stand-in.jsonl" > "$RESULTS/stand-in.out" 2>&1 &
+          # A throwaway app password for the stand-in's test account (never printed, never on a command line;
+          # the stand-in and the UI test read it from the environment).
+          WS_PW=$(openssl rand -hex 16)
+          echo "::add-mask::$WS_PW"
+          echo "NODRIVE_WS_USER=citest" >> "$GITHUB_ENV"
+          echo "NODRIVE_WS_APP_PASSWORD=$WS_PW" >> "$GITHUB_ENV"
+          export NODRIVE_WS_USER=citest NODRIVE_WS_APP_PASSWORD="$WS_PW"
+          printf '127.0.0.1 foreign.nodrive-ci.test\n::1 foreign.nodrive-ci.test\n' | sudo tee -a /etc/hosts
+          sudo -E nohup "$(command -v python3)" tools/ci/drive-stand-in.py --cert "$SI/chain.pem" --key "$SI/leaf.key" \
+            --log "$RESULTS/stand-in.jsonl" --workspace > "$RESULTS/stand-in.out" 2>&1 &
           for i in $(seq 1 30); do
             curl -fsS --cacert "$SI/ca.pem" -o /dev/null https://drive.nourax.org/status.php && break
             sleep 0.5
@@ -429,6 +441,23 @@ jobs:
           bash tools/ci/screens.sh switch "$UDID" en en_US dark
           bash tools/ci/screens.sh walk "$UDID" en-dark en en_US
 
+      - name: Workspace apps menu, signed in (light)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        run: |
+          bash tools/ci/screens.sh switch "$UDID" en en_US light
+          bash tools/ci/screens.sh workspace "$UDID" workspace-light
+
+      - name: Workspace apps menu, signed in (dark)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        run: |
+          bash tools/ci/screens.sh switch "$UDID" en en_US dark
+          bash tools/ci/screens.sh workspace "$UDID" workspace-dark
+
+      - name: Workspace checks (credential only to the own server, no login page, no stale sessions)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        run: |
+          python3 tools/ci/workspace-check.py "$RESULTS/stand-in.jsonl" --json "$RESULTS/workspace-check.json"
+
       - name: Network gate (no Nextcloud hosts; sign-in opened drive.nourax.org)
         if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
         run: |
@@ -441,8 +470,12 @@ jobs:
         if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
         run: |
           python3 tools/ci/screens-report.py --shots "$SHOTS" --results "$RESULTS" \
-            --variants en-light de-light ar-light en-dark \
+            --variants en-light de-light ar-light en-dark workspace-light workspace-dark \
             --docs-out "$GITHUB_WORKSPACE/screenshots-docs" --json "$RESULTS/screens-report.json"
+
+      - name: No throwaway password in any result file
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        run: python3 tools/ci/workspace-check.py --scan-secret "$RESULTS" "$SHOTS" "$GITHUB_WORKSPACE/screenshots-docs"
 
       - name: Upload screenshots
         if: ${{ !cancelled() }}

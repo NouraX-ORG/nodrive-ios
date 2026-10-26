@@ -158,6 +158,8 @@ class NCAccount: NSObject {
                 nkLog(error: "Unable to remove background upload history for account \(account): \(error)")
             }
         }
+        // Close the Workspace web screens of this account and forget their data
+        await NCWorkspaceWeb.shared.forget(account: account, urlBase: tblAccount?.urlBase ?? "")
         // Remove session in NextcloudKit
         NextcloudKit.shared.nkCommonInstance.nksessions.remove(account: account)
         // Remove session

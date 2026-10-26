@@ -97,7 +97,8 @@ def jar_from(set_cookies):
 
 
 def signed_in(srv, jar):
-    status, hdrs, body, _ = srv.request('GET', '/index.php/apps/dashboard/', cookies=jar, headers={'Accept': 'text/html'})
+    status, hdrs, body, _ = srv.request('GET', '/index.php/apps/dashboard/', cookies=jar, headers={'Accept': 'text/html'},
+                                        ua=WEB_UA_PRIMARY)
     text = body.decode('utf-8', 'replace')
     return status == 200 and f'data-user="{srv.user}"' in text, status, hdrs.get('location', ''), text
 
@@ -134,13 +135,17 @@ def run_token(srv, kind, token, out, container, login_password):
     check(ok, f'{kind}/4 dashboard with the cookies only is signed in', f'status {st}')
     m = re.search(r'data-requesttoken="([^"]+)"', text)
     request_token = m.group(1) if m else ''
-    partial = {k: v for k, v in jar.items() if k != PASSPHRASE}
+    # The negative control uses a session of its own: a request without the passphrase makes the server drop that session.
+    _, _, _, sc_b = srv.request('GET', '/ocs/v2.php/cloud/user?format=json', basic=token)
+    jar_b, _ = jar_from(sc_b)
+    partial = {k: v for k, v in jar_b.items() if k != PASSPHRASE}
     ok2, st2, loc2, _ = signed_in(srv, partial)
     check(not ok2 and st2 in (302, 303) and 'login' in loc2,
           f'{kind}/4 without {PASSPHRASE} the page is not signed in', f'status {st2}, redirect to login: {"login" in loc2}')
 
     # 5. navigation list
-    status, hdrs, body, _ = srv.request('GET', '/ocs/v2.php/core/navigation/apps?absolute=false&format=json', cookies=jar)
+    status, hdrs, body, _ = srv.request('GET', '/ocs/v2.php/core/navigation/apps?absolute=false&format=json', cookies=jar,
+                                        ua=WEB_UA_PRIMARY)
     check(status == 200, f'{kind}/5 navigation list with cookies only', f'status {status}')
     etag = hdrs.get('etag', '')
     entries = []
@@ -158,11 +163,12 @@ def run_token(srv, kind, token, out, container, login_password):
     check(all(str(e.get('href', '')).startswith('/') for e in entries), f'{kind}/5 absolute=false gives paths')
     if etag:
         status304, _, _, _ = srv.request('GET', '/ocs/v2.php/core/navigation/apps?absolute=false&format=json',
-                                         cookies=jar, headers={'If-None-Match': etag})
+                                         cookies=jar, headers={'If-None-Match': etag}, ua=WEB_UA_PRIMARY)
         check(status304 == 304, f'{kind}/5 If-None-Match answers 304', f'status {status304}')
     else:
         check(False, f'{kind}/5 ETag header present')
-    _, _, abody, _ = srv.request('GET', '/ocs/v2.php/core/navigation/apps?absolute=true&format=json', cookies=jar)
+    _, _, abody, _ = srv.request('GET', '/ocs/v2.php/core/navigation/apps?absolute=true&format=json', cookies=jar,
+                                 ua=WEB_UA_PRIMARY)
     try:
         absolute = json.loads(abody)['ocs']['data']
         rel = {e['id']: e['href'] for e in entries}
@@ -185,7 +191,7 @@ def run_token(srv, kind, token, out, container, login_password):
 
     # 8. web logout keeps the app signed in
     if request_token:
-        srv.request('GET', '/index.php/logout?requesttoken=' + urllib.parse.quote(request_token), cookies=jar)
+        srv.request('GET', '/index.php/logout?requesttoken=' + urllib.parse.quote(request_token), cookies=jar, ua=WEB_UA_PRIMARY)
     ok3, st3, _, _ = signed_in(srv, jar)
     check(not ok3, f'{kind}/8 after a web log-out the cookies are signed out', f'status {st3}')
     status, _, _, set_cookies = srv.request('GET', '/ocs/v2.php/cloud/user?format=json', basic=token)
@@ -212,9 +218,15 @@ def run_token(srv, kind, token, out, container, login_password):
                 pass
             if token_id is not None:
                 occ(container, 'user:auth-tokens:delete', user, str(token_id))
-                after, _, _, _ = signed_in(srv, rjar)
-                check(before and not after, f'{kind}/8 revoking the app password ends the web session at once',
-                      f'before {before}, after {after}')
+                # The server looks the token up through a short cache: the session ends within seconds.
+                started, after, waited = time.time(), True, 0.0
+                while after and time.time() - started < 90:
+                    after, _, _, _ = signed_in(srv, rjar)
+                    waited = time.time() - started
+                    if after:
+                        time.sleep(3)
+                check(before and not after, f'{kind}/8 revoking the app password ends the web session within 90 s',
+                      f'signed in before: {before}; ended after {waited:.0f} s: {not after}')
             else:
                 check(False, f'{kind}/8 revoke test: token id found', lst.stdout[:80].replace(tok, '***'))
         else:

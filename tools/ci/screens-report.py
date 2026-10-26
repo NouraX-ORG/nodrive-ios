@@ -129,10 +129,10 @@ def main():
         for p in pngs:
             name = os.path.splitext(os.path.basename(p))[0]
             info = check_colours(p)
-            if 'intro-slide' in name:
-                if info['cobalt_matches'] < 8:
-                    problems.append(f'{variant}/{name}: background is not Nourax cobalt '
-                                    f'({info["cobalt_matches"]}/10 samples match; samples {info["background_samples"]})')
+            if 'intro-slide' in name and info['cobalt_matches'] < 8:
+                problems.append(f'{variant}/{name}: background is not Nourax cobalt '
+                                f'({info["cobalt_matches"]}/10 samples match; samples {info["background_samples"]})')
+            if 'intro-slide' in name or 'workspace' in name:
                 if info['nextcloud_blue_fraction'] > 0.001:
                     problems.append(f'{variant}/{name}: Nextcloud blue on {info["nextcloud_blue_fraction"]:.2%} of the screen')
             v['screenshots'][name] = info

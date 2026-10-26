@@ -35,6 +35,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         if isUiTestingEnabled {
             Task {
                 await NCAccount().deleteAllAccounts()
+                await NCUITestAccount.injectIfRequested()
             }
         }
         let utilityFileSystem = NCUtilityFileSystem()

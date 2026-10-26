@@ -69,6 +69,9 @@ extension NCMainTabBarController {
         }, openExternalSite: { [weak self] url, title, identifier in
             self?.removeSidebar()
             self?.openSidebarExternalSite(url: url, title: title, identifier: identifier)
+        }, openWorkspaceApp: { [weak self] app in
+            self?.removeSidebar()
+            self?.openSidebarWorkspaceApp(app)
         }, openApp: { [weak self] url, fallbackUrl in
             self?.removeSidebar()
             self?.openSidebarApp(url: url, fallbackUrl: fallbackUrl)
@@ -87,7 +90,8 @@ extension NCMainTabBarController {
     private func sidebarSelectionIdentifier() -> String? {
         guard selectedIndex == 0,
               let root = currentNavigationController()?.viewControllers.first else { return nil }
-        if let identifier = root.restorationIdentifier, identifier.hasPrefix("sidebarExternalSite-") { return identifier }
+        if let identifier = root.restorationIdentifier,
+           identifier.hasPrefix("sidebarExternalSite-") || identifier.hasPrefix("sidebarWorkspaceApp-") { return identifier }
         switch root {
         case let files as NCFiles:
             return files.personalFilesOnly ? "sidebarPersonalFiles" : "sidebarFiles"
@@ -213,6 +217,14 @@ extension NCMainTabBarController {
         browserController.isHiddenButtonExit = true
         browserController.restorationIdentifier = "sidebarExternalSite-\(identifier)"
         selectSidebarDestination(NCMainNavigationController(rootViewController: browserController))
+    }
+
+    /// A Workspace web app (Mail, Calendar, Talk, ...) inside NoDrive, already signed in.
+    private func openSidebarWorkspaceApp(_ app: NCWorkspaceApp) {
+        guard let url = URL(string: app.href) else { return }
+        let webController = NCWorkspaceWebViewController(account: account, url: url, title: app.name)
+        webController.restorationIdentifier = "sidebarWorkspaceApp-\(app.id)"
+        selectSidebarDestination(NCMainNavigationController(rootViewController: webController))
     }
 
     func openSidebarAutoUpload() {

@@ -192,6 +192,9 @@ class NCService: NSObject {
             await self.database.deleteExternalSitesAsync(account: account)
         }
 
+        // Workspace apps (Mail, Calendar, Talk, ...) of the server's navigation list
+        await NCWorkspaceAppsStore.shared.refresh(account: account)
+
         // User Status
         if capabilities.userStatusEnabled {
             let results = await NextcloudKit.shared.getUserStatusAsync(account: account)

@@ -301,6 +301,11 @@ class NCNotification: UITableViewController, NCNotificationCellDelegate {
                 url = talkUrl
             }
 
+            // A link to this account's own server opens inside the app, signed in
+            if NCWorkspaceWeb.shared.openLink(url, session: session, from: self) {
+                return
+            }
+
             UIApplication.shared.open(url)
             return
         }

@@ -107,7 +107,17 @@ REMOVE_APP_PHASES = ['Crashlytics dSYM Upload']
 # Our test files, added to the test targets: (target, group path, file)
 TEST_FILES = [
     ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveBrandingTests.swift'),
+    ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveWorkspaceOriginTests.swift'),
+    ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveWorkspaceAppsTests.swift'),
+    ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveWorkspaceSessionTests.swift'),
+    ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveWorkspaceWebTests.swift'),
     ('NextcloudUITests', 'NextcloudUITests', 'NoDriveScreenshotUITests.swift'),
+    ('NextcloudUITests', 'NextcloudUITests', 'NoDriveWorkspaceUITests.swift'),
+]
+# Our own source folders of the app target, each a new group inside its parent group:
+# (target, folder, parent group name). Every .swift file of the folder is added.
+APP_SOURCE_FOLDERS = [
+    ('Nextcloud', 'iOSClient/Workspace', 'iOSClient'),
 ]
 # Product of the UI-test target. Its runner app ("<product>-Runner") sits on the simulator's home
 # screen during the screenshot walk, so it must not carry the Nextcloud name. The target name
@@ -499,6 +509,45 @@ class PBX:
         self.add_to_list(groups[0], 'children', f'\t\t\t\t{fref} /* {name} */,\n')
         self.add_to_list(self.phase_id(target, 'Sources'), 'files', f'\t\t\t\t{bfile} /* {name} in Sources */,\n')
 
+    def add_source_folder(self, target, folder, parent_group):
+        """Add every .swift file of `folder` (our own folder, new files only) to `target` as a new PBXGroup
+        inside `parent_group`. Ids are derived from the path, so a second run changes nothing."""
+        names = sorted(n for n in os.listdir(self.st.path(folder)) if n.endswith('.swift'))
+        if not names:
+            fail(f'{folder}: no .swift files')
+        group_name = os.path.basename(folder)
+        gid = hashlib.sha1(f'nodrive:group:{folder}'.encode()).hexdigest()[:24].upper()
+        parents = re.findall(r'^\t\t([0-9A-F]{24}) /\* ' + re.escape(parent_group) + r' \*/ = \{\n\t\t\tisa = PBXGroup;',
+                             self.text, re.M)
+        if len(parents) != 1:
+            fail(f'pbxproj: group {parent_group} found {len(parents)}x')
+        refs = []
+        for name in names:
+            rel = f'{folder}/{name}'
+            fref = hashlib.sha1(f'nodrive:fileref:{rel}'.encode()).hexdigest()[:24].upper()
+            bfile = hashlib.sha1(f'nodrive:buildfile:{target}:{rel}'.encode()).hexdigest()[:24].upper()
+            refs.append((fref, name))
+            if not re.search(r'^\t\t' + fref + ' ', self.text, re.M):
+                self.insert_sorted_in_section(
+                    'PBXFileReference', fref,
+                    f'\t\t{fref} /* {name} */ = {{isa = PBXFileReference; lastKnownFileType = sourcecode.swift; '
+                    f'path = {pbx_quote(name)}; sourceTree = "<group>"; }};\n')
+            if not re.search(r'^\t\t' + bfile + ' ', self.text, re.M):
+                self.insert_sorted_in_section(
+                    'PBXBuildFile', bfile,
+                    f'\t\t{bfile} /* {name} in Sources */ = {{isa = PBXBuildFile; fileRef = {fref} /* {name} */; }};\n')
+            self.add_to_list(self.phase_id(target, 'Sources'), 'files', f'\t\t\t\t{bfile} /* {name} in Sources */,\n')
+        if not re.search(r'^\t\t' + gid + ' ', self.text, re.M):
+            children = ''.join(f'\t\t\t\t{fref} /* {name} */,\n' for fref, name in refs)
+            self.insert_sorted_in_section(
+                'PBXGroup', gid,
+                f'\t\t{gid} /* {group_name} */ = {{\n\t\t\tisa = PBXGroup;\n\t\t\tchildren = (\n{children}\t\t\t);\n'
+                f'\t\t\tpath = {pbx_quote(group_name)};\n\t\t\tsourceTree = "<group>";\n\t\t}};\n')
+        else:
+            for fref, name in refs:
+                self.add_to_list(gid, 'children', f'\t\t\t\t{fref} /* {name} */,\n')
+        self.add_to_list(parents[0], 'children', f'\t\t\t\t{gid} /* {group_name} */,\n')
+
     def repoint_file(self, old_path, new_path):
         """Point the PBXFileReference with path old_path (or already new_path) at new_path."""
         new_name = os.path.basename(new_path)
@@ -818,6 +867,8 @@ def project(st, base):
     pbx.repoint_file('Reasons to use Nextcloud.pdf', 'Brand/NoDriveBlank.pdf')
     for target, group, name in TEST_FILES:
         pbx.add_source_file(target, group, name)
+    for target, folder, parent in APP_SOURCE_FOLDERS:
+        pbx.add_source_folder(target, folder, parent)
     # UI-test product (and so its runner app) named after NoDrive; see UI_TEST_PRODUCT
     for cfg in pbx.config_ids('NextcloudUITests'):
         pbx.set_setting(cfg, 'PRODUCT_NAME', UI_TEST_PRODUCT)
