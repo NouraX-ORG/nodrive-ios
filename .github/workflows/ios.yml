@@ -449,12 +449,16 @@ jobs:
       - name: Workspace apps menu, signed in (light)
         if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
         run: |
+          # a clean simulator: the account of an earlier run is in the keychain and the app group
+          bash tools/ci/screens.sh prepare-first "$UDID"
           bash tools/ci/screens.sh switch "$UDID" en en_US light
           bash tools/ci/screens.sh workspace "$UDID" workspace-light
 
       - name: Workspace apps menu, signed in (dark)
         if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
         run: |
+          # a clean simulator: the account of an earlier run is in the keychain and the app group
+          bash tools/ci/screens.sh prepare-first "$UDID"
           bash tools/ci/screens.sh switch "$UDID" en en_US dark
           bash tools/ci/screens.sh workspace "$UDID" workspace-dark
 
