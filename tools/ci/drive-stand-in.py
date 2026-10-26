@@ -255,6 +255,17 @@ class Handler(BaseHTTPRequestHandler):
                 self._record(404)
                 self._send(404, SIMPLE_HTML.format(t='Not found'), 'text/html; charset=utf-8')
             return True
+        if path == '/ocs/v2.php/cloud/users/' + ws['user']:
+            if not self._basic_ok():
+                self._record(401)
+                self._json(401, self._ocs(401, []))
+                return True
+            self._record(200)
+            self._json(200, self._ocs(200, {'id': ws['user'], 'enabled': True, 'displayname': 'Demo User',
+                                            'display-name': 'Demo User', 'email': '', 'language': 'en', 'locale': 'en_US',
+                                            'groups': [], 'quota': {'free': 1 << 30, 'used': 0, 'total': 1 << 30,
+                                                                    'relative': 0, 'quota': -3}}))
+            return True
         if path == '/ocs/v2.php/cloud/user':
             if not self._basic_ok():
                 self._record(401)
