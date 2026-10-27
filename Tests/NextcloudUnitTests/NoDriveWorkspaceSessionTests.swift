@@ -153,7 +153,7 @@ struct NoDriveWorkspaceSessionTests {
         let header = "oc_sessionPassphrase=p; path=/; HttpOnly, ocabcdefghij=s; path=/; HttpOnly"
         let secure = NCWorkspaceCookies.cookies(fromHeaderFields: ["Set-Cookie": header], url: url)
         #expect(secure.count == 2)
-        #expect(secure.allSatisfy(\.isSecure))
+        #expect(secure.allSatisfy { $0.isSecure })
         let local = URL(string: "http://localhost:8080/ocs/v2.php/cloud/user?format=json")!
         let plain = NCWorkspaceCookies.cookies(fromHeaderFields: ["Set-Cookie": header], url: local)
         #expect(plain.count == 2)

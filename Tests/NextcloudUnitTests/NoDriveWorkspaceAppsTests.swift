@@ -69,7 +69,7 @@ struct NoDriveWorkspaceAppsTests {
         #expect(nomail.href == "https://mail.nourax.org/")
         #expect(nomail.appId == "nourax_branding")
         #expect(nomail.symbolName == "envelope")
-        #expect(apps.filter(\.outside).map(\.id) == ["nourax_nomail"])
+        #expect(apps.filter { $0.outside }.map(\.id) == ["nourax_nomail"])
         #expect(apps.first { $0.id == "mail" }?.outside == false)
         #expect(apps.first { $0.id == "mail" }?.symbolName == "envelope")
     }
@@ -84,7 +84,7 @@ struct NoDriveWorkspaceAppsTests {
         """#
         let apps = try parse(json)
         #expect(apps.map(\.id) == ["wiki", "portal"])
-        #expect(apps.allSatisfy(\.outside))
+        #expect(apps.allSatisfy { $0.outside })
         #expect(apps.allSatisfy { $0.symbolName == "link" })
         #expect(UIImage(systemName: "link") != nil)
         // A protocol-relative address takes the account's scheme (https)
@@ -138,7 +138,7 @@ struct NoDriveWorkspaceAppsTests {
         #expect(apps.first { $0.id == "mail" }?.icon == "https://drive.nourax.org/apps/mail/img/mail.svg")
         #expect(apps.first { $0.id == "contacts" }?.icon == nil)
         #expect(apps.filter { !$0.outside }.allSatisfy { NCWorkspaceOrigin.isSameOrigin($0.href, base: base) })
-        #expect(apps.filter(\.outside).allSatisfy { NCWorkspaceOrigin.isOutsideLink($0.href) })
+        #expect(apps.filter { $0.outside }.allSatisfy { NCWorkspaceOrigin.isOutsideLink($0.href) })
         #expect(apps.first { $0.id == "nourax_nomail" }?.icon == "https://drive.nourax.org/apps/nourax_branding/img/nomail.svg")
         // Server addresses with a web root already contain it
         let root = try parse(Self.fixture.replacingOccurrences(of: "\"/apps/", with: "\"/cloud/apps/"), base: "https://h.example/cloud")
