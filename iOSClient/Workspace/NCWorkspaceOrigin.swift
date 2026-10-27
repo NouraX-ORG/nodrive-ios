@@ -61,6 +61,14 @@ enum NCWorkspaceOrigin {
         return candidateOrigin == baseOrigin
     }
 
+    /// True for an https URL with a plain host: no user info, no empty host, no white space or control characters,
+    /// no non-ASCII host. Such a page of another origin (NoMail) may be offered in the menu; it opens in the
+    /// in-app browser panel, which holds no NoDrive credential, cookie or session. http and every other scheme
+    /// are refused.
+    static func isOutsideLink(_ string: String) -> Bool {
+        origin(of: string)?.scheme == "https"
+    }
+
     /// A reference from the server (a path such as "/apps/mail/", or an absolute URL) made absolute against the
     /// account's server URL. The result is not checked: callers still test `isSameOrigin`.
     static func resolve(_ reference: String, base: String) -> String? {

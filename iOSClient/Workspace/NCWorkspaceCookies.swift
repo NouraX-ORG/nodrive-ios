@@ -7,8 +7,9 @@ import Foundation
 ///
 /// Rules: every cookie of the answer is kept, in order; expired ones (the server's deletion cookies) are
 /// dropped; a name sent twice keeps the last one (PHP sends one at session start and one after the new
-/// session id); every cookie becomes host-only (no Domain attribute) for the account's host; Path, Secure,
-/// HttpOnly, SameSite and the expiry stay.
+/// session id); every cookie becomes host-only (no Domain attribute) for the account's host; Path, HttpOnly,
+/// SameSite and the expiry stay; a cookie is Secure when the server sent it so or when the server is https
+/// (cookies are scoped by host, not scheme, so this keeps them off a plain http request to the same host).
 enum NCWorkspaceCookies {
     static let passphraseName = "oc_sessionPassphrase"
 
@@ -22,7 +23,7 @@ enum NCWorkspaceCookies {
             // A later cookie of the same name and path replaces the earlier one, and a deletion removes it.
             result.removeAll { $0.name == cookie.name && $0.path == cookie.path }
             if let expires = cookie.expiresDate, expires <= now { continue }
-            if let hostOnly = hostOnlyCopy(of: cookie, host: host) {
+            if let hostOnly = hostOnlyCopy(of: cookie, host: host, secure: url.scheme?.lowercased() == "https") {
                 result.append(hostOnly)
             }
         }
@@ -35,14 +36,14 @@ enum NCWorkspaceCookies {
             && cookies.contains { $0.name.hasPrefix("oc") && $0.name != passphraseName }
     }
 
-    private static func hostOnlyCopy(of cookie: HTTPCookie, host: String) -> HTTPCookie? {
+    private static func hostOnlyCopy(of cookie: HTTPCookie, host: String, secure: Bool) -> HTTPCookie? {
         var properties: [HTTPCookiePropertyKey: Any] = [
             .name: cookie.name,
             .value: cookie.value,
             .path: cookie.path.isEmpty ? "/" : cookie.path,
             .domain: host
         ]
-        if cookie.isSecure {
+        if cookie.isSecure || secure {
             properties[.secure] = "TRUE"
         }
         if let expires = cookie.expiresDate {

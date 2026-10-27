@@ -45,7 +45,7 @@ struct NCSidebarView: View {
     @State private var quotaProgress: Double = 0
     @State private var quotaHasLimit = false
     @State private var externalSites: [tableExternalSites] = []
-    @State private var workspaceApps: [NCWorkspaceApp] = []
+    @StateObject private var workspaceApps = NCWorkspaceAppsModel()
     @State private var showsShares = false
     @State private var showsGroupfolders = false
     @State private var showsAssistant = false
@@ -121,14 +121,14 @@ struct NCSidebarView: View {
                                 .accessibilityIdentifier("sidebarAutoUpload")
                             sidebarItem("_scanned_images_", systemImage: "doc.text.viewfinder", isSelected: false, action: openScannedImages)
                                 .accessibilityIdentifier("sidebarScannedImages")
-                            if !workspaceApps.isEmpty {
+                            if !workspaceApps.apps.isEmpty {
                                 Text("_apps_")
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(.secondary)
                                     .padding(.horizontal, 32)
                                     .padding(.top, 20)
                                     .padding(.bottom, 8)
-                                ForEach(workspaceApps) { app in
+                                ForEach(workspaceApps.apps) { app in
                                     sidebarItem(LocalizedStringKey(app.name),
                                                 systemImage: app.symbolName,
                                                 isSelected: selectedDestination == "sidebarWorkspaceApp-\(app.id)") {
@@ -268,7 +268,7 @@ struct NCSidebarView: View {
             // Hide the previous account's actions while loading the new cached capabilities.
             updatedAccount = account
             externalSites = []
-            workspaceApps = []
+            workspaceApps.clear()
             autoUploadEnabled = nil
             autoUploadCounter.stop(reset: true)
             quotaDescription = ""
@@ -308,6 +308,11 @@ struct NCSidebarView: View {
                 do { try await Task.sleep(for: .seconds(2)) } catch { return }
             }
         }
+        .task(id: activeAccount) {
+            // Show the cached apps at once; a list that arrives later reaches the open sidebar by itself
+            workspaceApps.show(account: activeAccount)
+            await NCWorkspaceAppsStore.shared.refresh(account: activeAccount)
+        }
         .task(id: "\(activeAccount)-\(capabilitiesRevision)") {
             // Account changes and server updates cancel the previous read automatically.
             let capabilities = await NCManageDatabase.shared.getCapabilities(account: activeAccount)
@@ -319,7 +324,7 @@ struct NCSidebarView: View {
             } else {
                 externalSites = []
             }
-            workspaceApps = NCWorkspaceAppsStore.shared.cached(account: activeAccount)
+            workspaceApps.show(account: activeAccount)
             showsShares = capabilities?.fileSharingApiEnabled ?? false
             showsGroupfolders = capabilities?.groupfoldersEnabled ?? false
             showsAssistant = capabilities?.assistantEnabled ?? false

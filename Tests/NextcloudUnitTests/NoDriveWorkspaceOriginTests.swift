@@ -99,6 +99,23 @@ struct NoDriveWorkspaceOriginTests {
         #expect(!NCWorkspaceOrigin.isSameOrigin(NCWorkspaceOrigin.resolve("//evil.example/x", base: base) ?? "", base: base))
     }
 
+    @Test("An outside menu page needs https and a plain host")
+    func outsideLinks() {
+        let yes = ["https://mail.nourax.org/", "https://mail.nourax.org", "HTTPS://Mail.Nourax.org/x?y=1#z",
+                   "https://mail.nourax.org:8443/", "https://drive.nourax.org/apps/mail/"]
+        for url in yes {
+            #expect(NCWorkspaceOrigin.isOutsideLink(url), "\(url)")
+        }
+        let no = ["http://mail.nourax.org/", "ftp://mail.nourax.org/", "javascript:alert(1)", "data:text/html,x",
+                  "mailto:a@b.example", "tel:+4912345", "file:///etc/hosts", "blob:https://mail.nourax.org/x",
+                  "https://user@mail.nourax.org/", "https://user:pw@mail.nourax.org/", "https://drive.nourax.org@evil.example/",
+                  "https:///x", "https://:443/", "https://", "https://mail.nourax.org\\@evil.example/", "https://mail nourax.org/",
+                  "https://m\u{00E4}il.nourax.org/", "https://mail.nourax.org/\u{0}", "nodrive://x", "about:blank", ""]
+        for url in no {
+            #expect(!NCWorkspaceOrigin.isOutsideLink(url), "\(url)")
+        }
+    }
+
     @Test("Navigation policy of the web view")
     func navigationDecisions() {
         typealias Decision = NCWorkspaceOrigin.NavigationDecision

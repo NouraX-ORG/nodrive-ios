@@ -6,7 +6,7 @@
 # Docker, never drive.nourax.org itself. It proves, on the real server code, that the app's sign-in for the
 # in-app web view works: the app sends one request with its app password, the server answers with session
 # cookies, and the web view then needs nothing but those cookies (tools/ci/server_login_check.py).
-#   start  create the server, one user and three app passwords (with and without a login password; the
+#   start  create the server, one user and two app passwords (with and without a login password; the
 #          second kind is what a "Log in with Nourax" user has). Values are random, masked in the log and
 #          exported through $GITHUB_ENV (never printed).
 #   check  run tools/ci/server_login_check.py against that server (report in build/server-login/).

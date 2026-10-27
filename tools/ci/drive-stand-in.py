@@ -23,13 +23,20 @@ in the environment, never on the command line), like the Nextcloud server 35 doe
 Workspace apps menu uses (tools/ci/server_login_check.py proves those against the real server code):
 
   GET  /ocs/v2.php/cloud/user         Basic -> the user, and the session cookies (oc_sessionPassphrase,
-                                      the session cookie sent twice, __Host- same-site cookies, a deletion)
+                                      the session cookie sent twice, __Host- same-site cookies, a deletion).
+                                      With ?nodrive=ws (the app's Workspace hand-off) the log event is
+                                      "bootstrap"; without it (the app's account setup) "account-setup"
   GET  /ocs/v2.php/cloud/capabilities, PROPFIND /remote.php/dav/files/<user>/   a minimal account
   GET  /ocs/v2.php/core/navigation/apps   the app list, ETag and 304 (Basic or session cookies)
   GET  /apps/<app>/, /index.php/apps/<app>/   a page that says signed-in:<name> only with a valid session
                                       (the cookie pair of the bootstrap answer), else 302 to /login
+  GET  /apps/mail/redirect-to-other-host   302 to the other host (a server redirect)
+  GET  /apps/mail/expire              the first time a session uses it: the session ends and the answer is 302 /login
+                                      (the app must sign in again by itself); later it shows session-renewed
+  GET  /ocs/v2.php/apps/notifications/api/v2/notifications   one notification with a WEB action to /apps/mail/
   GET  /login (the text LOGIN), /logout (the text LOGOUT)
-  host foreign.nodrive-ci.test: GET /probe   another host, for the link check
+  host foreign.nodrive-ci.test: /probe, /redirected, /blank, /window-open, /nomail/   another host (links, a
+                                      redirect, a new window, window.open, and the NoMail-style menu entry)
 
   sudo python3 tools/ci/drive-stand-in.py --cert leaf.pem --key leaf.key --log stand-in.jsonl [--workspace]
 """
@@ -70,11 +77,18 @@ USER_ID = 'citest'
 
 # The navigation list of a Nextcloud server 35 (core/ResponseDefinitions.php, CoreNavigationEntry), as
 # GET /ocs/v2.php/core/navigation/apps?absolute=false returns it, with the entries the app must leave out.
+# Left out by the app: files, activity and photos (NoDrive has its own), the external-site entry, a foreign
+# entry over http, a foreign entry with user info (any other https entry would be kept, like NoMail). Kept as an "outside" entry: NoMail (https, another origin),
+# exactly as the server app nourax_branding adds it.
+NOMAIL_URL = f'https://{FOREIGN_HOST}/nomail/'
 APPS = [
     ('dashboard', 'Dashboard', 'dashboard', True), ('files', 'Files', 'files', False),
-    ('mail', 'Mail', 'mail', False), ('calendar', 'Calendar', 'calendar', False),
-    ('spreed', 'Talk', 'spreed', False), ('contacts', 'Contacts', 'contacts', False),
-    ('external_index1', 'Wiki', 'external', False), ('evil', 'Foreign', 'evil', False),
+    ('mail', 'Mail', 'mail', False), ('nourax_nomail', 'NoMail', 'nourax_branding', False),
+    ('calendar', 'Calendar', 'calendar', False), ('photos', 'Photos', 'photos', False),
+    ('spreed', 'Talk', 'spreed', False), ('activity', 'Activity', 'activity', False),
+    ('contacts', 'Contacts', 'contacts', False),
+    ('external_index1', 'Wiki', 'external', False),
+    ('plainhttp', 'Plain http', 'plainhttp', False), ('userinfo', 'User info', 'userinfo', False),
 ]
 NAV_ENTRIES = []
 for _i, (_id, _name, _app, _default) in enumerate(APPS, start=1):
@@ -82,13 +96,26 @@ for _i, (_id, _name, _app, _default) in enumerate(APPS, start=1):
               'name': _name, 'app': _app, 'active': False, 'classes': '', 'unread': 0}
     if _default:
         _entry['default'] = True
-    if _id == 'evil':
-        _entry['href'] = 'https://evil.example/apps/x/'
-        _entry['icon'] = 'https://evil.example/i.svg'
+    if _id == 'nourax_nomail':
+        _entry['href'] = NOMAIL_URL
+        _entry['icon'] = '/apps/nourax_branding/img/nomail.svg'
+    if _id == 'plainhttp':
+        _entry['href'] = f'http://{FOREIGN_HOST}/plain/'
+    if _id == 'userinfo':
+        _entry['href'] = f'https://{HOST}@evil.example/apps/x/'
     NAV_ENTRIES.append(_entry)
 NAV_BODY = json.dumps({'ocs': {'meta': {'status': 'ok', 'statuscode': 200, 'message': 'OK'}, 'data': NAV_ENTRIES}})
 NAV_ETAG = '"' + hashlib.sha256(NAV_BODY.encode()).hexdigest()[:32] + '"'
 APP_NAMES = {a[0]: a[1] for a in APPS}
+
+# The other host's pages: path -> (log event, page title)
+FOREIGN_PAGES = {
+    '/probe': ('foreign-probe', 'Another host'),
+    '/redirected': ('foreign-redirect', 'Redirect target'),
+    '/blank': ('foreign-blank', 'New window target'),
+    '/window-open': ('foreign-window-open', 'window.open target'),
+    '/nomail/': ('foreign-nomail', 'NoMail stand-in'),
+}
 
 FAR = 'Fri, 31-Dec-2100 23:59:59 GMT'
 PAGE_HTML = """<!doctype html>
@@ -110,8 +137,12 @@ PAGE_HTML = """<!doctype html>
 <main>
 <div class="card"><p>signed-in:{name}</p></div>
 <div class="card"><p>Nourax Workspace (CI stand-in for the real server)</p>
-<p><a href="https://{foreign}/probe">Open the foreign test site</a></p></div>
-</main></body></html>
+<p><a href="https://{foreign}/probe">Open the foreign test site</a></p>
+<p><a href="/apps/mail/redirect-to-other-host">Redirect to the other host</a></p>
+<p><a href="https://{foreign}/blank" target="_blank">New window to the other host</a></p>
+<p><button type="button" onclick="window.open('https://{foreign}/window-open')">window.open to the other host</button></p>
+<p><a href="/apps/mail/expire">Expire the session</a></p></div>
+{extra}</main></body></html>
 """
 SIMPLE_HTML = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{t}</title></head><body><h1>{t}</h1></body></html>'
 PROPFIND_BODY = """<?xml version="1.0"?>
@@ -225,13 +256,17 @@ class Handler(BaseHTTPRequestHandler):
         return {'ocs': {'meta': {'status': 'ok' if status == 200 else 'failure', 'statuscode': status,
                                  'message': 'OK' if status == 200 else 'Not found'}, 'data': data}}
 
-    def _session_cookies(self):
+    def _session_cookies(self, issued_by):
         """What PHP sends at the sign-in: the session cookie twice (start, then after the new session id),
         the passphrase, the same-site cookies, and a deletion cookie."""
         ws = self.server.workspace
         sid, old, phrase = secrets.token_hex(8), secrets.token_hex(8), secrets.token_hex(16)
         ws['sessions'][sid] = phrase
-        self.server.write_log({'t': round(time.time(), 3), 'event': 'session-issued',
+        if ws['renew_next']:
+            # The session that replaces an expired one is not expired again by the expire link
+            ws['renewed'].add(sid)
+            ws['renew_next'] = False
+        self.server.write_log({'t': round(time.time(), 3), 'event': 'session-issued', 'issued_by': issued_by,
                                'issued_hash': hashlib.sha256(sid.encode()).hexdigest()[:12]})
         flags = 'path=/; secure; HttpOnly; SameSite=Lax'
         return [
@@ -248,9 +283,10 @@ class Handler(BaseHTTPRequestHandler):
         ws = self.server.workspace
         host = (self.headers.get('Host') or '').split(':')[0].lower()
         if host == FOREIGN_HOST:
-            if path == '/probe':
-                self._record(200, {'event': 'foreign-probe'})
-                self._send(200, SIMPLE_HTML.format(t='Another host'), 'text/html; charset=utf-8')
+            if path in FOREIGN_PAGES:
+                event, title = FOREIGN_PAGES[path]
+                self._record(200, {'event': event})
+                self._send(200, SIMPLE_HTML.format(t=title), 'text/html; charset=utf-8')
             else:
                 self._record(404)
                 self._send(404, SIMPLE_HTML.format(t='Not found'), 'text/html; charset=utf-8')
@@ -271,11 +307,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._record(401)
                 self._json(401, self._ocs(401, []))
                 return True
-            self._record(200, {'event': 'bootstrap'})
+            # The app's Workspace hand-off carries ?nodrive=ws; its account setup asks the same path without it
+            marked = 'nodrive=ws' in urlsplit(self.path).query.split('&')
+            issued_by = 'bootstrap' if marked else 'account-setup'
+            self._record(200, {'event': issued_by})
             self._json(200, self._ocs(200, {'id': ws['user'], 'enabled': True, 'display-name': 'Demo User', 'email': '',
                                             'language': 'en', 'locale': 'en_US', 'groups': [],
                                             'quota': {'free': 1 << 30, 'used': 0, 'total': 1 << 30, 'relative': 0, 'quota': -3}}),
-                       cookies=self._session_cookies())
+                       cookies=self._session_cookies(issued_by))
             return True
         if path in ('/ocs/v1.php/cloud/capabilities', '/ocs/v2.php/cloud/capabilities'):
             if not self._basic_ok():
@@ -288,6 +327,8 @@ class Handler(BaseHTTPRequestHandler):
                 'capabilities': {'core': {'pollinterval': 60, 'webdav-root': 'remote.php/webdav'},
                                  'files': {'bigfilechunking': True, 'undelete': True, 'versioning': True},
                                  'dav': {'chunking': '1.0'},
+                                 'notifications': {'ocs-endpoints': ['list', 'get', 'delete', 'delete-all', 'icons',
+                                                                     'rich-strings', 'action-web', 'user-status']},
                                  'theming': {'name': 'Nourax Workspace', 'url': 'https://drive.nourax.org', 'slogan': '',
                                              'color': '#2563EB', 'color-text': '#ffffff', 'color-element': '#2563EB',
                                              'color-element-bright': '#2563EB', 'color-element-dark': '#2563EB',
@@ -299,6 +340,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._record(401)
                 self._json(401, self._ocs(401, []))
                 return True
+            if self.server.nav_delay:
+                # The list arrives late, so a test can open the sidebar before it is there
+                time.sleep(self.server.nav_delay)
             if self.headers.get('If-None-Match') == NAV_ETAG:
                 self._record(304, {'event': 'navigation-304'})
                 self.send_response(304)
@@ -309,6 +353,19 @@ class Handler(BaseHTTPRequestHandler):
             self._record(200, {'event': 'navigation'})
             self._send(200, NAV_BODY, 'application/json; charset=utf-8', {'ETag': NAV_ETAG})
             return True
+        if path == '/ocs/v2.php/apps/notifications/api/v2/notifications':
+            if not self._basic_ok():
+                self._record(401)
+                self._json(401, self._ocs(401, []))
+                return True
+            self._record(200, {'event': 'notifications'})
+            link = f'https://{HOST}/apps/mail/'
+            self._json(200, self._ocs(200, [{
+                'notification_id': 1, 'app': 'mail', 'user': ws['user'], 'datetime': '2026-10-27T09:00:00+00:00',
+                'object_type': 'message', 'object_id': '1', 'subject': 'New mail from CI', 'message': 'A message waits in Mail',
+                'link': link, 'subjectRich': 'New mail from CI', 'messageRich': 'A message waits in Mail',
+                'actions': [{'label': 'Open mail', 'link': link, 'type': 'WEB', 'primary': True}]}]))
+            return True
         if path.startswith('/ocs/'):
             self._record(404)
             self._json(404, self._ocs(404, []))
@@ -317,8 +374,25 @@ class Handler(BaseHTTPRequestHandler):
         if m:
             if self._session_ok() and m.group(1) in APP_NAMES:
                 name = APP_NAMES[m.group(1)]
-                self._record(200, {'event': 'page', 'app': m.group(1)})
-                self._send(200, PAGE_HTML.format(user=ws['user'], name=name, foreign=FOREIGN_HOST), 'text/html; charset=utf-8')
+                sub = path.rsplit('/', 1)[-1]
+                if m.group(1) == 'mail' and sub == 'redirect-to-other-host':
+                    self._record(302, {'event': 'redirect-to-other-host'})
+                    self._send(302, '', 'text/html; charset=utf-8', {'Location': f'https://{FOREIGN_HOST}/redirected'})
+                    return True
+                extra = ''
+                if m.group(1) == 'mail' and sub == 'expire':
+                    sid = self._session_id()
+                    if sid not in ws['renewed']:
+                        # The session ends here: the next request of the web view would be sent to /login
+                        ws['sessions'].pop(sid, None)
+                        ws['renew_next'] = True
+                        self._record(302, {'event': 'session-expired'})
+                        self._send(302, '', 'text/html; charset=utf-8', {'Location': '/login'})
+                        return True
+                    extra = '<div class="card"><p>session-renewed</p></div>'
+                self._record(200, {'event': 'page', 'app': m.group(1), 'sub': sub})
+                self._send(200, PAGE_HTML.format(user=ws['user'], name=name, foreign=FOREIGN_HOST, extra=extra),
+                           'text/html; charset=utf-8')
             else:
                 self._record(302, {'event': 'page-redirect-to-login'})
                 self._send(302, '', 'text/html; charset=utf-8', {'Location': '/login'})
@@ -386,10 +460,11 @@ class DualStackTLSServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, addr, handler, context, log_path, workspace=None):
+    def __init__(self, addr, handler, context, log_path, workspace=None, nav_delay=0.0):
         self.context = context
         self.log_path = log_path
-        self.workspace = workspace   # None, or {'user', 'password', 'sessions'}
+        self.nav_delay = nav_delay
+        self.workspace = workspace   # None, or {'user', 'password', 'sessions', 'renewed', 'renew_next'}
         super().__init__(addr, handler)
 
     def server_bind(self):
@@ -438,6 +513,8 @@ def main():
     ap.add_argument('--key', required=True, help='PEM private key')
     ap.add_argument('--log', required=True, help='JSON-lines request log (appended)')
     ap.add_argument('--port', type=int, default=443)
+    ap.add_argument('--nav-delay', type=float, default=0.0,
+                    help='seconds to wait before the apps list is sent (the sidebar can then open before it arrives)')
     ap.add_argument('--workspace', action='store_true',
                     help='also answer for a signed-in account (NODRIVE_WS_USER, NODRIVE_WS_APP_PASSWORD in the environment)')
     args = ap.parse_args()
@@ -446,7 +523,7 @@ def main():
         user, password = os.environ.get('NODRIVE_WS_USER', ''), os.environ.get('NODRIVE_WS_APP_PASSWORD', '')
         if not user or not password:
             sys.exit('drive-stand-in: --workspace needs NODRIVE_WS_USER and NODRIVE_WS_APP_PASSWORD in the environment')
-        workspace = {'user': user, 'password': password, 'sessions': {}}
+        workspace = {'user': user, 'password': password, 'sessions': {}, 'renewed': set(), 'renew_next': False}
 
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
@@ -460,7 +537,7 @@ def main():
             pass
     ctx.sni_callback = sni
 
-    server = DualStackTLSServer(('::', args.port), Handler, ctx, args.log, workspace)
+    server = DualStackTLSServer(('::', args.port), Handler, ctx, args.log, workspace, args.nav_delay)
     server.write_log({'t': round(time.time(), 3), 'event': 'listening', 'port': args.port, 'workspace': bool(workspace)})
     print(f'drive-stand-in: listening on [::]:{args.port} (IPv4 and IPv6), log {args.log}', flush=True)
     server.serve_forever()

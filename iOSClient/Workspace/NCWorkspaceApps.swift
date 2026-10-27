@@ -11,12 +11,40 @@ struct NCWorkspaceApp: Codable, Equatable, Identifiable {
     let appId: String
     /// The name the server shows for the user's language.
     let name: String
-    /// The page, absolute and of the account's own origin.
+    /// The page, absolute: of the account's own origin, or an https page of another origin when `outside` is set.
     let href: String
     let icon: String?
+    /// True for an entry whose page lies on another origin (NoMail on mail.nourax.org). It opens in the in-app
+    /// browser panel with no NoDrive credential, cookie or session, never in the signed-in Workspace web view.
+    let outside: Bool
+
+    init(id: String, appId: String, name: String, href: String, icon: String?, outside: Bool = false) {
+        self.id = id
+        self.appId = appId
+        self.name = name
+        self.href = href
+        self.icon = icon
+        self.outside = outside
+    }
+
+    /// Lists cached by an earlier version have no `outside` key: they are all own-origin entries.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        appId = try container.decode(String.self, forKey: .appId)
+        name = try container.decode(String.self, forKey: .name)
+        href = try container.decode(String.self, forKey: .href)
+        icon = try container.decodeIfPresent(String.self, forKey: .icon)
+        outside = try container.decodeIfPresent(Bool.self, forKey: .outside) ?? false
+    }
 
     var symbolName: String {
-        Self.symbolName(appId: appId, id: id)
+        outside ? Self.outsideSymbolName(id: id) : Self.symbolName(appId: appId, id: id)
+    }
+
+    /// The server entry NoMail (app nourax_branding) gets the envelope; any other outside entry a link symbol.
+    static func outsideSymbolName(id: String) -> String {
+        id == "nourax_nomail" ? "envelope" : "link"
     }
 
     /// iOS has no SVG renderer for the server's icons, so each app gets an SF Symbol (they follow light and dark).
@@ -37,9 +65,14 @@ enum NCWorkspaceAppsParser {
         case malformed
     }
 
-    /// Keeps links only, leaves out Files (NoDrive already shows files) and the external-site entries (they are
-    /// listed under external sites), drops entries without a name and entries whose page is not of the
-    /// account's own origin, and keeps the server's order.
+    /// Entries the menu leaves out: NoDrive already shows files, and has its own Activity and Photos screens
+    /// (the same set as Android's HIDDEN_APPS). Checked against the entry id and the server app.
+    static let hiddenApps: Set<String> = ["files", "activity", "photos"]
+
+    /// Keeps links only, leaves out the hidden apps and the external-site entries (they are listed under
+    /// external sites), drops entries without a name, and keeps the server's order. A page of the account's own
+    /// origin is a normal entry. A page of another origin is kept as an "outside" entry only when it is https
+    /// with a plain host (no user info, no empty host); every other scheme or address is dropped.
     static func parse(data: Data, base: String) throws -> [NCWorkspaceApp] {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let ocs = root["ocs"] as? [String: Any] else { throw ParseError.malformed }
@@ -55,20 +88,27 @@ enum NCWorkspaceAppsParser {
         var apps: [NCWorkspaceApp] = []
         for entry in entries {
             guard (entry["type"] as? String) == "link",
-                  let id = entry["id"] as? String, !id.isEmpty, id != "files",
+                  let id = entry["id"] as? String, !id.isEmpty,
                   let name = (entry["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty,
                   let reference = entry["href"] as? String,
-                  let href = NCWorkspaceOrigin.resolve(reference, base: base),
-                  NCWorkspaceOrigin.isSameOrigin(href, base: base) else { continue }
+                  let href = NCWorkspaceOrigin.resolve(reference, base: base) else { continue }
             let appId = (entry["app"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? id
-            if appId == "external" { continue }
+            if appId == "external" || hiddenApps.contains(id) || hiddenApps.contains(appId) { continue }
+            let outside: Bool
+            if NCWorkspaceOrigin.isSameOrigin(href, base: base) {
+                outside = false
+            } else if NCWorkspaceOrigin.isOutsideLink(href) {
+                outside = true
+            } else {
+                continue
+            }
             var icon: String?
             if let iconReference = entry["icon"] as? String,
                let resolved = NCWorkspaceOrigin.resolve(iconReference, base: base),
                NCWorkspaceOrigin.isSameOrigin(resolved, base: base) {
                 icon = resolved
             }
-            apps.append(NCWorkspaceApp(id: id, appId: appId, name: name, href: href, icon: icon))
+            apps.append(NCWorkspaceApp(id: id, appId: appId, name: name, href: href, icon: icon, outside: outside))
         }
         return apps
     }
@@ -92,10 +132,34 @@ final class NCWorkspaceAppsStore {
 
     static let minimumInterval: TimeInterval = 600
 
-    private let defaults: UserDefaults
+    /// Posted (on any thread) when an account's list changed or was forgotten; userInfo["account"] names it.
+    /// An open sidebar listens, so a list that arrives late shows without reopening the menu.
+    static let didChange = Notification.Name("NoDriveWorkspaceAppsDidChange")
 
-    init(defaults: UserDefaults? = nil) {
+    private let defaults: UserDefaults
+    private let center: NotificationCenter
+    private let lock = NSLock()
+    private var accountsInFlight: Set<String> = []
+
+    init(defaults: UserDefaults? = nil, center: NotificationCenter = .default) {
         self.defaults = defaults ?? UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup) ?? .standard
+        self.center = center
+    }
+
+    private func beginRequest(account: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return accountsInFlight.insert(account).inserted
+    }
+
+    private func endRequest(account: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        accountsInFlight.remove(account)
+    }
+
+    private func announceChange(account: String) {
+        center.post(name: Self.didChange, object: nil, userInfo: ["account": account])
     }
 
     private func key(_ account: String) -> String {
@@ -119,11 +183,15 @@ final class NCWorkspaceAppsStore {
 
     func forget(account: String) {
         defaults.removeObject(forKey: key(account))
+        announceChange(account: account)
     }
 
     /// Asks the account's own server for the list (the app's normal sign-in header, no redirects).
     func refresh(account: String, force: Bool = false) async {
         guard let credentials = NCWorkspaceSession.credentials(account: account) else { return }
+        // One request at a time per account (the sidebar and the server update can ask together)
+        guard beginRequest(account: account) else { return }
+        defer { endRequest(account: account) }
         guard let request = NCWorkspaceSession.apiRequest(path: "ocs/v2.php/core/navigation/apps",
                                                          query: "absolute=false&format=json",
                                                          credentials: credentials) else { return }
@@ -159,6 +227,9 @@ final class NCWorkspaceAppsStore {
             guard let apps = try? NCWorkspaceAppsParser.parse(data: data, base: base) else { return .kept }
             let etag = response.value(forHTTPHeaderField: "ETag")
             save(Cache(etag: etag, apps: apps, fetchedAt: now), account: account)
+            if apps != cache?.apps {
+                announceChange(account: account)
+            }
             return .updated
         case 404:
             // An older server without the list: show nothing.

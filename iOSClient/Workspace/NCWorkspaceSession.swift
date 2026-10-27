@@ -92,11 +92,15 @@ enum NCWorkspaceSession {
         return (data, http)
     }
 
-    /// The sign-in request (section 1.5 of the design): `GET {base}/ocs/v2.php/cloud/user?format=json` with the
-    /// app's Basic header. Returns the server's session cookies, host-only, ready for the web view.
+    /// The query of the sign-in request. `nodrive=ws` marks it as the Workspace hand-off (the server ignores it),
+    /// so the CI checks can tell it from the account setup, which asks for the same path.
+    static let bootstrapQuery = "format=json&nodrive=ws"
+
+    /// The sign-in request (section 1.5 of the design): `GET {base}/ocs/v2.php/cloud/user?format=json&nodrive=ws`
+    /// with the app's Basic header. Returns the server's session cookies, host-only, ready for the web view.
     static func bootstrap(account: String) async throws -> (base: String, cookies: [HTTPCookie]) {
         guard let signedIn = Self.credentials(account: account),
-              let request = apiRequest(path: "ocs/v2.php/cloud/user", query: "format=json", credentials: signedIn),
+              let request = apiRequest(path: "ocs/v2.php/cloud/user", query: bootstrapQuery, credentials: signedIn),
               let url = request.url else { throw NCWorkspaceSessionError.noSession }
         let (data, response) = try await fetch(request)
         let cookies = try sessionCookies(data: data, response: response, url: url, userId: signedIn.userId)

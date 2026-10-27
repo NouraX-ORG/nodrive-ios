@@ -6,9 +6,15 @@ import XCTest
 /// The Workspace apps menu, end to end, in the simulator (CI job "screens").
 ///
 /// The app signs in to a local stand-in for drive.nourax.org (tools/ci/drive-stand-in.py --workspace); the real
-/// server is never contacted. The test then opens the sidebar, checks that the server's apps are listed (and
-/// Files is not), opens Mail (the page must show the signed-in user, never a login page), and follows a link to
-/// another host (it must open in the in-app browser panel, not in the Workspace screen).
+/// server is never contacted. The tests check:
+///   1. the menu (the server's apps in order, no Files, Activity or Photos, NoMail as an outside entry), a list that
+///      arrives after the sidebar opened, Mail signed in with no login page, a link to another host, and NoMail
+///      opening in the browser panel;
+///   2. every route to another host from a Workspace page (server redirect, new window, window.open) and an expired
+///      session that the app renews by itself;
+///   3. a second launch of the app, which must sign in again by itself (tools/ci/workspace-check.py checks the
+///      sessions in the stand-in's log);
+///   4. a notification link of the account's own server, which opens in the app, signed in.
 ///
 /// Environment (pass with the TEST_RUNNER_ prefix to xcodebuild):
 ///   NODRIVE_UITEST_ACCOUNT  "server URL|login name|app password": the account the app creates at launch
@@ -23,55 +29,41 @@ final class NoDriveWorkspaceUITests: XCTestCase {
     private let denyLabels = ["Don’t Allow", "Don't Allow", "Not Now", "Later"]
     private let continueLabels = ["Continue", "OK", "Allow"]
     private let doneLabels = ["Done", "Close"]
+    private let expectedMenu = ["Dashboard", "Mail", "NoMail", "Calendar", "Talk", "Contacts"]
     private var promptCount = 0
 
     override func setUp() async throws {
         continueAfterFailure = true
     }
 
+    // MARK: - 1. Menu, signed-in page, link to another host, NoMail
+
     func test1MenuSignedInPageAndForeignLink() throws {
-        guard let account = env["NODRIVE_UITEST_ACCOUNT"], !account.isEmpty else {
-            throw XCTSkip("NODRIVE_UITEST_ACCOUNT is not set")
-        }
-        let app = XCUIApplication()
-        app.launchArguments += ["UI_TESTING", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
-        app.launchEnvironment["NODRIVE_UITEST_ACCOUNT"] = account
-        app.launch()
-        record("launch", ["state": app.state.rawValue])
+        let app = try launchApp()
 
         // 1. The app signs the account in at launch and shows the main screen.
         let sidebarButton = app.buttons["openSidebar"]
         XCTAssertTrue(waitFor(sidebarButton, in: app, timeout: 300, hittable: true), "the main screen with the sidebar button never came up")
-        settle(app, seconds: 6)
         save("01-main-screen")
 
-        // 2. The sidebar lists the server's apps, and no entry for Files.
-        // The bar's buttons move while the avatar loads, so a tap can miss: tap again until the sidebar is open.
-        let sidebarOpen = app.descendants(matching: .any)["sidebarFiles"]
-        for attempt in 1...5 where !sidebarOpen.exists {
-            if sidebarButton.exists, sidebarButton.isHittable {
-                sidebarButton.tap()
-            }
-            record("sidebar-tap", ["attempt": attempt])
-            _ = waitFor(sidebarOpen, in: app, timeout: 10)
-        }
+        // 2. The sidebar opens at once; the stand-in sends the apps list late, so it has to arrive in the open sidebar.
+        openSidebar(app)
         let mail = app.descendants(matching: .any)["sidebarWorkspaceApp-mail"]
+        record("sidebar-open", ["apps_listed_at_open": mail.exists])
         let appeared = waitFor(mail, in: app, timeout: 90)
         XCTAssertTrue(appeared, "the sidebar has no Mail entry (the app list was not read from the server)")
         // Scroll so that the whole Apps section is in view (the last app is Contacts)
         scrollSidebar(until: app.descendants(matching: .any)["sidebarWorkspaceApp-contacts"], in: app)
         scrollSidebar(until: mail, in: app)
         Thread.sleep(forTimeInterval: 1)
-        let files = app.descendants(matching: .any)["sidebarWorkspaceApp-files"]
-        XCTAssertFalse(files.exists, "the apps menu lists Files")
-        for other in ["sidebarWorkspaceApp-external_index1", "sidebarWorkspaceApp-evil"] {
-            XCTAssertFalse(app.descendants(matching: .any)[other].exists, "\(other) is listed")
+        for hidden in ["files", "activity", "photos", "external_index1", "plainhttp", "userinfo"] {
+            XCTAssertFalse(app.descendants(matching: .any)["sidebarWorkspaceApp-\(hidden)"].exists, "\(hidden) is listed")
         }
         let appNames = app.buttons.allElementsBoundByIndex.filter { $0.identifier.hasPrefix("sidebarWorkspaceApp-") }.map(\.label)
         record("sidebar-apps", ["names": appNames])
         save("02-workspace-menu")
         saveTexts(app, "02-workspace-menu")
-        XCTAssertTrue(appNames.contains("Mail"), "the menu shows the server's name Mail")
+        XCTAssertEqual(appNames, expectedMenu, "the menu shows the server's apps in the server's order")
 
         // 3. Mail opens inside the app, signed in; no login page at any time.
         XCTAssertTrue(mail.isHittable, "the Mail entry cannot be tapped")
@@ -86,7 +78,7 @@ final class NoDriveWorkspaceUITests: XCTestCase {
         record("page", ["signed_in": shown, "web_views": app.webViews.count])
 
         // 4. A link to another host leaves the Workspace screen: it opens in the browser panel.
-        let foreign = app.webViews.links.matching(NSPredicate(format: "label CONTAINS[c] 'foreign'")).firstMatch
+        let foreign = app.webViews.links["Open the foreign test site"]
         if foreign.waitForExistence(timeout: 20) {
             foreign.tap()
             let opened = safariViewService.wait(for: .runningForeground, timeout: 60)
@@ -102,6 +94,168 @@ final class NoDriveWorkspaceUITests: XCTestCase {
             XCTAssertTrue(waitFor(signedIn, in: app, timeout: 30), "the Workspace page is gone after the panel closed")
         } else {
             XCTFail("the page has no link to another host")
+        }
+
+        // 5. NoMail (another origin) opens in the browser panel, never in the signed-in Workspace view.
+        openSidebar(app)
+        let nomail = app.descendants(matching: .any)["sidebarWorkspaceApp-nourax_nomail"]
+        XCTAssertTrue(waitFor(nomail, in: app, timeout: 30), "the sidebar has no NoMail entry")
+        scrollSidebar(until: nomail, in: app)
+        XCTAssertTrue(nomail.isHittable, "the NoMail entry cannot be tapped")
+        nomail.tap()
+        let nomailOpened = safariViewService.wait(for: .runningForeground, timeout: 60)
+        XCTAssertTrue(nomailOpened, "NoMail did not open in the in-app browser panel")
+        let nomailLoaded = safariViewService.staticTexts["NoMail stand-in"].waitForExistence(timeout: 40)
+        Thread.sleep(forTimeInterval: 2)
+        save("06-nomail-panel")
+        saveTexts(safariViewService, "06-nomail-panel")
+        record("nomail", ["panel_opened": nomailOpened, "loaded": nomailLoaded])
+        closeBrowserPanel(app)
+        // The Workspace page that was open stays; NoMail never replaced it
+        XCTAssertTrue(waitFor(signedIn, in: app, timeout: 30), "the Workspace page changed after NoMail")
+        XCTAssertFalse(app.webViews.staticTexts["NoMail stand-in"].exists, "NoMail was shown in the Workspace view")
+    }
+
+    // MARK: - 2. Redirect, new windows, window.open, session expiry
+
+    func test2RedirectNewWindowAndExpiredSession() throws {
+        let app = try launchApp()
+        try openMail(app)
+        let signedIn = app.webViews.staticTexts["signed-in:Mail"]
+
+        // A server redirect to another host, a new window (target=_blank) and window.open: each opens the browser
+        // panel, none of them loads in the Workspace view, and the Workspace page stays.
+        let routes: [(String, XCUIElement)] = [
+            ("redirect", app.webViews.links["Redirect to the other host"]),
+            ("new-window", app.webViews.links["New window to the other host"]),
+            ("window-open", app.webViews.buttons["window.open to the other host"])
+        ]
+        for (name, element) in routes {
+            XCTAssertTrue(element.waitForExistence(timeout: 20), "the page has no \(name) element")
+            element.tap()
+            let opened = safariViewService.wait(for: .runningForeground, timeout: 60)
+            XCTAssertTrue(opened, "\(name): the other host did not open in the browser panel")
+            Thread.sleep(forTimeInterval: 3)
+            save("10-\(name)-panel")
+            record("route-\(name)", ["panel_opened": opened])
+            closeBrowserPanel(app)
+            XCTAssertTrue(waitFor(signedIn, in: app, timeout: 30), "\(name): the Workspace page is gone")
+            XCTAssertFalse(app.webViews.staticTexts["LOGIN"].exists, "\(name): a login page was shown")
+        }
+
+        // The session ends on the server: the next page would be the login page. The app signs in again by itself,
+        // loads the page again, and the user never sees a login page.
+        let expire = app.webViews.links["Expire the session"]
+        XCTAssertTrue(expire.waitForExistence(timeout: 20), "the page has no expiry link")
+        expire.tap()
+        let renewed = app.webViews.staticTexts["session-renewed"]
+        let renewedShown = waitFor(renewed, in: app, timeout: 120)
+        XCTAssertTrue(renewedShown, "the page did not come back after the session ended")
+        XCTAssertFalse(app.webViews.staticTexts["LOGIN"].exists, "a login page was shown after the session ended")
+        settle(app, seconds: 2)
+        save("11-session-renewed")
+        record("session-renewed", ["shown": renewedShown])
+    }
+
+    // MARK: - 3. A second launch signs in again by itself
+
+    func test3SecondLaunchSignsInAgain() throws {
+        let app = try launchApp()
+        try openMail(app)
+        record("first-launch-page", ["ok": true])
+        app.terminate()
+
+        // The same app launches again: no web data of the first launch may be used, the Workspace page signs in by itself
+        record("launch-begin", [:])
+        app.launch()
+        record("launch", ["state": app.state.rawValue])
+        try openMail(app)
+        save("12-second-launch-page")
+        record("second-launch-page", ["ok": true])
+    }
+
+    // MARK: - 4. A notification link of the account's own server
+
+    func test4NotificationLinkOpensInTheApp() throws {
+        let app = try launchApp()
+        let sidebarButton = app.buttons["openSidebar"]
+        XCTAssertTrue(waitFor(sidebarButton, in: app, timeout: 300, hittable: true), "the main screen with the sidebar button never came up")
+        settle(app, seconds: 4)
+        openSidebar(app)
+        let bell = app.descendants(matching: .any)["sidebarNotifications"]
+        XCTAssertTrue(waitFor(bell, in: app, timeout: 90, hittable: true), "the sidebar has no Notifications button")
+        bell.tap()
+
+        let action = app.buttons["Open mail"]
+        let listed = waitFor(action, in: app, timeout: 90)
+        XCTAssertTrue(listed, "the notification list has no Open mail button")
+        save("13-notifications")
+        record("notifications", ["listed": listed])
+        action.tap()
+
+        let signedIn = app.webViews.staticTexts["signed-in:Mail"]
+        let shown = waitFor(signedIn, in: app, timeout: 120)
+        XCTAssertTrue(shown, "the notification link did not open the signed-in page inside the app")
+        XCTAssertFalse(app.webViews.staticTexts["LOGIN"].exists, "a login page was shown")
+        XCTAssertFalse(safariViewService.state == .runningForeground, "the link opened in the browser")
+        save("14-notification-page")
+        record("notification-page", ["signed_in": shown])
+
+        // The Close button brings the notification list back
+        var close = app.buttons["workspaceClose"]
+        if !close.exists {
+            close = app.navigationBars.buttons["Close"].firstMatch
+        }
+        XCTAssertTrue(close.waitForExistence(timeout: 20), "the Workspace screen has no Close button")
+        close.tap()
+        XCTAssertTrue(waitFor(action, in: app, timeout: 30), "the notification list is not back after Close")
+        XCTAssertEqual(app.webViews.count, 0, "the Workspace web view is still open after Close")
+    }
+
+    // MARK: - Steps
+
+    private func launchApp() throws -> XCUIApplication {
+        guard let account = env["NODRIVE_UITEST_ACCOUNT"], !account.isEmpty else {
+            throw XCTSkip("NODRIVE_UITEST_ACCOUNT is not set")
+        }
+        let app = XCUIApplication()
+        app.launchArguments += ["UI_TESTING", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+        app.launchEnvironment["NODRIVE_UITEST_ACCOUNT"] = account
+        // tools/ci/workspace-check.py compares the sessions the pages used with the time of every launch
+        record("launch-begin", [:])
+        app.launch()
+        record("launch", ["state": app.state.rawValue])
+        return app
+    }
+
+    /// The main screen, the sidebar, and the Mail page, signed in.
+    private func openMail(_ app: XCUIApplication) throws {
+        let sidebarButton = app.buttons["openSidebar"]
+        XCTAssertTrue(waitFor(sidebarButton, in: app, timeout: 300, hittable: true), "the main screen with the sidebar button never came up")
+        settle(app, seconds: 4)
+        openSidebar(app)
+        let mail = app.descendants(matching: .any)["sidebarWorkspaceApp-mail"]
+        XCTAssertTrue(waitFor(mail, in: app, timeout: 90), "the sidebar has no Mail entry (the app list was not read from the server)")
+        scrollSidebar(until: mail, in: app)
+        XCTAssertTrue(mail.isHittable, "the Mail entry cannot be tapped")
+        mail.tap()
+        let signedIn = app.webViews.staticTexts["signed-in:Mail"]
+        let shown = waitFor(signedIn, in: app, timeout: 120)
+        XCTAssertTrue(shown, "the Mail page did not show the signed-in user")
+        XCTAssertFalse(app.webViews.staticTexts["LOGIN"].exists, "a login page was shown")
+        settle(app, seconds: 2)
+    }
+
+    /// The bar's buttons move while the avatar loads, so a tap can miss: tap again until the sidebar is open.
+    private func openSidebar(_ app: XCUIApplication) {
+        let sidebarButton = app.buttons["openSidebar"]
+        let sidebarOpen = app.descendants(matching: .any)["sidebarFiles"]
+        for attempt in 1...5 where !sidebarOpen.exists {
+            if sidebarButton.exists, sidebarButton.isHittable {
+                sidebarButton.tap()
+            }
+            record("sidebar-tap", ["attempt": attempt])
+            _ = waitFor(sidebarOpen, in: app, timeout: 10)
         }
     }
 

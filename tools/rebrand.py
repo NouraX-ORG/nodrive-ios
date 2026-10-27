@@ -111,6 +111,7 @@ TEST_FILES = [
     ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveWorkspaceAppsTests.swift'),
     ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveWorkspaceSessionTests.swift'),
     ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveWorkspaceWebTests.swift'),
+    ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveWorkspaceMenuTests.swift'),
     ('NextcloudUITests', 'NextcloudUITests', 'NoDriveScreenshotUITests.swift'),
     ('NextcloudUITests', 'NextcloudUITests', 'NoDriveWorkspaceUITests.swift'),
 ]

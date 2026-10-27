@@ -222,6 +222,11 @@ extension NCMainTabBarController {
     /// A Workspace web app (Mail, Calendar, Talk, ...) inside NoDrive, already signed in.
     private func openSidebarWorkspaceApp(_ app: NCWorkspaceApp) {
         guard let url = URL(string: app.href) else { return }
+        // An entry of another origin (NoMail) opens in the browser panel, with no NoDrive credential or session
+        if app.outside {
+            _ = NCWorkspaceWeb.shared.openOutside(url, from: self)
+            return
+        }
         let webController = NCWorkspaceWebViewController(account: account, url: url, title: app.name)
         webController.restorationIdentifier = "sidebarWorkspaceApp-\(app.id)"
         selectSidebarDestination(NCMainNavigationController(rootViewController: webController))

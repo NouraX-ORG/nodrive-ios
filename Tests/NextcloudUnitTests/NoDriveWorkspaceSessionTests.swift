@@ -137,6 +137,29 @@ struct NoDriveWorkspaceSessionTests {
         #expect(request.httpShouldHandleCookies == false)
     }
 
+    @Test("The sign-in request is marked as the Workspace hand-off, so it is told apart from the account setup")
+    func requestMarker() throws {
+        #expect(NCWorkspaceSession.bootstrapQuery == "format=json&nodrive=ws")
+        let request = try #require(NCWorkspaceSession.apiRequest(path: "ocs/v2.php/cloud/user",
+                                                                 query: NCWorkspaceSession.bootstrapQuery,
+                                                                 credentials: credentials(base: "https://drive.nourax.org")))
+        #expect(request.url?.absoluteString == "https://drive.nourax.org/ocs/v2.php/cloud/user?format=json&nodrive=ws")
+        // The credential is in the header only, never in the address
+        #expect(!(request.url?.absoluteString.contains("dGVzdDp0ZXN0") ?? true))
+    }
+
+    @Test("A cookie of an https server becomes Secure; a local http test server keeps what it sent")
+    func secureOverHttps() {
+        let header = "oc_sessionPassphrase=p; path=/; HttpOnly, ocabcdefghij=s; path=/; HttpOnly"
+        let secure = NCWorkspaceCookies.cookies(fromHeaderFields: ["Set-Cookie": header], url: url)
+        #expect(secure.count == 2)
+        #expect(secure.allSatisfy(\.isSecure))
+        let local = URL(string: "http://localhost:8080/ocs/v2.php/cloud/user?format=json")!
+        let plain = NCWorkspaceCookies.cookies(fromHeaderFields: ["Set-Cookie": header], url: local)
+        #expect(plain.count == 2)
+        #expect(plain.allSatisfy { !$0.isSecure })
+    }
+
     @Test("A base that is not a web address gets no request, so no credential can be sent")
     func noRequestForOtherBase() {
         #expect(NCWorkspaceSession.apiRequest(path: "ocs", query: "x=1", credentials: credentials(base: "ftp://drive.nourax.org")) == nil)

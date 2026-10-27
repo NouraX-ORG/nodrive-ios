@@ -16,6 +16,7 @@ on:
       - main
       - platform/ios
       - feature/workspace-apps
+      - feature/workspace-apps-fixes
   workflow_dispatch:
     inputs:
       products_run_id:
@@ -79,6 +80,9 @@ jobs:
 
       - name: The UI-test account code exists in Debug builds only
         run: python tools/ci/workspace-check.py --debug-only iOSClient/Workspace/NCUITestAccount.swift
+
+      - name: The Workspace checks can fail (each broken log must be caught)
+        run: python tools/ci/workspace-check.py --self-test
 
   server-login:
     name: Server login (a real Nextcloud 35 in Docker; the app's web view sign-in)
@@ -397,7 +401,7 @@ jobs:
           export NODRIVE_WS_USER=citest NODRIVE_WS_APP_PASSWORD="$WS_PW"
           printf '127.0.0.1 foreign.nodrive-ci.test\n::1 foreign.nodrive-ci.test\n' | sudo tee -a /etc/hosts
           sudo -E nohup "$(command -v python3)" tools/ci/drive-stand-in.py --cert "$SI/chain.pem" --key "$SI/leaf.key" \
-            --log "$RESULTS/stand-in.jsonl" --workspace > "$RESULTS/stand-in.out" 2>&1 &
+            --log "$RESULTS/stand-in.jsonl" --workspace --nav-delay 6 > "$RESULTS/stand-in.out" 2>&1 &
           for i in $(seq 1 30); do
             curl -fsS --cacert "$SI/ca.pem" -o /dev/null https://drive.nourax.org/status.php && break
             sleep 0.5
@@ -462,10 +466,10 @@ jobs:
           bash tools/ci/screens.sh switch "$UDID" en en_US dark
           bash tools/ci/screens.sh workspace "$UDID" workspace-dark
 
-      - name: Workspace checks (credential only to the own server, no login page, no stale sessions)
+      - name: Workspace checks (credential only to the own server, no login page, no stale sessions, expiry)
         if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
         run: |
-          python3 tools/ci/workspace-check.py "$RESULTS/stand-in.jsonl" --json "$RESULTS/workspace-check.json"
+          python3 tools/ci/workspace-check.py "$RESULTS/stand-in.jsonl" --walk "$SHOTS" --json "$RESULTS/workspace-check.json"
 
       - name: Network gate (no Nextcloud hosts; sign-in opened drive.nourax.org)
         if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true }}

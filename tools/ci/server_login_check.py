@@ -115,7 +115,7 @@ def run_token(srv, kind, token, out, container, login_password):
     say(f'\n## App password {kind}')
     user = srv.user
     # 3. the app's one request
-    status, hdrs, body, set_cookies = srv.request('GET', '/ocs/v2.php/cloud/user?format=json', basic=token)
+    status, hdrs, body, set_cookies = srv.request('GET', '/ocs/v2.php/cloud/user?format=json&nodrive=ws', basic=token)
     jar, counts = jar_from(set_cookies)
     check(status == 200, f'{kind}/3 bootstrap request answers 200', f'status {status}')
     try:
@@ -136,7 +136,7 @@ def run_token(srv, kind, token, out, container, login_password):
     m = re.search(r'data-requesttoken="([^"]+)"', text)
     request_token = m.group(1) if m else ''
     # The negative control uses a session of its own: a request without the passphrase makes the server drop that session.
-    _, _, _, sc_b = srv.request('GET', '/ocs/v2.php/cloud/user?format=json', basic=token)
+    _, _, _, sc_b = srv.request('GET', '/ocs/v2.php/cloud/user?format=json&nodrive=ws', basic=token)
     jar_b, _ = jar_from(sc_b)
     partial = {k: v for k, v in jar_b.items() if k != PASSPHRASE}
     ok2, st2, loc2, _ = signed_in(srv, partial)
@@ -180,7 +180,7 @@ def run_token(srv, kind, token, out, container, login_password):
     # 6. controls
     st, hdrs, _, _ = srv.request('GET', '/index.php/apps/dashboard/', headers={'Accept': 'text/html'})
     check(st in (302, 303) and 'login' in hdrs.get('location', ''), f'{kind}/6 no credentials -> login redirect', f'status {st}')
-    st, _, _, wrong_cookies = srv.request('GET', '/ocs/v2.php/cloud/user?format=json', basic=token[::-1])
+    st, _, _, wrong_cookies = srv.request('GET', '/ocs/v2.php/cloud/user?format=json&nodrive=ws', basic=token[::-1])
     wjar, _ = jar_from(wrong_cookies)
     wok, _, _, _ = signed_in(srv, wjar)
     check(st == 401 and not wok, f'{kind}/6 wrong app password -> 401, nothing signed in', f'status {st}')
@@ -194,7 +194,7 @@ def run_token(srv, kind, token, out, container, login_password):
         srv.request('GET', '/index.php/logout?requesttoken=' + urllib.parse.quote(request_token), cookies=jar, ua=WEB_UA_PRIMARY)
     ok3, st3, _, _ = signed_in(srv, jar)
     check(not ok3, f'{kind}/8 after a web log-out the cookies are signed out', f'status {st3}')
-    status, _, _, set_cookies = srv.request('GET', '/ocs/v2.php/cloud/user?format=json', basic=token)
+    status, _, _, set_cookies = srv.request('GET', '/ocs/v2.php/cloud/user?format=json&nodrive=ws', basic=token)
     jar2, _ = jar_from(set_cookies)
     again, _, _, _ = signed_in(srv, jar2)
     check(status == 200 and again, f'{kind}/8 the app password still works after the web log-out', f'status {status}')
@@ -205,7 +205,7 @@ def run_token(srv, kind, token, out, container, login_password):
                 env={'NC_PASS': login_password})
         tok = (r.stdout.strip().splitlines() or [''])[-1].strip()
         if len(tok) >= 32:
-            st, _, _, sc = srv.request('GET', '/ocs/v2.php/cloud/user?format=json', basic=tok)
+            st, _, _, sc = srv.request('GET', '/ocs/v2.php/cloud/user?format=json&nodrive=ws', basic=tok)
             rjar, _ = jar_from(sc)
             before, _, _, _ = signed_in(srv, rjar)
             lst = occ(container, 'user:auth-tokens:list', '--output=json', user)
@@ -236,7 +236,7 @@ def run_token(srv, kind, token, out, container, login_password):
 def ua_check(port, user, token, out):
     say('\n## 9. Web view user agents (Playwright with Chrome; /unsupported check)')
     srv = Server(port, user)
-    _, _, _, sc = srv.request('GET', '/ocs/v2.php/cloud/user?format=json', basic=token)
+    _, _, _, sc = srv.request('GET', '/ocs/v2.php/cloud/user?format=json&nodrive=ws', basic=token)
     jar, _ = jar_from(sc)
     try:
         from playwright.sync_api import sync_playwright

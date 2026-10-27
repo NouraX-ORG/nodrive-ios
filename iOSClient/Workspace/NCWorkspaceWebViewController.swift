@@ -17,26 +17,64 @@ final class NCWorkspaceWebViewController: UIViewController {
     /// server's web pages do not take it for an unsupported browser.
     static let applicationName = "Mobile/15E148 NoDrive"
 
+    /// What the screen does with a decision. The real ones act on the web view and the screen; the unit tests
+    /// replace them to see which decision was taken.
+    struct Effects {
+        var load: (URL) -> Void
+        var signIn: (URL) -> Void
+        var failure: () -> Void
+        var openPanel: (URL) -> Void
+        var openSystem: (URL) -> Void
+        var close: () -> Void
+    }
+
     let account: String
+    let showsCloseButton: Bool
     private let startURL: URL
     private let base: String
-    private let showsCloseButton: Bool
     private var webView: WKWebView!
     private let spinner = UIActivityIndicatorView(style: .large)
     private var canGoBackObservation: NSKeyValueObservation?
     private var startTask: Task<Void, Never>?
-    private var lastPageURL: URL
+    private(set) var lastPageURL: URL
     private var lastReauthentication: Date?
+    private var failurePending = false
+
+    /// True once the account was removed or signed out: the screen is closed, its web data cleared, and it never
+    /// signs in or loads anything again.
+    private(set) var isInvalidated = false
+
+    /// The screen's own data store (nil before the view is loaded).
+    var websiteDataStore: WKWebsiteDataStore? {
+        webView?.configuration.websiteDataStore
+    }
+
+    /// How the screen leaves when the account goes. Nil: the real way (see `leaveScreen`). Tests set it.
+    var leaveHandler: (() -> Void)?
+
+    lazy var effects = Effects(
+        load: { [weak self] url in
+            guard let self, !self.isInvalidated else { return }
+            self.lastPageURL = url
+            self.webView?.load(URLRequest(url: url))
+        },
+        signIn: { [weak self] url in self?.signInAndLoad(url) },
+        failure: { [weak self] in self?.showFailure() },
+        openPanel: { [weak self] url in self?.openInBrowserPanel(url) },
+        openSystem: { url in UIApplication.shared.open(url) },
+        close: { [weak self] in self?.closeScreen() }
+    )
 
     /// - Parameters:
     ///   - account: the NoDrive account whose app password signs the page in.
     ///   - url: the page; it must be of the account's own origin.
     ///   - showsCloseButton: true when presented on its own (notification links), false inside the main screen.
-    init(account: String, url: URL, title: String, showsCloseButton: Bool = false) {
+    ///   - base: the account's server URL; nil takes it from the signed-in account (tests pass their own).
+    init(account: String, url: URL, title: String, showsCloseButton: Bool = false, base: String? = nil) {
         self.account = account
         self.startURL = url
         self.lastPageURL = url
-        self.base = NCWorkspaceSession.credentials(account: account)?.base ?? ""
+        self.base = base ?? NCWorkspaceSession.credentials(account: account)?.base ?? ""
         self.showsCloseButton = showsCloseButton
         super.init(nibName: nil, bundle: nil)
         self.title = title
@@ -88,6 +126,7 @@ final class NCWorkspaceWebViewController: UIViewController {
                 self?.dismiss(animated: true)
             })
             close.accessibilityLabel = NSLocalizedString("_close_", comment: "")
+            close.accessibilityIdentifier = "workspaceClose"
             navigationItem.rightBarButtonItem = close
         }
 
@@ -105,14 +144,25 @@ final class NCWorkspaceWebViewController: UIViewController {
         updateBackButton()
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // A failure that came while the browser panel was up is shown now
+        if failurePending, presentedViewController == nil {
+            failurePending = false
+            showFailure()
+        }
+    }
+
     // MARK: - Sign-in and loading
 
     /// Signs in natively, puts the session cookies into the web view, then loads `url` without a credential.
     private func signInAndLoad(_ url: URL) {
+        guard !isInvalidated, isViewLoaded else { return }
         startTask?.cancel()
         spinner.startAnimating()
         let account = account
         let store = webView.configuration.websiteDataStore.httpCookieStore
+        let dataStore = webView.configuration.websiteDataStore
         startTask = Task { [weak self] in
             do {
                 let session = try await NCWorkspaceSession.bootstrap(account: account)
@@ -120,8 +170,13 @@ final class NCWorkspaceWebViewController: UIViewController {
                 guard NCWorkspaceOrigin.isSameOrigin(url.absoluteString, base: session.base) else {
                     throw NCWorkspaceSessionError.noSession
                 }
-                for cookie in session.cookies {
+                for cookie in session.cookies where !self.isInvalidated {
                     await store.setCookie(cookie)
+                }
+                guard !self.isInvalidated else {
+                    // The account went while the cookies were being set: leave nothing in the store
+                    await dataStore.removeData(ofTypes: NCWorkspaceWeb.websiteDataTypes, modifiedSince: .distantPast)
+                    return
                 }
                 guard !Task.isCancelled else { return }
                 self.lastPageURL = url
@@ -134,8 +189,13 @@ final class NCWorkspaceWebViewController: UIViewController {
     }
 
     private func showFailure() {
+        guard !isInvalidated else { return }
         spinner.stopAnimating()
-        guard presentedViewController == nil else { return }
+        guard presentedViewController == nil else {
+            // Shown when the browser panel on top is gone
+            failurePending = true
+            return
+        }
         let alert = UIAlertController(title: NSLocalizedString("_error_", comment: ""),
                                       message: nil,
                                       preferredStyle: .alert)
@@ -153,7 +213,7 @@ final class NCWorkspaceWebViewController: UIViewController {
 
     /// The web page's history is walked with a back button next to the sidebar button.
     private func updateBackButton() {
-        guard isViewLoaded else { return }
+        guard isViewLoaded, !isInvalidated else { return }
         if webView.canGoBack {
             let back = UIBarButtonItem(image: UIImage(systemName: "chevron.backward"), primaryAction: UIAction { [weak self] _ in
                 self?.webView.goBack()
@@ -170,23 +230,39 @@ final class NCWorkspaceWebViewController: UIViewController {
     // MARK: - Closing
 
     private func closeScreen() {
+        leaveScreen(animated: true)
+    }
+
+    /// Presented on its own (notification link): dismiss it. Inside the main screen: back to the files.
+    private func leaveScreen(animated: Bool) {
         if presentingViewController != nil || navigationController?.presentingViewController != nil {
-            dismiss(animated: true)
+            dismiss(animated: animated)
         } else {
-            // Inside the main screen: back to the files.
             (tabBarController as? NCMainTabBarController)?.openSidebarFiles()
         }
     }
 
-    /// Called when the account is removed or signed out: stop everything and leave nothing behind.
-    func invalidate() {
+    /// Called when the account is removed (also a remote wipe) or signed out: stops everything, leaves the
+    /// screen (a presented one is dismissed; the one in the main view gives way to Files), and clears the
+    /// screen's own web data, so a later sign-in can never reuse the page, the cookies or the session.
+    func invalidate() async {
+        guard !isInvalidated else { return }
+        isInvalidated = true
         startTask?.cancel()
+        startTask = nil
+        canGoBackObservation = nil
+        spinner.stopAnimating()
+        let store = webView?.configuration.websiteDataStore
         webView?.stopLoading()
         webView?.navigationDelegate = nil
         webView?.uiDelegate = nil
-        if presentingViewController != nil || navigationController?.presentingViewController != nil {
-            dismiss(animated: false)
+        webView?.removeFromSuperview()
+        if let leaveHandler {
+            leaveHandler()
+        } else {
+            leaveScreen(animated: false)
         }
+        await store?.removeData(ofTypes: NCWorkspaceWeb.websiteDataTypes, modifiedSince: .distantPast)
     }
 
     // MARK: - Other origins
@@ -209,35 +285,43 @@ extension NCWorkspaceWebViewController: WKNavigationDelegate {
             decisionHandler(.allow)
             return
         }
+        decisionHandler(policy(forMainFrameNavigationTo: url))
+    }
+
+    /// The policy for a main-frame navigation, a server redirect included: the account's own pages load in place,
+    /// a login page (the session ended) triggers a native sign-in, the log-out page closes the screen, another
+    /// origin goes to the browser panel, and nothing else loads.
+    func policy(forMainFrameNavigationTo url: URL) -> WKNavigationActionPolicy {
+        guard !isInvalidated else { return .cancel }
         switch NCWorkspaceOrigin.navigationDecision(for: url.absoluteString, base: base) {
         case .allow:
-            lastPageURL = url
-            decisionHandler(.allow)
+            // Only a real page of the account is a place to come back to (not about:blank)
+            if let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" {
+                lastPageURL = url
+            }
+            return .allow
         case .reauthenticate:
-            decisionHandler(.cancel)
             reauthenticate()
         case .close:
-            decisionHandler(.cancel)
-            closeScreen()
+            effects.close()
         case .openExternally:
-            decisionHandler(.cancel)
-            openInBrowserPanel(url)
+            effects.openPanel(url)
         case .openSystem:
-            decisionHandler(.cancel)
-            UIApplication.shared.open(url)
+            effects.openSystem(url)
         case .cancel:
-            decisionHandler(.cancel)
+            break
         }
+        return .cancel
     }
 
     /// The server ended the web session (a login page came up): sign in again natively, once a minute at most.
     private func reauthenticate() {
         if let last = lastReauthentication, Date().timeIntervalSince(last) < 60 {
-            showFailure()
+            effects.failure()
             return
         }
         lastReauthentication = Date()
-        signInAndLoad(lastPageURL)
+        effects.signIn(lastPageURL)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -263,15 +347,29 @@ extension NCWorkspaceWebViewController: WKUIDelegate {
                  createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction,
                  windowFeatures: WKWindowFeatures) -> WKWebView? {
-        guard let url = navigationAction.request.url else { return nil }
-        switch NCWorkspaceOrigin.navigationDecision(for: url.absoluteString, base: base) {
-        case .allow:
-            webView.load(URLRequest(url: url))
-        case .openExternally:
-            openInBrowserPanel(url)
-        default:
-            break
+        if let url = navigationAction.request.url {
+            handleNewWindow(to: url)
         }
         return nil
+    }
+
+    /// A page asks for a new window (target="_blank", window.open): never a second web view. The account's own
+    /// pages load in place, another origin goes to the browser panel, and the rest is treated as in the main frame.
+    func handleNewWindow(to url: URL) {
+        guard !isInvalidated else { return }
+        switch NCWorkspaceOrigin.navigationDecision(for: url.absoluteString, base: base) {
+        case .allow:
+            effects.load(url)
+        case .reauthenticate:
+            reauthenticate()
+        case .close:
+            effects.close()
+        case .openExternally:
+            effects.openPanel(url)
+        case .openSystem:
+            effects.openSystem(url)
+        case .cancel:
+            break
+        }
     }
 }
