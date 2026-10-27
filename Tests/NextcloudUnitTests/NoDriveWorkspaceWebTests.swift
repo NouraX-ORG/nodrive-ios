@@ -83,7 +83,7 @@ struct NoDriveWorkspaceWebTests {
         _ = await apps.refresh(account: account, base: base, request: request, force: true, now: Date(), fetch: transport.fetch)
         #expect(!apps.cached(account: account).isEmpty)
 
-        await NCWorkspaceWeb.shared.forget(account: account, urlBase: base)
+        await NCWorkspaceWeb.shared.forget(account: account, urlBase: "")
 
         #expect(apps.cached(account: account).isEmpty)
     }
@@ -105,7 +105,7 @@ struct NoDriveWorkspaceWebTests {
         controller.leaveHandler = { left += 1 }
         #expect(!controller.isInvalidated)
 
-        await NCWorkspaceWeb.shared.forget(account: account, urlBase: base)
+        await NCWorkspaceWeb.shared.forget(account: account, urlBase: "")
 
         // Closed, empty, and unusable
         #expect(left == 1)
@@ -118,7 +118,7 @@ struct NoDriveWorkspaceWebTests {
         #expect(recorder.loads.isEmpty && recorder.signIns.isEmpty)
 
         // A second removal does not close it again
-        await NCWorkspaceWeb.shared.forget(account: account, urlBase: base)
+        await NCWorkspaceWeb.shared.forget(account: account, urlBase: "")
         #expect(left == 1)
     }
 
@@ -139,14 +139,14 @@ struct NoDriveWorkspaceWebTests {
         let cookie = try sessionCookie()
         await otherStore.httpCookieStore.setCookie(cookie)
 
-        await NCWorkspaceWeb.shared.forget(account: account, urlBase: base)
+        await NCWorkspaceWeb.shared.forget(account: account, urlBase: "")
 
         #expect(closed.sorted() == ["first", "second"])
         #expect(first.isInvalidated && second.isInvalidated)
         #expect(!other.isInvalidated)
         #expect(await otherStore.httpCookieStore.allCookies().count == 1)
         // Clean up the other screen
-        await NCWorkspaceWeb.shared.forget(account: "other-user https://drive.nourax.org", urlBase: base)
+        await NCWorkspaceWeb.shared.forget(account: "other-user https://drive.nourax.org", urlBase: "")
         #expect(other.isInvalidated)
     }
 
@@ -158,14 +158,14 @@ struct NoDriveWorkspaceWebTests {
         let oldStore = try #require(old.websiteDataStore)
         let cookie = try sessionCookie()
         await oldStore.httpCookieStore.setCookie(cookie)
-        await NCWorkspaceWeb.shared.forget(account: account, urlBase: base)
+        await NCWorkspaceWeb.shared.forget(account: account, urlBase: "")
 
         let fresh = makeController(account: account)
         fresh.loadViewIfNeeded()
         let freshStore = try #require(fresh.websiteDataStore)
         #expect(freshStore !== oldStore)
         #expect(await freshStore.httpCookieStore.allCookies().isEmpty)
-        await NCWorkspaceWeb.shared.forget(account: account, urlBase: base)
+        await NCWorkspaceWeb.shared.forget(account: account, urlBase: "")
     }
 
     // MARK: - Redirects, new windows, session expiry
@@ -255,7 +255,7 @@ struct NoDriveWorkspaceWebTests {
         #expect(controller.policy(forMainFrameNavigationTo: URL(string: "about:blank")!) == .allow)
         #expect(controller.lastPageURL == own)
         #expect(controller.policy(forMainFrameNavigationTo: URL(string: "https://drive.nourax.org/apps/talk/")!) == .allow)
-        #expect(controller.lastPageURL.path == "/apps/talk/")
+        #expect(controller.lastPageURL.path == "/apps/talk")
     }
 
     @Test("The log-out page closes the screen and keeps the account")
@@ -310,7 +310,7 @@ struct NoDriveWorkspaceWebTests {
         #expect(screen.account == session.account)
         #expect(screen.lastPageURL == link)
         // Clean up
-        await NCWorkspaceWeb.shared.forget(account: session.account, urlBase: base)
+        await NCWorkspaceWeb.shared.forget(account: session.account, urlBase: "")
     }
 
     @Test("Notification links of another server are not taken in")
