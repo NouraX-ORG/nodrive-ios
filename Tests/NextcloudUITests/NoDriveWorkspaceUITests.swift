@@ -186,9 +186,9 @@ final class NoDriveWorkspaceUITests: XCTestCase {
         let sidebarButton = app.buttons["openSidebar"]
         XCTAssertTrue(waitFor(sidebarButton, in: app, timeout: 300, hittable: true), "the main screen with the sidebar button never came up")
         settle(app, seconds: 4)
-        openSidebar(app)
         let bell = app.buttons["sidebarNotifications"]
-        XCTAssertTrue(waitFor(bell, in: app, timeout: 90, hittable: true), "the sidebar has no Notifications button")
+        openSidebar(app, until: bell)
+        XCTAssertTrue(waitFor(bell, in: app, timeout: 30, hittable: true), "the sidebar has no Notifications button")
         bell.tap()
 
         let action = app.buttons["Open mail"]
@@ -238,9 +238,9 @@ final class NoDriveWorkspaceUITests: XCTestCase {
         let sidebarButton = app.buttons["openSidebar"]
         XCTAssertTrue(waitFor(sidebarButton, in: app, timeout: 300, hittable: true), "the main screen with the sidebar button never came up")
         settle(app, seconds: 4)
-        openSidebar(app)
         let mail = app.descendants(matching: .any)["sidebarWorkspaceApp-mail"]
-        XCTAssertTrue(waitFor(mail, in: app, timeout: 90), "the sidebar has no Mail entry (the app list was not read from the server)")
+        openSidebar(app, until: mail)
+        XCTAssertTrue(mail.exists, "the sidebar has no Mail entry (the app list was not read from the server)")
         scrollSidebar(until: mail, in: app)
         XCTAssertTrue(mail.isHittable, "the Mail entry cannot be tapped")
         mail.tap()
@@ -249,6 +249,17 @@ final class NoDriveWorkspaceUITests: XCTestCase {
         XCTAssertTrue(shown, "the Mail page did not show the signed-in user")
         XCTAssertFalse(app.webViews.staticTexts["LOGIN"].exists, "a login page was shown")
         settle(app, seconds: 2)
+    }
+
+    /// A launch that restores the main screen of an earlier launch replaces it a few seconds later with the one of
+    /// the new account, and an open sidebar goes with it: open the sidebar again until `element` is in it.
+    private func openSidebar(_ app: XCUIApplication, until element: XCUIElement) {
+        for _ in 1...4 {
+            openSidebar(app)
+            if waitFor(element, in: app, timeout: 40) {
+                return
+            }
+        }
     }
 
     /// The bar's buttons move while the avatar loads, so a tap can miss: tap again until the sidebar is open.
@@ -277,23 +288,36 @@ final class NoDriveWorkspaceUITests: XCTestCase {
         }
     }
 
+    /// Closes the browser panel and waits until the Workspace page is in front again; when the first tap did not
+    /// close it, taps again (the panel's Close button, then the Close button of its bottom bar).
     private func closeBrowserPanel(_ app: XCUIApplication) {
-        let deadline = Date().addingTimeInterval(20)
-        while Date() < deadline {
-            for root in [safariViewService, app] {
-                let done = root.buttons.matching(NSPredicate(format: "label IN %@ OR identifier IN %@", doneLabels, doneLabels)).firstMatch
-                if done.exists {
-                    // The panel's Close button overlaps its address field, so isHittable can be false: tap its centre.
-                    done.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-                    Thread.sleep(forTimeInterval: 3)
-                    return
+        let page = app.webViews.firstMatch
+        let corners = [CGVector(dx: 0.09, dy: 0.10), CGVector(dx: 0.74, dy: 0.95), CGVector(dx: 0.09, dy: 0.10)]
+        for attempt in 0..<4 {
+            let deadline = Date().addingTimeInterval(20)
+            var tapped = false
+            while Date() < deadline, !tapped {
+                for root in [safariViewService, app] {
+                    let done = root.buttons.matching(NSPredicate(format: "label IN %@ OR identifier IN %@", doneLabels, doneLabels)).firstMatch
+                    if done.exists {
+                        // The panel's Close button overlaps its address field, so isHittable can be false: tap its centre.
+                        done.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+                        tapped = true
+                        break
+                    }
+                }
+                if !tapped {
+                    Thread.sleep(forTimeInterval: 1)
                 }
             }
-            Thread.sleep(forTimeInterval: 1)
+            if !tapped {
+                safariViewService.coordinate(withNormalizedOffset: corners[attempt % corners.count]).tap()
+            }
+            Thread.sleep(forTimeInterval: 3)
+            if page.waitForExistence(timeout: 8), page.isHittable {
+                return
+            }
         }
-        // Without a Done button: the panel's top-left corner
-        safariViewService.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.06)).tap()
-        Thread.sleep(forTimeInterval: 2)
     }
 
     private func waitFor(_ element: XCUIElement, in app: XCUIApplication, timeout: TimeInterval, hittable: Bool = false) -> Bool {
