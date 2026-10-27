@@ -9,8 +9,10 @@ the Drive's login pages only open from the owner's home network, and CI must nev
 `drive.nourax.org` (a local stand-in answers for it). Everything after sign-in is an **owner test**
 on the owner's Mac (simulator) or iPhone.
 
-Workspace apps (feature `feature/workspace-apps`): run [40399328940](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40399328940), commit `0585f7e0f7`, all 4 jobs green
-(Branding gate, Build and unit tests, Server login, Simulator screens); on `main` after the merge the same checks run again.
+Workspace apps (feature `feature/workspace-apps`, then the fixes round `feature/workspace-apps-fixes`): run [40470638063](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40470638063), commit `5c6c9f8597`, all 4 jobs green
+(Branding gate, Build and unit tests, Server login, Simulator screens). The merge to `main` adds only documents on top of
+that commit; the same checks run again on the merge commit and on `main`. The first round ran as
+[40399328940](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40399328940) (commit `0585f7e0f7`).
 
 Reference run: **[40206804804](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40206804804)**
 on `main` (commit `b03563c3c9`), all 3 jobs green. Xcode 27.1 (build 27A9275), runner image
@@ -25,7 +27,7 @@ on `main` (commit `b03563c3c9`), all 3 jobs green. Xcode 27.1 (build 27A9275), r
 | No unclassified Nextcloud name, link, id or colour in the source | CI | pass | `check-branding: 483 hits: 264 internal, 217 legal, 2 artwork, 0 unclassified` |
 | App, 8 extensions and test bundles build for the simulator, unsigned | CI | pass | job "Build and unit tests", `xcodebuild build-for-testing … CODE_SIGNING_ALLOWED=NO` succeeded; 0 Thread Sanitizer objects |
 | Bundle ids, display names, URL scheme, app group and keychain group of the built app and every extension | CI | pass | `tools/ci/inspect-products.py`: `org.nourax.nodrive` + 8 extension ids, display names NoDrive / NoDrive Assistant, scheme `nodrive`, `group.org.nourax.nodrive` in every entitlements section |
-| Unit tests (upstream + NoDrive) | CI | pass | `Test run with 145 tests in 17 suites passed`; result `Passed`, 145/145, 0 failed, 0 skipped |
+| Unit tests (upstream + NoDrive) | CI | pass | run [40470638063](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40470638063) (Workspace apps head): `Test run with 204 tests in 22 suites passed`; result `Passed`, 204/204, 0 failed, 0 skipped (the reference run below had 145 before the Workspace tests) |
 | NoDrive branding unit tests (name, ids and app group, URL schemes, fixed server, version `35.2.1-nourax.1`, user agent matches server 35, Nextcloud services off, privacy link hidden, cobalt colour) | CI | pass | Suite "NoDrive branding": 9 of 9 passed |
 | Built app sweep (`check-branding.py --app`) | CI | report only | 833 hits, all classified by hand in [branding-sweep.md](branding-sweep.md); becoming a gate is a follow-up |
 | Launches (install with `simctl`, start, keeps running) | CI | pass | job "Simulator screens", step "simctl install, launch and screenshots" |
@@ -39,14 +41,20 @@ on `main` (commit `b03563c3c9`), all 3 jobs green. Xcode 27.1 (build 27A9275), r
 | Right-to-left language (Arabic) | CI | pass (before sign-in) | `ar-light/` screenshots. Arabic is not a shipped app language (same as upstream), so NoDrive's own texts are English while the system UI is Arabic |
 | No calls to Nextcloud services | CI | pass | `network-gate: 565 DNS queries for 157 names; forbidden 0`, `network-gate: ok`; no DNS query by a NoDrive process |
 | Launch screen (cobalt, Nourax logo) | CI | not captured | The recording showed black, then the intro; the storyboard colour and image are checked by `rebrand.py --check`. Owner: look at it on the Mac |
-| Workspace apps: the side menu lists the server's apps (Dashboard, Mail, Calendar, Talk, Contacts), in server order, without Files | CI | pass (stand-in) | run [40399328940](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40399328940) (`feature/workspace-apps`, commit `0585f7e0f7`), job "Simulator screens": `walk.jsonl` `names: [Dashboard, Mail, Calendar, Talk, Contacts]`; screenshot `workspace-light/02-workspace-menu` |
-| Tapping an app opens it inside NoDrive, already signed in, no sign-in page | CI | pass (stand-in) | `NoDriveWorkspaceUITests` passed 1/1 (light and dark): page text `signed-in:Mail`, the sign-in page never shown; the page request carried the 4 session cookies and no `Authorization` header (`stand-in.jsonl`); screenshot `workspace-light/03-workspace-page` |
-| The password goes only to the account's own server, only on the app's own requests | CI | pass | `workspace-check.py`: `ok`, 0 problems; credentialed paths are all `/ocs/`, `/remote.php/`, `/index.php/avatar`; the other host got 2 requests, no cookie, no credential |
-| A link to another host leaves NoDrive's web view (system browser panel, no session) | CI | pass (stand-in) | UI test: clicked foreign link opens the panel (`04-foreign-link-panel`); the panel's request carried no cookies |
-| Origin rules (user info, look-alike hosts, http, other port, trailing dot, IDN, `javascript:`, `data:`, `file:` ...) and notification-link routes | CI | pass | unit suite "NoDrive Workspace origin rules" (part of `Test run with 173 tests in 21 suites passed`) |
-| Apps list cache, ETag/304, session hand-off, redirect refusal, web-data clearing on removal | CI | pass | unit suites "NoDrive Workspace apps", "... session", "... web" (same 173 tests) |
-| Web-view sign-in on a real Nextcloud server 35.0.2 (throwaway, in Docker): both app-password kinds | CI | pass | job "Server login", `report.md`: all checks passed; cookies alone sign the page in, 304 on the apps list, a web log-out keeps the app signed in, revoking the app password ends the web session after 12 s |
+| Workspace apps: the side menu lists the server's apps in server order (Dashboard, Mail, NoMail, Calendar, Talk, Contacts), without Files, Activity and Photos | CI | pass (stand-in) | run [40470638063](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40470638063), job "Simulator screens": `walk.jsonl` `sidebar-apps {"names": ["Dashboard","Mail","NoMail","Calendar","Talk","Contacts"]}`; the stand-in's list also contains Files, Activity and Photos; the UI test asserts none of the three is shown; unit test `hiddenApps` (checks `id` and `app`); screenshot `workspace-light/02-workspace-menu` |
+| The Apps section fills in by itself after sign-in, without closing and reopening the menu | CI | pass (stand-in) | `walk.jsonl` `sidebar-open {"apps_listed_at_open": false}` then `sidebar-apps`, with no second open in between; `stand-in.jsonl`: the list was answered after the sidebar was open (the stand-in delays it by 6 s); 8 unit tests in "NoDrive Workspace menu" (late list, changed list, 404, other account, account switch, restored launch, sign-in again, joined reads, retries after 5, 20 and 60 s) |
+| NoMail appears in the Apps menu and opens in a browser panel, not signed in to NoDrive | CI | pass (stand-in) | UI test1 step 5: the panel shows "NoMail stand-in" and the Workspace page stays behind it; `stand-in.jsonl` `foreign-nomail`: `has_authorization: false`, `cookie_names: []` (light and dark); unit tests `outsideEntries`, `otherOutsideEntry`, `unsafeOutsideEntries` (20 bad links dropped), `outsideEntryOpensThePanel`; screenshot `workspace-light/06-nomail-panel` |
+| Tapping an app opens it inside NoDrive, already signed in, no sign-in page | CI | pass (stand-in) | `NoDriveWorkspaceUITests` passed 4/4 in light and 4/4 in dark (`ui-workspace-*-summary.json`): page text `signed-in:Mail`, the sign-in page never shown; the page request carried the session cookies and no `Authorization` header (`stand-in.jsonl`); screenshot `workspace-light/03-workspace-page` |
+| The signed-in session is renewed by itself when it ends, and a second launch of the app is signed in again | CI | pass (stand-in) | UI test "Expire the session": `walk.jsonl` `session-renewed {"shown": true}`, no login page; `workspace-check.py` check (g) `sessions_expired: 2`, check (f) `app_launches: 10`, each page served with a session issued after its own launch; screenshots `11-session-renewed`, `12-second-launch-page` |
+| The password goes only to the account's own server, only on the app's own requests | CI | pass | `workspace-check.json`: `ok: true`, `problems: []`; credentialed paths are all `/ocs/`, `/remote.php/`, `/index.php/avatar`; 10 requests reached the other host, none with a cookie or credential; `--scan-secret` finds the throwaway password nowhere |
+| A link to another host leaves NoDrive's web view (system browser panel, no session): plain link, redirect to another host, `target=_blank`, `window.open` | CI | pass (stand-in) | UI test1 step 4 and test2; `stand-in.jsonl` `foreign-probe`, `foreign-redirect`, `foreign-blank`, `foreign-window-open`: all `has_authorization: false`, `cookie_names: []`; unit tests `newWindows` and the `createWebViewWith` decisions; screenshots `04-foreign-link-panel`, `10-*-panel` |
+| A notification link that points to the account's own server opens inside NoDrive, signed in | CI | pass (stand-in) | UI test4 taps "Open mail" in the notification list: page `signed-in:Mail`, no Safari, Close returns to the list; unit test `notificationLinkOpensInApp`; screenshots `13-notifications`, `14-notification-page` |
+| Removing the account closes every open Workspace screen, clears its web data and the saved apps list | CI | pass (unit) | unit tests `forgetClosesTheScreenAndClearsItsStore` (own non-persistent store, cookie gone, web view removed, no sign-in or load afterwards), `forgetClosesAllScreensOfTheAccountOnly`, `screensDoNotShareStores`, `forgetRemovesTheAppList`. No test runs the real "leave the main view" step yet (it is an owner row) |
+| Origin rules (user info, look-alike hosts, http, other port, trailing dot, IDN, `javascript:`, `data:`, `file:` ...) and notification-link routes | CI | pass | unit suite "NoDrive Workspace origin rules" (part of `Test run with 204 tests in 22 suites passed`, run [40470638063](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40470638063)) |
+| Apps list cache, ETag/304, retries, session hand-off, redirect refusal, cookie flags (Secure over https), web-data clearing on removal | CI | pass | unit suites "NoDrive Workspace apps", "... menu", "... session", "... web" (same 204 tests) |
+| Web-view sign-in on a real Nextcloud server 35.0.2 (throwaway, in Docker): both app-password kinds | CI | pass | job "Server login", `report.md`: all checks passed (including `?nodrive=ws` accepted by server 35); cookies alone sign the page in, 304 on the apps list, a web log-out keeps the app signed in, revoking the app password ends the web session after 12 s |
 | The test account used by the UI test cannot exist in a Release build | CI | pass | `workspace-check.py --debug-only` in the Branding gate; `NCUITestAccount.swift` is inside `#if DEBUG` |
+| No Nextcloud text, link or colour in the Workspace screens or code | CI | pass | `check-branding.py`: 0 unclassified; screenshots of the Apps menu and the pages looked at: none; no new strings (names come from the server) |
 | Sign in with "Log in with Nourax" on the real drive.nourax.org | owner | pending | Mac simulator at home (WAF) |
 | File list after sign-in | owner | pending | |
 | Upload, download, rename, move, delete | owner | pending | |
@@ -60,12 +68,14 @@ on `main` (commit `b03563c3c9`), all 3 jobs green. Xcode 27.1 (build 27A9275), r
 | Settings: footer "NoDrive 35.2.1-nourax.1" and "Nourax Workspace <version>"; no privacy or source-code link | owner | pending | |
 | Settings → Information → Acknowledgements: text only, no logos, no nextcloud.com links | owner | pending | |
 | Sign out | owner | pending | |
-| Workspace apps: the side menu shows an "Apps" section with the apps your Nourax account has (Mail, Calendar, Talk ...), no "Files" entry | owner | pending | iPhone or Mac simulator, signed in at home. Names and order come from the server |
+| Workspace apps: the side menu shows an "Apps" section with the apps your Nourax account has (Mail, Calendar, Talk ...), with no "Files", no "Activity" and no "Photos" entry | owner | pending | iPhone or Mac simulator, signed in at home. Names and order come from the server |
+| The Apps section fills in by itself a few seconds after you sign in, without closing and reopening the menu | owner | pending | sign in, open the menu at once, wait; also after removing the account and signing in again |
+| NoMail appears in the Apps menu and opens in a browser panel, not signed in to NoDrive | owner | pending | tap NoMail: a Safari panel opens and you may be asked to sign in to NoMail there; close it and you are back in NoDrive |
 | Tapping an app opens it inside NoDrive, already signed in, with no sign-in page at any point | owner | pending | try Mail, then Talk |
 | Back: the back arrow goes back inside the page; the sidebar button returns to the files | owner | pending | |
 | A link inside an app that points to another website opens in a separate browser panel, not inside the app page | owner | pending | e.g. a link in a mail |
 | A notification link (a "view" button in the notification list) that points to drive.nourax.org opens inside NoDrive, already signed in | owner | pending | |
-| Sign out (remove the account), then sign in again: the in-app pages are signed out too; after signing in again an app opens signed in | owner | pending | after removal, no app page may show your data |
+| Sign out (remove the account), then sign in again: any open app page closes at once; after signing in again an app opens signed in | owner | pending | after removal, no app page may show your data. Try it with an app page open, and once with an app opened from a notification |
 | Dark mode and German after sign-in | owner | pending | |
 | Device name under Settings → Security on drive.nourax.org | owner | pending | read it back for the Workspace session |
 | Sync works away from home (mobile data), after one sign-in at home | owner | pending | iPhone only |
@@ -110,17 +120,21 @@ Details: [screenshots/ios/README.md](screenshots/ios/README.md).
 [02-launch-8s](screenshots/ios/simctl/02-launch-8s.png),
 [03-launch-later](screenshots/ios/simctl/03-launch-later.png).
 
-Workspace apps (feature `feature/workspace-apps`), from the `nodrive-ios-screenshots` artifact of run [40399328940](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40399328940)
-(commit `0585f7e0f7`, iPhone 17, iOS 27.0; the signed-in account and the Workspace pages are made by the
+Workspace apps (fixes round), from the `nodrive-ios-screenshots` artifact of run [40470638063](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40470638063)
+(commit `5c6c9f8597`, iPhone 17, iOS 27.0; the signed-in account and the Workspace pages are made by the
 CI stand-in, `docs/screenshots/ios/workspace-{light,dark}/`, 1200 px copies). Looked at for Nextcloud's name,
 logo, colours and links: none.
 
 | Screen | light | dark |
 |---|---|---|
-| Side menu with the "Apps" section | [02-workspace-menu](screenshots/ios/workspace-light/02-workspace-menu.png) | [02-workspace-menu](screenshots/ios/workspace-dark/02-workspace-menu.png) |
+| Side menu with the "Apps" section (no Files, Activity or Photos; NoMail with an envelope) | [02-workspace-menu](screenshots/ios/workspace-light/02-workspace-menu.png) | [02-workspace-menu](screenshots/ios/workspace-dark/02-workspace-menu.png) |
 | Mail page inside NoDrive, signed in (`signed-in:Mail`, stand-in page) | [03-workspace-page](screenshots/ios/workspace-light/03-workspace-page.png) | [03-workspace-page](screenshots/ios/workspace-dark/03-workspace-page.png) |
 | Link to another host: system browser panel | [04-foreign-link-panel](screenshots/ios/workspace-light/04-foreign-link-panel.png) | [04-foreign-link-panel](screenshots/ios/workspace-dark/04-foreign-link-panel.png) |
 | Back in the app page after closing the panel | [05-after-panel](screenshots/ios/workspace-light/05-after-panel.png) | [05-after-panel](screenshots/ios/workspace-dark/05-after-panel.png) |
+| NoMail: browser panel on another host, not signed in | [06-nomail-panel](screenshots/ios/workspace-light/06-nomail-panel.png) | [06-nomail-panel](screenshots/ios/workspace-dark/06-nomail-panel.png) |
+| Session ended and renewed by itself | [11-session-renewed](screenshots/ios/workspace-light/11-session-renewed.png) | [11-session-renewed](screenshots/ios/workspace-dark/11-session-renewed.png) |
+| Notification list | [13-notifications](screenshots/ios/workspace-light/13-notifications.png) | [13-notifications](screenshots/ios/workspace-dark/13-notifications.png) |
+| Notification link opened inside NoDrive, signed in | [14-notification-page](screenshots/ios/workspace-light/14-notification-page.png) | [14-notification-page](screenshots/ios/workspace-dark/14-notification-page.png) |
 
 Screens after sign-in (file list, settings, licence page, Files app, widgets) need an account and
 are owner tests.
@@ -134,8 +148,10 @@ are owner tests.
 3. Toolbar: scheme **Nextcloud**, destination **iPhone 17**. Press Run (⌘R).
 4. In the simulator: Log in → the browser opens at drive.nourax.org → "Log in with Nourax" →
    use your normal Nourax account (not the emergency admin account) → Grant access.
-5. Workspace apps: open the side menu, tap an app under "Apps" (it must open inside NoDrive, signed in,
-   with no sign-in page), go back, then remove the account and sign in again (the pages must be signed out).
+5. Workspace apps: open the side menu right after signing in and wait: the "Apps" section appears by itself
+   (no Files, Activity or Photos). Tap an app (it must open inside NoDrive, signed in, with no sign-in page),
+   go back, tap NoMail (a browser panel, not signed in to NoDrive), then remove the account while an app page
+   is open (the page must close) and sign in again (the pages must be signed out).
 6. Go through the "owner" rows above, then read back the device name shown under
    Settings → Security on drive.nourax.org.
 

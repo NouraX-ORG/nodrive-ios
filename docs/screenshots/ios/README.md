@@ -37,15 +37,19 @@ Nextcloud blue, no "Nextcloud" in any recorded screen text).
 | `simctl/03-launch-later.png` | A few seconds later: the same prompt over the intro (NoDrive is still running). |
 
 Workspace apps (`workspace-light/`, `workspace-dark/`): from run
-[40399328940](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40399328940) on `feature/workspace-apps`
-(commit `0585f7e0f7`), same device and settings. The account and the Workspace pages come from the CI stand-in.
+[40470638063](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40470638063) on `feature/workspace-apps-fixes`
+(commit `5c6c9f8597`), same device and settings. The account and the Workspace pages come from the CI stand-in.
 
 | File | Screen |
 |---|---|
-| `02-workspace-menu.png` | Side menu with the "Apps" section: Dashboard, Mail, Calendar, Talk, Contacts (no Files). |
+| `02-workspace-menu.png` | Side menu with the "Apps" section: Dashboard, Mail, NoMail, Calendar, Talk, Contacts (no Files, Activity or Photos). |
 | `03-workspace-page.png` | The Mail page open inside NoDrive, already signed in (page text `signed-in:Mail`). |
 | `04-foreign-link-panel.png` | A link to another host opens in the system browser panel, not in the app page. |
 | `05-after-panel.png` | Back in the app page after closing the panel. |
+| `06-nomail-panel.png` | NoMail opens in the browser panel on another host, not signed in to NoDrive. |
+| `11-session-renewed.png` | The Mail page after its session ended and was renewed by itself. |
+| `13-notifications.png` | The notification list with a link to the account's own server. |
+| `14-notification-page.png` | That link opened inside NoDrive, signed in. |
 
 Looked at for Nextcloud's name, logo, colours and links: none.
 
