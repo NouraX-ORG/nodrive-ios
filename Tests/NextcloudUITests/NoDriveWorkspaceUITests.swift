@@ -182,7 +182,7 @@ final class NoDriveWorkspaceUITests: XCTestCase {
         XCTAssertTrue(waitFor(sidebarButton, in: app, timeout: 300, hittable: true), "the main screen with the sidebar button never came up")
         settle(app, seconds: 4)
         openSidebar(app)
-        let bell = app.descendants(matching: .any)["sidebarNotifications"]
+        let bell = app.buttons["sidebarNotifications"]
         XCTAssertTrue(waitFor(bell, in: app, timeout: 90, hittable: true), "the sidebar has no Notifications button")
         bell.tap()
 

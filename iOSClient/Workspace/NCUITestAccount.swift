@@ -22,10 +22,12 @@ enum NCUITestAccount {
         let parts = value.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
         guard parts.count == 3, !parts[0].isEmpty, !parts[1].isEmpty, !parts[2].isEmpty else { return }
 
-        // Wait for the first screen (the intro) of a launch without an account.
+        // Wait for the first screen: the intro of a launch without an account, or the main screen that a launch
+        // restores when an earlier launch of the same test run left an account behind (the account is deleted
+        // above and replaced by the one below, which puts a new main screen in the window).
         for _ in 0..<240 {
             if let window = UIApplication.shared.mainAppWindow,
-               window.rootViewController is UINavigationController {
+               window.rootViewController is UINavigationController || window.rootViewController is NCMainTabBarController {
                 break
             }
             try? await Task.sleep(for: .milliseconds(500))
