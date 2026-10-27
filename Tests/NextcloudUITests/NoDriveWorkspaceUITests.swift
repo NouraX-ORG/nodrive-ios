@@ -83,7 +83,8 @@ final class NoDriveWorkspaceUITests: XCTestCase {
             foreign.tap()
             let opened = safariViewService.wait(for: .runningForeground, timeout: 60)
             XCTAssertTrue(opened, "the link to another host did not open in the in-app browser panel")
-            let loaded = safariViewService.staticTexts["Another host"].waitForExistence(timeout: 40)
+            let loaded = safariViewService.staticTexts["Another host"].waitForExistence(timeout: 60)
+            XCTAssertTrue(loaded, "the other host's page never loaded in the browser panel")
             Thread.sleep(forTimeInterval: 2)
             save("04-foreign-link-panel")
             saveTexts(safariViewService, "04-foreign-link-panel")
@@ -105,7 +106,8 @@ final class NoDriveWorkspaceUITests: XCTestCase {
         nomail.tap()
         let nomailOpened = safariViewService.wait(for: .runningForeground, timeout: 60)
         XCTAssertTrue(nomailOpened, "NoMail did not open in the in-app browser panel")
-        let nomailLoaded = safariViewService.staticTexts["NoMail stand-in"].waitForExistence(timeout: 40)
+        let nomailLoaded = safariViewService.staticTexts["NoMail stand-in"].waitForExistence(timeout: 60)
+        XCTAssertTrue(nomailLoaded, "the NoMail page never loaded in the browser panel")
         Thread.sleep(forTimeInterval: 2)
         save("06-nomail-panel")
         saveTexts(safariViewService, "06-nomail-panel")
@@ -125,19 +127,22 @@ final class NoDriveWorkspaceUITests: XCTestCase {
 
         // A server redirect to another host, a new window (target=_blank) and window.open: each opens the browser
         // panel, none of them loads in the Workspace view, and the Workspace page stays.
-        let routes: [(String, XCUIElement)] = [
-            ("redirect", app.webViews.links["Redirect to the other host"]),
-            ("new-window", app.webViews.links["New window to the other host"]),
-            ("window-open", app.webViews.buttons["window.open to the other host"])
+        let routes: [(String, XCUIElement, String)] = [
+            ("redirect", app.webViews.links["Redirect to the other host"], "Redirect target"),
+            ("new-window", app.webViews.links["New window to the other host"], "New window target"),
+            ("window-open", app.webViews.buttons["window.open to the other host"], "window.open target")
         ]
-        for (name, element) in routes {
+        for (name, element, pageText) in routes {
             XCTAssertTrue(element.waitForExistence(timeout: 20), "the page has no \(name) element")
             element.tap()
             let opened = safariViewService.wait(for: .runningForeground, timeout: 60)
             XCTAssertTrue(opened, "\(name): the other host did not open in the browser panel")
-            Thread.sleep(forTimeInterval: 3)
+            // The panel must show the other host's page (the stand-in logs the request; no cookie may come with it)
+            let loaded = safariViewService.staticTexts[pageText].waitForExistence(timeout: 60)
+            XCTAssertTrue(loaded, "\(name): the other host's page never loaded in the browser panel")
+            Thread.sleep(forTimeInterval: 1)
             save("10-\(name)-panel")
-            record("route-\(name)", ["panel_opened": opened])
+            record("route-\(name)", ["panel_opened": opened, "loaded": loaded])
             closeBrowserPanel(app)
             XCTAssertTrue(waitFor(signedIn, in: app, timeout: 30), "\(name): the Workspace page is gone")
             XCTAssertFalse(app.webViews.staticTexts["LOGIN"].exists, "\(name): a login page was shown")
