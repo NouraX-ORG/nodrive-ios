@@ -133,7 +133,14 @@ final class NoDriveWorkspaceUITests: XCTestCase {
             ("window-open", app.webViews.buttons["window.open to the other host"], "window.open target")
         ]
         for (name, element, pageText) in routes {
-            XCTAssertTrue(element.waitForExistence(timeout: 20), "the page has no \(name) element")
+            // The element of the next route: wait for it by polling (the page can still be coming back from behind
+            // the closing browser panel) and scroll it into view; no fixed pause
+            let ready = waitForPageElement(element, in: app, timeout: 90)
+            if !ready {
+                save("10-\(name)-missing")
+                saveTexts(app, "10-\(name)-missing")
+            }
+            XCTAssertTrue(ready, "the page has no \(name) element")
             element.tap()
             let opened = safariViewService.wait(for: .runningForeground, timeout: 60)
             XCTAssertTrue(opened, "\(name): the other host did not open in the browser panel")
@@ -144,6 +151,7 @@ final class NoDriveWorkspaceUITests: XCTestCase {
             save("10-\(name)-panel")
             record("route-\(name)", ["panel_opened": opened, "loaded": loaded])
             closeBrowserPanel(app)
+            save("10-\(name)-closed")
             XCTAssertTrue(waitFor(signedIn, in: app, timeout: 30), "\(name): the Workspace page is gone")
             XCTAssertFalse(app.webViews.staticTexts["LOGIN"].exists, "\(name): a login page was shown")
         }
@@ -186,9 +194,9 @@ final class NoDriveWorkspaceUITests: XCTestCase {
         let sidebarButton = app.buttons["openSidebar"]
         XCTAssertTrue(waitFor(sidebarButton, in: app, timeout: 300, hittable: true), "the main screen with the sidebar button never came up")
         settle(app, seconds: 4)
+        openSidebar(app)
         let bell = app.buttons["sidebarNotifications"]
-        openSidebar(app, until: bell)
-        XCTAssertTrue(waitFor(bell, in: app, timeout: 30, hittable: true), "the sidebar has no Notifications button")
+        XCTAssertTrue(waitFor(bell, in: app, timeout: 90, hittable: true), "the sidebar has no Notifications button")
         bell.tap()
 
         let action = app.buttons["Open mail"]
@@ -238,9 +246,10 @@ final class NoDriveWorkspaceUITests: XCTestCase {
         let sidebarButton = app.buttons["openSidebar"]
         XCTAssertTrue(waitFor(sidebarButton, in: app, timeout: 300, hittable: true), "the main screen with the sidebar button never came up")
         settle(app, seconds: 4)
+        openSidebar(app)
+        // The sidebar is opened once and never reopened: the Apps section fills in by itself, also after a restored launch
         let mail = app.descendants(matching: .any)["sidebarWorkspaceApp-mail"]
-        openSidebar(app, until: mail)
-        XCTAssertTrue(mail.exists, "the sidebar has no Mail entry (the app list was not read from the server)")
+        XCTAssertTrue(waitFor(mail, in: app, timeout: 90), "the sidebar has no Mail entry (the app list was not read from the server)")
         scrollSidebar(until: mail, in: app)
         XCTAssertTrue(mail.isHittable, "the Mail entry cannot be tapped")
         mail.tap()
@@ -249,17 +258,6 @@ final class NoDriveWorkspaceUITests: XCTestCase {
         XCTAssertTrue(shown, "the Mail page did not show the signed-in user")
         XCTAssertFalse(app.webViews.staticTexts["LOGIN"].exists, "a login page was shown")
         settle(app, seconds: 2)
-    }
-
-    /// A launch that restores the main screen of an earlier launch replaces it a few seconds later with the one of
-    /// the new account, and an open sidebar goes with it: open the sidebar again until `element` is in it.
-    private func openSidebar(_ app: XCUIApplication, until element: XCUIElement) {
-        for _ in 1...4 {
-            openSidebar(app)
-            if waitFor(element, in: app, timeout: 40) {
-                return
-            }
-        }
     }
 
     /// The bar's buttons move while the avatar loads, so a tap can miss: tap again until the sidebar is open.
@@ -318,6 +316,23 @@ final class NoDriveWorkspaceUITests: XCTestCase {
                 return
             }
         }
+    }
+
+    /// Waits until `element` of the Workspace page can be tapped: polls for it, answers prompts, and swipes the
+    /// page up when the element exists below the visible part.
+    private func waitForPageElement(_ element: XCUIElement, in app: XCUIApplication, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            answerPrompts(in: app)
+            if element.exists, element.isHittable {
+                return true
+            }
+            if element.exists, app.webViews.firstMatch.exists {
+                app.webViews.firstMatch.swipeUp()
+            }
+            Thread.sleep(forTimeInterval: 0.5)
+        } while Date() < deadline
+        return false
     }
 
     private func waitFor(_ element: XCUIElement, in app: XCUIApplication, timeout: TimeInterval, hittable: Bool = false) -> Bool {

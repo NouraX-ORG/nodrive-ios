@@ -115,11 +115,21 @@ enum NCWorkspaceAppsParser {
 }
 
 /// The list per account: shown at once from the cache, refreshed with If-None-Match at most every 10 minutes.
-final class NCWorkspaceAppsStore {
+///
+/// One read runs at a time per account, and every caller that asks meanwhile joins it (none is turned away): the
+/// read does not belong to the screen that started it, so a sidebar or a main screen that goes away while the
+/// answer is on its way does not cancel it. A read that fails (no session yet, no network) is tried again a few
+/// times, so the list shows by itself as soon as the server answers.
+final class NCWorkspaceAppsStore: @unchecked Sendable {
     static let shared = NCWorkspaceAppsStore()
 
     enum RefreshResult: Equatable {
         case updated, notModified, cleared, kept, throttled
+    }
+
+    /// What one read tells the caller: done, or worth trying again.
+    enum Outcome: Equatable {
+        case done, retry
     }
 
     private struct Cache: Codable {
@@ -128,9 +138,17 @@ final class NCWorkspaceAppsStore {
         var fetchedAt: Date
     }
 
+    private struct Running {
+        let id: UUID
+        let task: Task<Outcome, Never>
+    }
+
     typealias Fetch = (URLRequest) async throws -> (Data, HTTPURLResponse)
 
     static let minimumInterval: TimeInterval = 600
+
+    /// Seconds to wait before the 1st, 2nd and 3rd new try of a failed read.
+    static let defaultRetryDelays: [TimeInterval] = [5, 20, 60]
 
     /// Posted (on any thread) when an account's list changed or was forgotten; userInfo["account"] names it.
     /// An open sidebar listens, so a list that arrives late shows without reopening the menu.
@@ -138,24 +156,82 @@ final class NCWorkspaceAppsStore {
 
     private let defaults: UserDefaults
     private let center: NotificationCenter
+    private let retryDelays: [TimeInterval]
     private let lock = NSLock()
-    private var accountsInFlight: Set<String> = []
+    private var running: [String: Running] = [:]
+    private var retrying: [String: Running] = [:]
 
-    init(defaults: UserDefaults? = nil, center: NotificationCenter = .default) {
+    init(defaults: UserDefaults? = nil, center: NotificationCenter = .default, retryDelays: [TimeInterval] = NCWorkspaceAppsStore.defaultRetryDelays) {
         self.defaults = defaults ?? UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup) ?? .standard
         self.center = center
+        self.retryDelays = retryDelays
     }
 
-    private func beginRequest(account: String) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return accountsInFlight.insert(account).inserted
+    /// Runs `perform` for `account`, or joins the run that is already going. A failed run schedules a new try
+    /// (`attempt` counts them) until the delays are used up.
+    @discardableResult
+    func coalesced(account: String, attempt: Int = 0, perform: @escaping @Sendable () async -> Outcome) async -> Outcome {
+        let task = startOrJoin(account: account, attempt: attempt, perform: perform)
+        return await task.value
     }
 
-    private func endRequest(account: String) {
+    private func startOrJoin(account: String, attempt: Int, perform: @escaping @Sendable () async -> Outcome) -> Task<Outcome, Never> {
         lock.lock()
         defer { lock.unlock() }
-        accountsInFlight.remove(account)
+        if let current = running[account] {
+            return current.task
+        }
+        let id = UUID()
+        let task = Task { [self] () -> Outcome in
+            let outcome = await perform()
+            finish(account: account, id: id)
+            if outcome == .retry, !Task.isCancelled {
+                scheduleRetry(account: account, attempt: attempt, perform: perform)
+            }
+            return outcome
+        }
+        running[account] = Running(id: id, task: task)
+        return task
+    }
+
+    private func finish(account: String, id: UUID) {
+        lock.lock()
+        defer { lock.unlock() }
+        if running[account]?.id == id {
+            running[account] = nil
+        }
+    }
+
+    private func scheduleRetry(account: String, attempt: Int, perform: @escaping @Sendable () async -> Outcome) {
+        guard attempt < retryDelays.count else { return }
+        let delay = retryDelays[attempt]
+        lock.lock()
+        defer { lock.unlock() }
+        guard retrying[account] == nil else { return }
+        let id = UUID()
+        let task = Task { [self] () -> Outcome in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else { return .done }
+            clearRetry(account: account, id: id)
+            return await coalesced(account: account, attempt: attempt + 1, perform: perform)
+        }
+        retrying[account] = Running(id: id, task: task)
+    }
+
+    private func clearRetry(account: String, id: UUID) {
+        lock.lock()
+        defer { lock.unlock() }
+        if retrying[account]?.id == id {
+            retrying[account] = nil
+        }
+    }
+
+    /// The account goes: a read on its way and a planned new try stop, and neither can write the list back.
+    private func cancelWork(account: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        running.removeValue(forKey: account)?.task.cancel()
+        retrying.removeValue(forKey: account)?.task.cancel()
     }
 
     private func announceChange(account: String) {
@@ -182,21 +258,28 @@ final class NCWorkspaceAppsStore {
     }
 
     func forget(account: String) {
+        cancelWork(account: account)
         defaults.removeObject(forKey: key(account))
         announceChange(account: account)
     }
 
-    /// Asks the account's own server for the list (the app's normal sign-in header, no redirects).
+    /// Asks the account's own server for the list (the app's normal sign-in header, no redirects). Joins a read
+    /// that is already going for the account; tries again by itself when the read fails.
     func refresh(account: String, force: Bool = false) async {
-        guard let credentials = NCWorkspaceSession.credentials(account: account) else { return }
-        // One request at a time per account (the sidebar and the server update can ask together)
-        guard beginRequest(account: account) else { return }
-        defer { endRequest(account: account) }
+        await coalesced(account: account) { [self] in
+            await readFromServer(account: account, force: force)
+        }
+    }
+
+    private func readFromServer(account: String, force: Bool) async -> Outcome {
+        // No session yet (the account is still being set up): try again shortly
+        guard let credentials = NCWorkspaceSession.credentials(account: account) else { return .retry }
         guard let request = NCWorkspaceSession.apiRequest(path: "ocs/v2.php/core/navigation/apps",
                                                          query: "absolute=false&format=json",
-                                                         credentials: credentials) else { return }
-        _ = await refresh(account: account, base: credentials.base, request: request, force: force,
-                          now: Date(), fetch: NCWorkspaceSession.fetch)
+                                                         credentials: credentials) else { return .done }
+        let result = await refresh(account: account, base: credentials.base, request: request, force: force,
+                                   now: Date(), fetch: NCWorkspaceSession.fetch)
+        return result == .kept ? .retry : .done
     }
 
     /// The testable core: `request` is built by the caller; `fetch` is the transport.
@@ -213,6 +296,10 @@ final class NCWorkspaceAppsStore {
         do {
             answer = try await fetch(request)
         } catch {
+            return .kept
+        }
+        // The account was removed (or the read stopped) while the answer was on its way: write nothing
+        if Task.isCancelled {
             return .kept
         }
         let (data, response) = answer

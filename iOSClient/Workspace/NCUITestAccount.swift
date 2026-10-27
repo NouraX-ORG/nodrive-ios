@@ -14,20 +14,44 @@ import UIKit
 /// sign-in does (the same NCAccount().createAccount call). CI passes a throwaway value created for a stand-in
 /// server; the value is never logged.
 enum NCUITestAccount {
+    /// What a UI test run does with the accounts at launch. A launch that finds exactly the account of the test
+    /// (an earlier launch of the same run left it behind) keeps it: the app restores its main screen and signs in
+    /// again, as it does for a real user after a restart, so a test sees a true restored launch and not a screen
+    /// that is swapped for a new one a few seconds later. Any other state starts clean: all accounts go, then the
+    /// test's account is created.
     @MainActor
-    static func injectIfRequested() async {
+    static func prepareAccounts() async {
+        if await restoredAccountMatches() { return }
+        await NCAccount().deleteAllAccounts()
+        await injectIfRequested()
+    }
+
+    private static func requestedAccount() -> (urlBase: String, user: String, password: String)? {
         let info = ProcessInfo.processInfo
         guard info.arguments.contains("UI_TESTING"),
-              let value = info.environment["NODRIVE_UITEST_ACCOUNT"] else { return }
+              let value = info.environment["NODRIVE_UITEST_ACCOUNT"] else { return nil }
         let parts = value.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
-        guard parts.count == 3, !parts[0].isEmpty, !parts[1].isEmpty, !parts[2].isEmpty else { return }
+        guard parts.count == 3, !parts[0].isEmpty, !parts[1].isEmpty, !parts[2].isEmpty else { return nil }
+        var urlBase = parts[0]
+        if urlBase.last == "/" { urlBase = String(urlBase.dropLast()) }
+        return (urlBase, parts[1], parts[2])
+    }
 
-        // Wait for the first screen: the intro of a launch without an account, or the main screen that a launch
-        // restores when an earlier launch of the same test run left an account behind (the account is deleted
-        // above and replaced by the one below, which puts a new main screen in the window).
+    @MainActor
+    private static func restoredAccountMatches() async -> Bool {
+        guard let requested = requestedAccount() else { return false }
+        let accounts = await NCManageDatabase.shared.getAccountsAsync() ?? []
+        return accounts == ["\(requested.user) \(requested.urlBase)"]
+    }
+
+    @MainActor
+    private static func injectIfRequested() async {
+        guard let requested = requestedAccount() else { return }
+
+        // Wait for the first screen: the intro of a launch without an account.
         for _ in 0..<240 {
             if let window = UIApplication.shared.mainAppWindow,
-               window.rootViewController is UINavigationController || window.rootViewController is NCMainTabBarController {
+               window.rootViewController is UINavigationController {
                 break
             }
             try? await Task.sleep(for: .milliseconds(500))
@@ -35,9 +59,9 @@ enum NCUITestAccount {
         guard let window = UIApplication.shared.mainAppWindow,
               let presenter = window.rootViewController else { return }
         await NCAccount().createAccount(viewController: presenter,
-                                        urlBase: parts[0],
-                                        user: parts[1],
-                                        password: parts[2],
+                                        urlBase: requested.urlBase,
+                                        user: requested.user,
+                                        password: requested.password,
                                         controller: nil)
     }
 }
@@ -46,7 +70,9 @@ enum NCUITestAccount {
 
 enum NCUITestAccount {
     @MainActor
-    static func injectIfRequested() async {}
+    static func prepareAccounts() async {
+        await NCAccount().deleteAllAccounts()
+    }
 }
 
 #endif

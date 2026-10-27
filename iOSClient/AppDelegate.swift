@@ -34,8 +34,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         if isUiTestingEnabled {
             Task {
-                await NCAccount().deleteAllAccounts()
-                await NCUITestAccount.injectIfRequested()
+                await NCUITestAccount.prepareAccounts()
             }
         }
         let utilityFileSystem = NCUtilityFileSystem()
