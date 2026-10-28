@@ -54,6 +54,12 @@ Workspace apps (`workspace-light/`, `workspace-dark/`): from run
 Looked at for Nextcloud's name, logo, colours and links: none.
 
 Notes:
+Smart conflicts (`conflicts-light/`, `conflicts-dark/`): from run
+[40696152657](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40696152657) on `feature/smart-conflicts`
+(commit `855350f705`, the UI test `NoDriveConflictSettingsUITests`, signed in by the CI stand-in, Photos access
+granted before the launch). `01-auto-upload-row` (the new row, default Smart), `02-choices` (the four choices),
+`03-keep-both`, `04-after-relaunch` (the choice is kept), `05-smart-again`, `00-prompt-1` (the notification prompt).
+
 - CI never contacts the real drive.nourax.org. In the screenshot job, drive.nourax.org points to a
   local stand-in (`tools/ci/drive-stand-in.py`) that answers Login Flow v2 and serves a plain page
   marked "CI stand-in". The real "Log in with Nourax" page is checked by the owner on a device.

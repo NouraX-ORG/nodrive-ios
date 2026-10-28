@@ -55,6 +55,18 @@ on `main` (commit `b03563c3c9`), all 3 jobs green. Xcode 27.1 (build 27A9275), r
 | Web-view sign-in on a real Nextcloud server 35.0.2 (throwaway, in Docker): both app-password kinds | CI | pass | job "Server login", `report.md`: all checks passed (including `?nodrive=ws` accepted by server 35); cookies alone sign the page in, 304 on the apps list, a web log-out keeps the app signed in, revoking the app password ends the web session after 12 s |
 | The test account used by the UI test cannot exist in a Release build | CI | pass | `workspace-check.py --debug-only` in the Branding gate; `NCUITestAccount.swift` is inside `#if DEBUG` |
 | No Nextcloud text, link or colour in the Workspace screens or code | CI | pass | `check-branding.py`: 0 unclassified; screenshots of the Apps menu and the pages looked at: none; no new strings (names come from the server) |
+| Smart conflicts: the Auto upload screen has the row "If a file is already in NoDrive", default "Smart (recommended)"; its list has exactly the four choices with the contract's texts and Smart's summary "Skip it if it's the same size, otherwise keep both", and no "Ask me every time" | CI | pass (stand-in) | `NoDriveConflictSettingsUITests`, run [40696152657](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40696152657) (`only_round3`, commit `855350f705`): 1 test, 0 failures, light and dark; `walk.jsonl` `row-default` label "If a file is already in NoDrive, Smart (recommended)"; screenshots `01-auto-upload-row`, `02-choices` |
+| Each of the four choices can be selected, the row shows it, and the choice is kept after the app is closed and opened again | CI | pass (stand-in) | same run, `walk.jsonl` `chose` x4 and `kept-after-relaunch` ("… Keep both"); `03-keep-both`, `04-after-relaunch`, `05-smart-again` |
+| The experimental PhotoKit background upload (it would replace same-name files) is gone from the Auto upload screen and cannot be switched on | CI | pass | UI test: no "Experimental" section, no "PhotoKit background upload extension" switch; unit suite "NoDrive background upload extension": `disable_background_upload_extension` is true, `canConfigureBackgroundUploadExtension` and `shouldUseBackgroundUploadExtension` are false |
+| Smart conflicts decision: every choice against every state of the name (missing, same size, other size, folder, not clear): exact action; only "Keep the phone copy" ever uploads over a name that exists; the answer "not clear" is always "retry later" | CI | pass (unit) | suite "NoDrive conflict decision": 20 parameterised cases plus property tests; run [40687316684](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40687316684) (commit `855350f705`): all 250 unit tests passed, 0 failed |
+| A Live Photo follows one decision for both parts: Smart (both the same size: both done; photo the same, video missing: only the video uploads; one part differs: both get the same new number; one part not clear: retry), Keep both, Keep the NoDrive copy (per part), Keep the phone copy | CI | pass (unit) | suites "NoDrive conflict decision" and "NoDrive conflict resolver" (renamed parts point at each other through `livePhotoFile`; a partner extracted earlier is found in the queue) |
+| Numbering: `name.ext` -> `name 1.ext`, a trailing number counts on, a pair takes the first number free for both, queued names and folders are skipped, an unclear answer or 100 taken names mean "retry later" (never a taken name) | CI | pass (unit) | suite "NoDrive conflict naming" |
+| The size the app reads: PROPFIND `getcontentlength` of a file (12345 bytes), a missing name (404), a folder (`d:collection`, size only in a 404 propstat), and a PUT of the same name with another size replaces it | CI | pass (real Nextcloud 35.0.2, throwaway) | job "Server login", `round3.md`: 15 checks passed; the unit-test fixtures have exactly the element paths of the real answers (drift check) |
+| The answer parser (namespace aware, first response only) and the request body | CI | pass (unit) | suite "NoDrive conflict probe" |
+| A renamed upload also records the photo's original name once it succeeded (so the next library scan does not queue the photo again); a failed one records nothing; a second queue item of the same photo is marked done, not renamed again; a stale entry never hides a photo; the file survives a restart and is pruned after 90 days | CI | pass (unit) | suite "NoDrive conflict ledger" |
+| The setting per account: default Smart, unknown value reads as Smart, kept per account and across instances; the texts are exactly the contract's | CI | pass (unit) | suite "NoDrive conflict policy" |
+| No Nextcloud text in the new screens | CI | pass | UI test `assertNoUpstreamName` on the list and the Auto upload screen; `screens-report` for `conflicts-light` and `conflicts-dark`: no problem; `check-branding.py`: 0 unclassified |
+| Auto upload with photos already on the Drive: the same photo is not uploaded again, a different photo with the same name is kept as `name 1.ext`, in the app (simulator or iPhone) | owner | pending | see the owner steps below; CI covers the decision logic, the size the app reads on a real server and the screen, not an upload from the simulator's Photos library |
 | Sign in with "Log in with Nourax" on the real drive.nourax.org | owner | pending | Mac simulator at home (WAF) |
 | File list after sign-in | owner | pending | |
 | Upload, download, rename, move, delete | owner | pending | |
@@ -136,6 +148,18 @@ logo, colours and links: none.
 | Notification list | [13-notifications](screenshots/ios/workspace-light/13-notifications.png) | [13-notifications](screenshots/ios/workspace-dark/13-notifications.png) |
 | Notification link opened inside NoDrive, signed in | [14-notification-page](screenshots/ios/workspace-light/14-notification-page.png) | [14-notification-page](screenshots/ios/workspace-dark/14-notification-page.png) |
 
+Smart conflicts, from the `nodrive-ios-screenshots` artifact of run [40696152657](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40696152657)
+(commit `855350f705`, iPhone 17, iOS 27.0; signed in by the CI stand-in, `docs/screenshots/ios/conflicts-{light,dark}/`,
+1200 px copies). Looked at for Nextcloud's name, logo, colours and links: none.
+
+| Screen | light | dark |
+|---|---|---|
+| Auto upload with the row "If a file is already in NoDrive" (Smart, the default) | [01-auto-upload-row](screenshots/ios/conflicts-light/01-auto-upload-row.png) | [01-auto-upload-row](screenshots/ios/conflicts-dark/01-auto-upload-row.png) |
+| The four choices (Smart with its summary, checkmark on the chosen one) | [02-choices](screenshots/ios/conflicts-light/02-choices.png) | [02-choices](screenshots/ios/conflicts-dark/02-choices.png) |
+| "Keep both" chosen | [03-keep-both](screenshots/ios/conflicts-light/03-keep-both.png) | [03-keep-both](screenshots/ios/conflicts-dark/03-keep-both.png) |
+| After closing and opening the app: the choice is kept | [04-after-relaunch](screenshots/ios/conflicts-light/04-after-relaunch.png) | [04-after-relaunch](screenshots/ios/conflicts-dark/04-after-relaunch.png) |
+| Smart chosen again | [05-smart-again](screenshots/ios/conflicts-light/05-smart-again.png) | [05-smart-again](screenshots/ios/conflicts-dark/05-smart-again.png) |
+
 Screens after sign-in (file list, settings, licence page, Files app, widgets) need an account and
 are owner tests.
 
@@ -152,7 +176,14 @@ are owner tests.
    (no Files, Activity or Photos). Tap an app (it must open inside NoDrive, signed in, with no sign-in page),
    go back, tap NoMail (a browser panel, not signed in to NoDrive), then remove the account while an app page
    is open (the page must close) and sign in again (the pages must be signed out).
-6. Go through the "owner" rows above, then read back the device name shown under
+6. Smart conflicts (Auto upload): open the side menu → Auto upload. The row "If a file is already in NoDrive" reads
+   "Smart (recommended)". With photos already on the Drive (delete NoDrive and install it again, or use a second
+   device), turn on Auto upload: nothing is uploaded twice and no question is asked. Then edit one of those photos
+   on the phone (it changes size, the name stays): the Drive then has `name.jpg` and `name 1.jpg`. Try each of the
+   four choices once: "Keep the phone copy" replaces the file on the Drive (the old one stays in the file's versions);
+   "Keep the NoDrive copy" uploads nothing for a name that is there; "Keep both" always makes `name 1.ext`.
+   Existing installs move from the old silent skip to Smart when they update.
+7. Go through the "owner" rows above, then read back the device name shown under
    Settings → Security on drive.nourax.org.
 
 Building and the iPhone steps: [build.md](build.md).

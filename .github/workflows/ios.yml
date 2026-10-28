@@ -319,7 +319,7 @@ jobs:
     # also after a unit-test failure (the build products exist), or with products of an earlier run
     if: ${{ !cancelled() && needs.branding.result == 'success' && (needs.ios.result == 'success' || needs.ios.result == 'failure' || (needs.ios.result == 'skipped' && inputs.products_run_id != '')) }}
     runs-on: xcode-27
-    timeout-minutes: 120
+    timeout-minutes: 180
     permissions:
       contents: read
       actions: read   # download-artifact from an earlier run (products_run_id)

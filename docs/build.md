@@ -81,13 +81,15 @@ copy it ships to `NoDrive.app`. The bundle id, display name and icon are NoDrive
 
 ## CI (`.github/workflows/ios.yml`)
 
-Runs on every push to `main` and `platform/ios`, and by hand (workflow_dispatch). No secrets.
+Runs on every push to `main`, `platform/ios` and the feature branches (`feature/workspace-apps*`,
+`feature/smart-conflicts`, `feature/problem-reports`), and by hand (workflow_dispatch). No secrets.
 
 | Job | Runner | What it does |
 |---|---|---|
 | Branding gate | `ubuntu-latest` | `rebrand.py --check`, `make-icons.py --check`, `check-branding.py` (about 15 s) |
 | Build and unit tests (iOS Simulator) | `xcode-27` | Select Xcode 27.1, check every xcodebuild option in `xcodebuild -help`, restore/save the Swift-package cache, validate the project file, simulated entitlements, `build-for-testing` (unsigned), package `NoDrive.app`, inspect ids and entitlements, sweep the built app (report), unit tests (about 17 min) |
-| Simulator screens | `xcode-27` | Install and launch `NoDrive.app`, UI walk in en, de, ar and dark mode with screenshots, the drive.nourax.org stand-in, DNS capture and network gate, screenshot report (about 60 min) |
+| Simulator screens | `xcode-27` | Install and launch `NoDrive.app`, UI walk in en, de, ar and dark mode with screenshots, the drive.nourax.org stand-in, DNS capture and network gate, screenshot report; the two UI tests after sign-in (Workspace apps, Smart conflicts) run in light and dark mode (about 130 min, job limit 180 min) |
+| Server login | `ubuntu-24.04` | A throwaway Nextcloud 35.0.2 in Docker: the web-view sign-in checks (`server_login_check.py`) and the round 3 checks (`server_round3_check.py`: the size the app reads for Smart conflicts, and that the unit-test fixtures keep the real answer shape) |
 
 Why `xcode-27` and not `macos-latest`: `macos-latest` is macOS 26 with Xcode 26 only, which cannot
 build an iOS 27 project; GitHub's hosted `xcode-27` image (macOS 27, image `xcode-27-arm64`) has
@@ -110,6 +112,11 @@ artifact zip, then `nodrive-ios-simulator-app.zip`), boot a simulator, then
 
 The screens job can be re-run alone with the products of an earlier run: Actions → iOS → Run
 workflow → `products_run_id` = that run's id.
+
+The screens job also runs the Workspace apps UI test and the Smart conflicts UI test (the Auto upload
+setting "If a file is already in NoDrive", light and dark, Photos access granted by
+`simctl privacy grant photos`). Dispatch inputs: `only_workspace` (only the Workspace test) and `only_round3`
+(only the Smart conflicts test).
 
 ## On your own iPhone (optional, free Apple account)
 
