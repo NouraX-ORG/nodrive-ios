@@ -38,6 +38,7 @@ private final class FakeStore: NCConflictStore {
     var sizes: [String: Int64] = [:]            // ocId -> size of the extracted copy
     var queued: Set<String> = []                // names used by items of the app
     var waiting: [tableMetadata] = []           // rows in the queue that were not passed in
+    var queue: [tableMetadata] = []             // every waiting or uploading row (for "another photo uses this name")
     private(set) var done: [String] = []        // ocIds marked as already in NoDrive
     private(set) var renamed: [(ocId: String, from: String, to: String)] = []
     var failRename = false                      // a file copy fails: nothing is renamed
@@ -46,6 +47,13 @@ private final class FakeStore: NCConflictStore {
     func policy(account: String) -> NCConflictPolicy { policies[account] ?? .smart }
     func localSize(of metadata: tableMetadata) -> Int64 { sizes[metadata.ocId] ?? metadata.size }
     func isNameQueued(_ fileName: String, serverUrl: String, account: String) async -> Bool { queued.contains(fileName) }
+    func isNameTakenByOtherItem(_ metadata: tableMetadata) async -> Bool {
+        queue.contains {
+            $0.fileNameView == metadata.fileNameView && $0.serverUrl == metadata.serverUrl && $0.ocId != metadata.ocId
+                && $0.assetLocalIdentifier != metadata.assetLocalIdentifier
+                && ($0.status == NCGlobal.shared.metadataStatusUploading || $0.ocId < metadata.ocId)
+        }
+    }
     func mate(of metadata: tableMetadata) async -> tableMetadata? {
         waiting.first { $0.assetLocalIdentifier == metadata.assetLocalIdentifier && $0.isLivePhotoImage != metadata.isLivePhotoImage }
     }
@@ -62,6 +70,10 @@ private final class FakeStore: NCConflictStore {
             renamed.append((metadata.ocId, metadata.fileName, rename.newName))
             queued.remove(metadata.fileName)
             queued.insert(rename.newName)
+            for queuedRow in queue where queuedRow.ocId == metadata.ocId {
+                queuedRow.fileName = rename.newName
+                queuedRow.fileNameView = rename.newName
+            }
             updated.fileName = rename.newName
             updated.fileNameView = rename.newName
             updated.serverUrlFileName = NCConflictNaming.join(metadata.serverUrl, rename.newName)
@@ -247,6 +259,22 @@ struct NoDriveConflictDecisionTests {
                 }
             }
         }
+    }
+
+    @Test("A free name that another photo of the phone is about to take: Smart and Keep both rename, Keep the NoDrive copy waits, Keep the phone copy replaces by choice")
+    func nameTakenByOtherPhoto() {
+        let taken = NCConflictPart(name: "IMG_0001.HEIC", localSize: 100, remote: .missing, takenByOther: true)
+        #expect(NCConflictDecision.decide(policy: .smart, parts: [taken]) == .renameAll)
+        #expect(NCConflictDecision.decide(policy: .keepBoth, parts: [taken]) == .renameAll)
+        #expect(NCConflictDecision.decide(policy: .keepNoDrive, parts: [taken]) == .retryLater)
+        #expect(NCConflictDecision.decide(policy: .keepPhone, parts: [taken]) == .upload(skipping: []))
+        // An answer that is not clear still wins: retry later.
+        let unclear = NCConflictPart(name: "IMG_0001.MOV", localSize: 100, remote: .unknown)
+        #expect(NCConflictDecision.decide(policy: .smart, parts: [taken, unclear]) == .retryLater)
+        // One part of a Live Photo is enough for both to get a number.
+        let free = NCConflictPart(name: "IMG_0001.MOV", localSize: 100, remote: .missing)
+        #expect(NCConflictDecision.decide(policy: .smart, parts: [free, taken]) == .renameAll)
+        #expect(NCConflictDecision.decide(policy: .keepBoth, parts: [free, taken]) == .renameAll)
     }
 
     @Test("Smart: an unreadable local size is never compared")
@@ -463,7 +491,7 @@ struct NoDriveConflictProbeTests {
 
     @Test("No session (the library answers with an error of its own) is unknown, never missing")
     func noSession() async {
-        let state = await probe(answering: NKError(errorCode: -9999, errorDescription: "no session")).state(of: "https://x/y", account: account)
+        let state = await probe(answering: NKError.urlError).state(of: "https://x/y", account: account)
         #expect(state == .unknown)
     }
 
@@ -635,6 +663,72 @@ struct NoDriveConflictResolverTests {
         #expect(Set(names) == ["IMG_0001 1.JPG", "IMG_0001 2.JPG"])
         #expect(store.renamed.count == 2)
         #expect(Set(store.renamed.map(\.to)).count == 2)
+    }
+
+    @Test("Two photos with one name, the Drive has neither: one uploads as is, the other gets the next number")
+    func sameNameTwoAssetsSmartAndKeepBoth() async {
+        for policy in [NCConflictPolicy.smart, .keepBoth] {
+            let store = FakeStore()
+            store.policies[account] = policy
+            let first = row("a", "IMG_0001.JPG", asset: "ASSET-A")
+            let second = row("b", "IMG_0001.JPG", asset: "ASSET-B")
+            store.queue = [first, second]
+            let (resolver, _) = makeResolver(store, FakeProbe())
+            let result = await resolver.resolve([first, second])
+            #expect(Set(result.map(\.fileName)) == ["IMG_0001.JPG", "IMG_0001 1.JPG"], "\(policy)")
+            #expect(result.count == 2)
+            #expect(store.renamed.count == 1)
+            #expect(store.done.isEmpty)
+        }
+    }
+
+    @Test("Two photos with one name, the other already uploading in the background session: this one gets a number")
+    func sameNameOtherIsUploading() async {
+        let store = FakeStore()
+        let uploading = row("u", "IMG_0001.JPG", asset: "ASSET-A")
+        uploading.status = NCGlobal.shared.metadataStatusUploading
+        let waitingRow = row("a", "IMG_0001.JPG", asset: "ASSET-B")
+        store.queue = [uploading, waitingRow]
+        let (resolver, _) = makeResolver(store, FakeProbe())
+        let result = await resolver.resolve([waitingRow])
+        #expect(result.map(\.fileName) == ["IMG_0001 1.JPG"])
+    }
+
+    @Test("Two photos with one name under Keep the NoDrive copy: the one that goes second waits, they never wait for each other")
+    func sameNameKeepNoDriveWaits() async {
+        let store = FakeStore()
+        store.policies[account] = .keepNoDrive
+        let first = row("a", "IMG_0001.JPG", asset: "ASSET-A")
+        let second = row("b", "IMG_0001.JPG", asset: "ASSET-B")
+        store.queue = [first, second]
+        let (resolver, _) = makeResolver(store, FakeProbe())
+        let result = await resolver.resolve([first, second])
+        #expect(result.map(\.ocId) == ["a"])
+        #expect(store.done.isEmpty && store.renamed.isEmpty)
+    }
+
+    @Test("A photo with the same asset (its own seed) or a name nobody else uses is not taken")
+    func sameAssetIsNotTaken() async {
+        let store = FakeStore()
+        let item = row("a", "IMG_0001.JPG", asset: "ASSET-A")
+        store.queue = [item, row("z", "IMG_0001.JPG", asset: "ASSET-A"), row("y", "IMG_0002.JPG", asset: "ASSET-B")]
+        let (resolver, _) = makeResolver(store, FakeProbe())
+        let result = await resolver.resolve([item])
+        #expect(result.map(\.fileName) == ["IMG_0001.JPG"])
+        #expect(store.renamed.isEmpty)
+    }
+
+    @Test("Keep the phone copy still uploads as is, even when another photo uses the name (the owner chose to replace)")
+    func sameNameKeepPhone() async {
+        let store = FakeStore()
+        store.policies[account] = .keepPhone
+        let first = row("a", "IMG_0001.JPG", asset: "ASSET-A")
+        let second = row("b", "IMG_0001.JPG", asset: "ASSET-B")
+        store.queue = [first, second]
+        let (resolver, _) = makeResolver(store, FakeProbe())
+        let result = await resolver.resolve([first, second])
+        #expect(result.map(\.fileName) == ["IMG_0001.JPG", "IMG_0001.JPG"])
+        #expect(store.renamed.isEmpty)
     }
 
     @Test("The lock is let go on every path: a pass that ends in retry later does not block the next one")
@@ -894,6 +988,32 @@ struct NoDriveConflictDatabaseStoreTests {
         #expect(await store.isNameQueued("IMG_0001 1.HEIC", serverUrl: dbServerUrl, account: storeAccount) == false)
         #expect(await store.isNameQueued("IMG_0001.HEIC", serverUrl: dbServerUrl + "/Other", account: storeAccount) == false)
         await clean([id])
+    }
+
+    @Test("Another photo with the same name in the queue: an uploading one always counts, a waiting one only when it goes first; the same asset never")
+    func nameTakenByOtherItem() async throws {
+        let low = "ndtest-a-" + UUID().uuidString
+        let high = "ndtest-b-" + UUID().uuidString
+        let same = "ndtest-c-" + UUID().uuidString
+        let lowItem = try await make(low, "IMG_0009.HEIC", bytes: 3, asset: "ASSET-T1")
+        let highItem = try await make(high, "IMG_0009.HEIC", bytes: 3, asset: "ASSET-T2")
+        // Two waiting photos: only the one that goes second sees the name as taken, so they never wait for each other.
+        #expect(await store.isNameTakenByOtherItem(lowItem) == false)
+        #expect(await store.isNameTakenByOtherItem(highItem))
+        // An uploading row of the same asset never counts.
+        let sameAsset = try await make(same, "IMG_0009.HEIC", bytes: 3, asset: "ASSET-T1")
+        let sameUploading = sameAsset.detachedCopy()
+        sameUploading.status = NCGlobal.shared.metadataStatusUploading
+        await NCManageDatabase.shared.addMetadataAsync(sameUploading)
+        #expect(await store.isNameTakenByOtherItem(lowItem) == false)
+        // An uploading row of another asset counts for every other photo.
+        let uploading = highItem.detachedCopy()
+        uploading.status = NCGlobal.shared.metadataStatusUploading
+        await NCManageDatabase.shared.addMetadataAsync(uploading)
+        #expect(await store.isNameTakenByOtherItem(lowItem))
+        // Another name is not taken.
+        #expect(await store.isNameTakenByOtherItem(row("zz", "IMG_0010.HEIC", asset: "ASSET-T3")) == false)
+        await clean([low, high, same])
     }
 
     @Test("A rename moves the extracted file with the row: the new name is in the database, the old one is gone")

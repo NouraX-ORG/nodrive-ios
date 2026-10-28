@@ -37,23 +37,18 @@ enum NCConflictNaming {
     /// The first number that is free for every name (one file, or the two parts of a Live Photo).
     ///
     /// A candidate is free when the server answers 404 for all its names, no queued item of the app uses one of
-    /// them, and none was handed out earlier in the same pass (`reserved`). Returns the new names in the order of
+    /// them (the queue rows and the resolver's lock keep two passes apart). Returns the new names in the order of
     /// `names`, or `nil` when a server answer is not clear or 100 candidates were taken (retry later).
     static func freeNames(for names: [String],
                           serverUrl: String,
                           account: String,
                           probe: NCRemoteProbe,
-                          isQueued: (String) async -> Bool,
-                          reserved: Set<String> = []) async -> [String]? {
+                          isQueued: (String) async -> Bool) async -> [String]? {
         var candidates = names
         for _ in 0..<maxAttempts {
             candidates = candidates.map(nextName(after:))
             var free = true
             for candidate in candidates {
-                if reserved.contains(candidate) {
-                    free = false
-                    break
-                }
                 if await isQueued(candidate) {
                     free = false
                     break

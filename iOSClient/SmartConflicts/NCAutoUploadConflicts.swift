@@ -11,6 +11,10 @@ protocol NCConflictStore {
     func localSize(of metadata: tableMetadata) -> Int64
     /// True when a queued or known item of the app already uses this name in this folder.
     func isNameQueued(_ fileName: String, serverUrl: String, account: String) async -> Bool
+    /// True when another photo of the phone (another row, another asset) is uploading under this name in this folder,
+    /// or is waiting for it and goes first. Of two waiting photos with one name only the one with the smaller `ocId`
+    /// counts for the other, so the two never wait for each other.
+    func isNameTakenByOtherItem(_ metadata: tableMetadata) async -> Bool
     /// The other part of a Live Photo that is waiting in the queue, if any.
     func mate(of metadata: tableMetadata) async -> tableMetadata?
     /// Already in NoDrive: leave the upload queue and enter the upload history (no upload, no notification).
@@ -54,6 +58,22 @@ struct NCDatabaseConflictStore: NCConflictStore {
     func isNameQueued(_ fileName: String, serverUrl: String, account: String) async -> Bool {
         await database.getMetadataAsync(predicate: NSPredicate(format: "fileNameView == %@ AND serverUrl == %@ AND account == %@",
                                                                fileName, serverUrl, account)) != nil
+    }
+
+    func isNameTakenByOtherItem(_ metadata: tableMetadata) async -> Bool {
+        var format = "fileNameView == %@ AND serverUrl == %@ AND account == %@ AND ocId != %@ AND (status == %d OR status == %d)"
+        var arguments: [Any] = [metadata.fileNameView,
+                                metadata.serverUrl,
+                                metadata.account,
+                                metadata.ocId,
+                                NCGlobal.shared.metadataStatusWaitUpload,
+                                NCGlobal.shared.metadataStatusUploading]
+        if !metadata.assetLocalIdentifier.isEmpty {
+            format += " AND assetLocalIdentifier != %@"
+            arguments.append(metadata.assetLocalIdentifier)
+        }
+        let rows = await database.getMetadatasAsync(predicate: NSPredicate(format: format, argumentArray: arguments))
+        return rows.contains { $0.status == NCGlobal.shared.metadataStatusUploading || $0.ocId < metadata.ocId }
     }
 
     func mate(of metadata: tableMetadata) async -> tableMetadata? {
@@ -225,7 +245,13 @@ actor NCConflictResolver {
             let remote: NCConflictRemoteState = policy == .keepPhone
                 ? .missing
                 : await probe.state(of: part.serverUrlFileName, account: account)
-            parts.append(NCConflictPart(name: part.fileName, localSize: store.localSize(of: part), remote: remote))
+            // A name that is free on the Drive may still be about to be taken by another photo of the phone (the
+            // library scan can queue two photos with one name, and an upload that runs in the background session
+            // is not on the Drive yet). The lock makes this check safe. "Keep the phone copy" replaces by choice.
+            let taken = remote == .missing && policy != .keepPhone
+                ? await store.isNameTakenByOtherItem(part)
+                : false
+            parts.append(NCConflictPart(name: part.fileName, localSize: store.localSize(of: part), remote: remote, takenByOther: taken))
         }
 
         switch NCConflictDecision.decide(policy: policy, parts: parts) {

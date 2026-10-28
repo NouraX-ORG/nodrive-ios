@@ -28,6 +28,9 @@ struct NCConflictPart: Equatable {
     /// Size in bytes of the file the app will upload.
     let localSize: Int64
     let remote: NCConflictRemoteState
+    /// True when the Drive has no such name (404) but another photo of the phone, waiting or uploading in the same
+    /// folder, is about to use it. Uploading both would let the second replace the first.
+    var takenByOther: Bool = false
 }
 
 /// The outcome for one file or one Live Photo. Pure logic, no I/O.
@@ -49,11 +52,13 @@ enum NCConflictDecision: Equatable {
 
         case .keepNoDrive:
             if parts.contains(where: { $0.remote == .unknown }) { return .retryLater }
+            // A free name that another waiting photo is about to take: this one waits until that upload is done.
+            if parts.contains(where: { $0.remote == .missing && $0.takenByOther }) { return .retryLater }
             return .upload(skipping: parts.indices.filter { parts[$0].remote.exists })
 
         case .keepBoth:
             if parts.contains(where: { $0.remote == .unknown }) { return .retryLater }
-            return parts.contains(where: { $0.remote.exists }) ? .renameAll : .upload(skipping: [])
+            return parts.contains(where: { $0.remote.exists || $0.takenByOther }) ? .renameAll : .upload(skipping: [])
 
         case .smart:
             if parts.contains(where: { $0.remote == .unknown }) { return .retryLater }
@@ -61,6 +66,8 @@ enum NCConflictDecision: Equatable {
             for (index, part) in parts.enumerated() {
                 switch part.remote {
                 case .missing, .unknown:
+                    // Free on the Drive, but another photo of the phone is about to use the name: never overwrite it.
+                    if part.takenByOther { return .renameAll }
                     continue
                 case .folder:
                     return .renameAll
