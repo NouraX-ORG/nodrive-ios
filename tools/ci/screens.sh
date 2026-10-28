@@ -21,6 +21,9 @@
 #   screens.sh workspace <udid> <variant>
 #        the Workspace apps UI test against the stand-in's test account (needs XCTESTRUN, SHOTS, RESULTS,
 #        NODRIVE_WS_USER and NODRIVE_WS_APP_PASSWORD in the environment)
+#   screens.sh conflicts <udid> <variant>
+#        the Smart conflicts UI test (the Auto upload setting "If a file is already in NoDrive"), signed in as
+#        for `workspace`; Photos access is granted before the launch (needs the shipped app in app/NoDrive.app)
 set -euo pipefail
 
 APP_ID=org.nourax.nodrive
@@ -321,6 +324,38 @@ workspace() {
   return $status
 }
 
+conflicts() {
+  local udid=$1 variant=$2 status=0
+  mkdir -p "$SHOTS/$variant" "$RESULTS"
+  # The Auto upload screen needs Photos access: grant it before the test installs and launches the app
+  xcrun simctl install "$udid" "${CONFLICT_APP:-app/NoDrive.app}"
+  xcrun simctl privacy "$udid" grant photos "$APP_ID"
+  set +e
+  # The account goes to the app through the test runner's environment, not through a command line.
+  TEST_RUNNER_NODRIVE_VARIANT="$variant" TEST_RUNNER_NODRIVE_SHOTS_DIR="$SHOTS" \
+  TEST_RUNNER_NODRIVE_UITEST_ACCOUNT="https://drive.nourax.org|$NODRIVE_WS_USER|$NODRIVE_WS_APP_PASSWORD" \
+    xcodebuild test-without-building \
+      -xctestrun "$XCTESTRUN" \
+      -destination "id=$udid" \
+      -only-testing:NextcloudUITests/NoDriveConflictSettingsUITests \
+      -parallel-testing-enabled NO \
+      -resultBundlePath "$RESULTS/ui-$variant.xcresult" \
+      > "$RESULTS/ui-$variant.log" 2>&1
+  status=$?
+  set -e
+  xcbeautify --renderer github-actions < "$RESULTS/ui-$variant.log" || true
+  if ! grep -Eq "Executed [1-9][0-9]* tests?" "$RESULTS/ui-$variant.log"; then
+    echo "conflicts $variant: no test ran (check -only-testing and the .xctestrun)"
+    status=1
+  fi
+  xcrun xcresulttool get test-results summary --path "$RESULTS/ui-$variant.xcresult" \
+    > "$RESULTS/ui-$variant-summary.json" 2>/dev/null || true
+  xcrun simctl spawn "$udid" log show --last 8m --style compact \
+    --predicate 'process == "Nextcloud"' 2>/dev/null | tail -n 3000 > "$RESULTS/ui-$variant-app.log" || true
+  echo "conflicts $variant: xcodebuild exit $status; files: $(ls "$SHOTS/$variant" | tr '\n' ' ')"
+  return $status
+}
+
 cmd=${1:-}; shift || true
 case "$cmd" in
   check-tools) check_tools "$@" ;;
@@ -333,5 +368,6 @@ case "$cmd" in
   launch) launch "$@" ;;
   walk) walk "$@" ;;
   workspace) workspace "$@" ;;
+  conflicts) conflicts "$@" ;;
   *) echo "usage: see the header of $0" >&2; exit 2 ;;
 esac

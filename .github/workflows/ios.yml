@@ -17,6 +17,8 @@ on:
       - platform/ios
       - feature/workspace-apps
       - feature/workspace-apps-fixes
+      - feature/smart-conflicts
+      - feature/problem-reports
   workflow_dispatch:
     inputs:
       products_run_id:
@@ -26,6 +28,11 @@ on:
         type: string
       only_workspace:
         description: 'Screens job: run only the Workspace apps UI test (not the four screenshot walks)'
+        required: false
+        default: false
+        type: boolean
+      only_round3:
+        description: 'Screens job: run only the round-3 UI tests (Smart conflicts setting), not the walks or the Workspace test'
         required: false
         default: false
         type: boolean
@@ -106,6 +113,10 @@ jobs:
       - name: Check how the app's sign-in works against the real server code
         run: bash tools/ci/server-app-login.sh check
 
+      - name: Round 3 server checks (the size the app reads for Smart conflicts, on the real server code)
+        if: ${{ !cancelled() }}
+        run: bash tools/ci/server-app-login.sh round3
+
       - name: Stop the server
         if: ${{ always() }}
         run: |
@@ -119,6 +130,7 @@ jobs:
           name: server-login-report
           path: |
             build/server-login/report.md
+            build/server-login/round3.md
             build/server-login/status.json
             build/server-login/navigation-apps-*.json
             build/server-login/webview-ua-primary.png
@@ -421,37 +433,37 @@ jobs:
       - name: simctl install, launch and screenshots (shipped NoDrive.app)
         run: |
           bash tools/ci/screens.sh prepare-first "$UDID"
-          if [ "${{ inputs.only_workspace }}" != "true" ]; then
+          if [ "${{ inputs.only_workspace }}" != "true" ] && [ "${{ inputs.only_round3 }}" != "true" ]; then
             bash tools/ci/screens.sh switch "$UDID" en en_US light
             bash tools/ci/screens.sh launch "$UDID" app/NoDrive.app "$SHOTS/simctl" "$RESULTS"
           fi
 
       - name: UI walk, English (en-light)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true && inputs.only_round3 != true }}
         run: |
           bash tools/ci/screens.sh switch "$UDID" en en_US light
           bash tools/ci/screens.sh walk "$UDID" en-light en en_US
 
       - name: UI walk, German (de-light)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true && inputs.only_round3 != true }}
         run: |
           bash tools/ci/screens.sh switch "$UDID" de de_DE light
           bash tools/ci/screens.sh walk "$UDID" de-light de de_DE
 
       - name: UI walk, Arabic right-to-left (ar-light)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true && inputs.only_round3 != true }}
         run: |
           bash tools/ci/screens.sh switch "$UDID" ar ar_SA light
           bash tools/ci/screens.sh walk "$UDID" ar-light ar ar_SA
 
       - name: UI walk, English dark mode (en-dark)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true && inputs.only_round3 != true }}
         run: |
           bash tools/ci/screens.sh switch "$UDID" en en_US dark
           bash tools/ci/screens.sh walk "$UDID" en-dark en en_US
 
       - name: Workspace apps menu, signed in (light)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_round3 != true }}
         run: |
           # a clean simulator: the account of an earlier run is in the keychain and the app group
           bash tools/ci/screens.sh prepare-first "$UDID"
@@ -459,20 +471,35 @@ jobs:
           bash tools/ci/screens.sh workspace "$UDID" workspace-light
 
       - name: Workspace apps menu, signed in (dark)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_round3 != true }}
         run: |
           # a clean simulator: the account of an earlier run is in the keychain and the app group
           bash tools/ci/screens.sh prepare-first "$UDID"
           bash tools/ci/screens.sh switch "$UDID" en en_US dark
           bash tools/ci/screens.sh workspace "$UDID" workspace-dark
 
+      - name: Conflict setting, signed in (light)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true }}
+        run: |
+          # a clean simulator; Photos access is granted before the launch (the Auto upload screen needs it)
+          bash tools/ci/screens.sh prepare-first "$UDID"
+          bash tools/ci/screens.sh switch "$UDID" en en_US light
+          bash tools/ci/screens.sh conflicts "$UDID" conflicts-light
+
+      - name: Conflict setting, signed in (dark)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true }}
+        run: |
+          bash tools/ci/screens.sh prepare-first "$UDID"
+          bash tools/ci/screens.sh switch "$UDID" en en_US dark
+          bash tools/ci/screens.sh conflicts "$UDID" conflicts-dark
+
       - name: Workspace checks (credential only to the own server, no login page, no stale sessions, expiry)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_round3 != true }}
         run: |
           python3 tools/ci/workspace-check.py "$RESULTS/stand-in.jsonl" --walk "$SHOTS" --json "$RESULTS/workspace-check.json"
 
       - name: Network gate (no Nextcloud hosts; sign-in opened drive.nourax.org)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true && inputs.only_round3 != true }}
         run: |
           bash tools/ci/screens.sh capture-stop "$RESULTS"
           python3 tools/ci/network-gate.py --dns-text "$RESULTS/dns.txt" --dns-processes "$RESULTS/dns-processes.txt" \
@@ -483,7 +510,7 @@ jobs:
         if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
         run: |
           python3 tools/ci/screens-report.py --shots "$SHOTS" --results "$RESULTS" \
-            --variants ${{ inputs.only_workspace == true && 'workspace-light workspace-dark' || 'en-light de-light ar-light en-dark workspace-light workspace-dark' }} \
+            --variants ${{ inputs.only_round3 == true && 'conflicts-light conflicts-dark' || inputs.only_workspace == true && 'workspace-light workspace-dark' || 'en-light de-light ar-light en-dark workspace-light workspace-dark conflicts-light conflicts-dark' }} \
             --docs-out "$GITHUB_WORKSPACE/screenshots-docs" --json "$RESULTS/screens-report.json"
 
       - name: No throwaway password in any result file

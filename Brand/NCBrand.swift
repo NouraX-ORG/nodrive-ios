@@ -107,6 +107,7 @@ final class NCBrandOptions: @unchecked Sendable {
     var disable_more_external_site: Bool = false
     var disable_openin_file: Bool = false
     var disable_crash_service: Bool = true
+    var disable_background_upload_extension: Bool = true // NoDrive: iOSClient/SmartConflicts, see NCPreferences
     var disable_log: Bool = false
     var disable_mobileconfig: Bool = false  
     var disable_show_more_nextcloud_apps_in_settings: Bool = true

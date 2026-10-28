@@ -162,6 +162,8 @@ actor NCMetadataUploadTranfersSuccess {
 
         // Auto Upload
         await NCManageDatabase.shared.addAutoUploadTransferAsync(autoUploads)
+        // NoDrive: a renamed copy also records the photo's original name (iOSClient/SmartConflicts, H8)
+        await NCAutoUploadConflicts.shared.didUpload(autoUploads)
 
         if !NCNetworking.shared.isInBackground() {
             // Set livePhoto on Server

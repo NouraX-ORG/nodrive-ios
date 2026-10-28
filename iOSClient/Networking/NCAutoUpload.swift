@@ -423,8 +423,8 @@ class NCAutoUpload: NSObject {
                   let uploadAccount = await database.getTableAccountAsync(predicate: NSPredicate(format: "account == %@", metadata.account)),
                   uploadAccount.autoUploadStart else { return }
 
-            // Forced uploads intentionally replace existing server resources.
-            if !uploadAccount.autoUploadForceReupload {
+            // NoDrive: only "Keep the NoDrive copy" checks before the photo is read (iOSClient/SmartConflicts, H1)
+            if NCAutoUploadConflicts.shared.upstreamPrecheck(uploadAccount) {
                 let existsResult = await NCNetworking.shared.fileExists(
                     serverUrlFileName: metadata.serverUrlFileName,
                     account: metadata.account
@@ -446,10 +446,13 @@ class NCAutoUpload: NSObject {
                   current.autoUploadStart,
                   current.autoUploadSessionIdentifier == uploadAccount.autoUploadSessionIdentifier else { return }
 
-            for extractedMetadata in extractedMetadatas {
+            // NoDrive: the setting "If a file is already in NoDrive" decides what uploads (iOSClient/SmartConflicts, H2)
+            for extractedMetadata in await NCAutoUploadConflicts.shared.resolve(extractedMetadatas, backgroundResource: false) {
                 guard !Task.isCancelled else { return }
 
-                if extractedMetadata.isLivePhoto && !uploadAccount.autoUploadForceReupload {
+                // NoDrive: upstream's per-part check is skipped for items NoDrive decided (iOSClient/SmartConflicts, H3)
+                if extractedMetadata.isLivePhoto && !uploadAccount.autoUploadForceReupload
+                    && !NCAutoUploadConflicts.shared.handles(extractedMetadata, backgroundResource: false) {
                     let resourceExists = await NCNetworking.shared.fileExists(
                         serverUrlFileName: extractedMetadata.serverUrlFileName,
                         account: extractedMetadata.account
