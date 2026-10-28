@@ -16,9 +16,14 @@ private let serverUrlBase = "https://drive.nourax.org/remote.php/dav/files/cites
 private final class FakeProbe: NCRemoteProbe {
     var answers: [String: NCConflictRemoteState] = [:]
     private(set) var asked: [String] = []
+    /// A pause in every answer, so that two callers overlap in the tests (a real server takes time too).
+    var pauseNanoseconds: UInt64 = 0
 
     func state(of serverUrlFileName: String, account: String) async -> NCConflictRemoteState {
         asked.append(serverUrlFileName)
+        if pauseNanoseconds > 0 {
+            try? await Task.sleep(nanoseconds: pauseNanoseconds)
+        }
         return answers[serverUrlFileName] ?? .missing
     }
 
@@ -35,6 +40,7 @@ private final class FakeStore: NCConflictStore {
     var waiting: [tableMetadata] = []           // rows in the queue that were not passed in
     private(set) var done: [String] = []        // ocIds marked as already in NoDrive
     private(set) var renamed: [(ocId: String, from: String, to: String)] = []
+    var failRename = false                      // a file copy fails: nothing is renamed
     private(set) var history: [(base: String, name: String, asset: String)] = []
 
     func policy(account: String) -> NCConflictPolicy { policies[account] ?? .smart }
@@ -47,16 +53,22 @@ private final class FakeStore: NCConflictStore {
         done.append(metadata.ocId)
         waiting.removeAll { $0.ocId == metadata.ocId }
     }
-    func rename(_ metadata: tableMetadata, to newName: String, livePhotoFile: String?) async -> tableMetadata {
-        let updated = metadata.detachedCopy()
-        renamed.append((metadata.ocId, metadata.fileName, newName))
-        queued.remove(metadata.fileName)
-        queued.insert(newName)
-        updated.fileName = newName
-        updated.fileNameView = newName
-        updated.serverUrlFileName = NCConflictNaming.join(metadata.serverUrl, newName)
-        if let livePhotoFile { updated.livePhotoFile = livePhotoFile }
-        return updated
+    func rename(_ renames: [NCConflictRename]) async -> [tableMetadata]? {
+        if failRename { return nil }
+        var rows: [tableMetadata] = []
+        for rename in renames {
+            let metadata = rename.metadata
+            let updated = metadata.detachedCopy()
+            renamed.append((metadata.ocId, metadata.fileName, rename.newName))
+            queued.remove(metadata.fileName)
+            queued.insert(rename.newName)
+            updated.fileName = rename.newName
+            updated.fileNameView = rename.newName
+            updated.serverUrlFileName = NCConflictNaming.join(metadata.serverUrl, rename.newName)
+            if let livePhotoFile = rename.livePhotoFile { updated.livePhotoFile = livePhotoFile }
+            rows.append(updated)
+        }
+        return rows
     }
     func recordUploaded(account: String, serverUrlBase: String, fileName: String, assetLocalIdentifier: String, date: Date) async {
         history.append((serverUrlBase, fileName, assetLocalIdentifier))
@@ -435,6 +447,59 @@ struct NoDriveConflictProbeTests {
         #expect(NCPropfindSizeParser.parse(Data(two.utf8)) == .file(size: 12345))
     }
 
+    private func probe(answering error: NKError, data: Data? = nil) -> NCWebDAVProbe {
+        NCWebDAVProbe(call: { _, _, _ in NCPropfindAnswer(error: error, data: data) })
+    }
+
+    @Test("The answer of the server becomes the state: 404 is missing, any other error is unknown")
+    func statusMapping() async {
+        let answers: [(Int, NCConflictRemoteState)] = [(404, .missing), (401, .unknown), (403, .unknown), (423, .unknown),
+                                                       (500, .unknown), (503, .unknown), (-1001, .unknown)]
+        for (code, expected) in answers {
+            let state = await probe(answering: NKError(errorCode: code, errorDescription: "test")).state(of: "https://x/y", account: account)
+            #expect(state == expected, "status \(code)")
+        }
+    }
+
+    @Test("No session (the library answers with an error of its own) is unknown, never missing")
+    func noSession() async {
+        let state = await probe(answering: NKError(errorCode: -9999, errorDescription: "no session")).state(of: "https://x/y", account: account)
+        #expect(state == .unknown)
+    }
+
+    @Test("A good answer is read: a file with its size, a folder; a body that is missing or unreadable is unknown")
+    func successMapping() async {
+        let file = await probe(answering: .success, data: Data(Self.fileAnswer.utf8)).state(of: "https://x/y", account: account)
+        #expect(file == .file(size: 12345))
+        let folder = await probe(answering: .success, data: Data(Self.folderAnswer.utf8)).state(of: "https://x/y", account: account)
+        #expect(folder == .folder)
+        let noBody = await probe(answering: .success).state(of: "https://x/y", account: account)
+        #expect(noBody == .unknown)
+        let junk = await probe(answering: .success, data: Data("nope".utf8)).state(of: "https://x/y", account: account)
+        #expect(junk == .unknown)
+    }
+
+    @Test("The probe asks for the url of the name with the account's own session and the request body")
+    func askedWith() async {
+        final class Seen: @unchecked Sendable {
+            var url = ""
+            var body: Data?
+            var account = ""
+        }
+        let seen = Seen()
+        let probe = NCWebDAVProbe(call: { url, body, account in
+            seen.url = url
+            seen.body = body
+            seen.account = account
+            return NCPropfindAnswer(error: NKError(errorCode: 404, errorDescription: "Not Found"), data: nil)
+        })
+        let state = await probe.state(of: "https://x/y/IMG.HEIC", account: "acc")
+        #expect(state == .missing)
+        #expect(seen.url == "https://x/y/IMG.HEIC")
+        #expect(seen.account == "acc")
+        #expect(seen.body == Data(NCWebDAVProbe.requestBodyText.utf8))
+    }
+
     @Test("The request body asks for exactly what the parser reads")
     func requestBody() {
         let body = NCWebDAVProbe.requestBodyText
@@ -551,6 +616,54 @@ struct NoDriveConflictResolverTests {
         #expect(result[0].livePhotoFile == "IMG_0001 1.mov")
         #expect(result[1].livePhotoFile == "IMG_0001 1.HEIC")
         #expect(await ledger.count == 2)
+    }
+
+    @Test("Two upload passes at the same time never give one new name to two photos")
+    func overlappingPasses() async {
+        let store = FakeStore()
+        let probe = FakeProbe()
+        probe.pauseNanoseconds = 5_000_000
+        probe.set("IMG_0001.JPG", .file(size: 99))
+        let (resolver, _) = makeResolver(store, probe)
+        let first = row("a", "IMG_0001.JPG", asset: "ASSET-A")
+        let second = row("b", "IMG_0001.JPG", asset: "ASSET-B")
+        async let one = resolver.resolve([first])
+        async let two = resolver.resolve([second])
+        let results = await [one, two]
+        #expect(results.map(\.count) == [1, 1])
+        let names = results.flatMap { $0.map(\.fileName) }
+        #expect(Set(names) == ["IMG_0001 1.JPG", "IMG_0001 2.JPG"])
+        #expect(store.renamed.count == 2)
+        #expect(Set(store.renamed.map(\.to)).count == 2)
+    }
+
+    @Test("The lock is let go on every path: a pass that ends in retry later does not block the next one")
+    func lockIsReleased() async {
+        let store = FakeStore()
+        let probe = FakeProbe()
+        probe.pauseNanoseconds = 1_000_000
+        probe.set("A.HEIC", .unknown)
+        let (resolver, _) = makeResolver(store, probe)
+        async let blocked = resolver.resolve([row("a", "A.HEIC", asset: "ASSET-A")])
+        async let free = resolver.resolve([row("b", "B.HEIC", asset: "ASSET-B")])
+        let results = await [blocked, free]
+        #expect(results.map { $0.map(\.fileName) } == [[], ["B.HEIC"]])
+    }
+
+    @Test("Live Photo, a file copy fails: neither part is renamed, nothing is recorded, nothing uploads")
+    func livePhotoCopyFails() async {
+        let store = FakeStore()
+        store.failRename = true
+        let probe = FakeProbe()
+        probe.set("IMG_0001.HEIC", .file(size: 100))
+        probe.set("IMG_0001.mov", .file(size: 49))
+        let (resolver, ledger) = makeResolver(store, probe)
+        let result = await resolver.resolve([row("p", "IMG_0001.HEIC", kind: .photo),
+                                             row("v", "IMG_0001.mov", kind: .video, size: 50)])
+        #expect(result.isEmpty)
+        #expect(store.renamed.isEmpty)
+        #expect(store.done.isEmpty)
+        #expect(await ledger.count == 0)
     }
 
     @Test("Live Photo, Smart, both the same size: both marked done")
@@ -714,5 +827,129 @@ struct NoDriveBackgroundUploadExtensionTests {
         #expect(NCBrandOptions.shared.disable_background_upload_extension)
         #expect(!NCPreferences.canConfigureBackgroundUploadExtension)
         #expect(!NCPreferences().shouldUseBackgroundUploadExtension)
+    }
+}
+
+// MARK: - The real store (the test app's database and file system)
+
+@Suite("NoDrive conflict database store")
+struct NoDriveConflictDatabaseStoreTests {
+    private let urlBase = "https://nodrive-test.invalid"
+    private let userId = "citest-store"
+    // A host that cannot exist: nothing in the test app can reach a real server with these rows.
+    private let storeAccount = "citest-store https://nodrive-test.invalid"
+    private let dbServerUrl = "https://nodrive-test.invalid/remote.php/dav/files/citest-store/Camera"
+    private let store = NCDatabaseConflictStore()
+    private let utility = NCUtilityFileSystem()
+
+    private func folder(_ ocId: String) -> String {
+        utility.getDirectoryProviderStorageOcId(ocId, userId: userId, urlBase: urlBase)
+    }
+
+    /// A waiting Auto upload item with its extracted file (`bytes` long) in the app's storage.
+    private func make(_ ocId: String, _ name: String, kind: Kind = .plain, bytes: Int, asset: String) async throws -> tableMetadata {
+        let metadata = row(ocId, name, asset: asset, kind: kind, size: 1)
+        metadata.userId = userId
+        metadata.urlBase = urlBase
+        metadata.account = storeAccount
+        metadata.serverUrl = dbServerUrl
+        metadata.serverUrlFileName = NCConflictNaming.join(dbServerUrl, name)
+        metadata.autoUploadServerUrlBase = dbServerUrl
+        try Data(count: bytes).write(to: URL(fileURLWithPath: folder(ocId) + "/" + name))
+        await NCManageDatabase.shared.addMetadataAsync(metadata)
+        return metadata
+    }
+
+    private func stored(_ ocId: String) async -> tableMetadata? {
+        await NCManageDatabase.shared.getMetadataAsync(predicate: NSPredicate(format: "ocId == %@", ocId))
+    }
+
+    private func exists(_ ocId: String, _ name: String) -> Bool {
+        FileManager.default.fileExists(atPath: folder(ocId) + "/" + name)
+    }
+
+    /// The old copy is dropped on a background queue: wait a moment for it.
+    private func waitUntilGone(_ ocId: String, _ name: String) async -> Bool {
+        for _ in 0..<50 {
+            if !exists(ocId, name) { return true }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        return false
+    }
+
+    /// Removes the rows and files this test made (its own, by their unique ids).
+    private func clean(_ ocIds: [String]) async {
+        for ocId in ocIds {
+            await NCManageDatabase.shared.deleteMetadataAsync(ocId: ocId)
+            try? FileManager.default.removeItem(atPath: folder(ocId))
+        }
+    }
+
+    @Test("The size is the one of the extracted file; the queue is asked by name, folder and account")
+    func sizeAndQueue() async throws {
+        let id = "ndtest-" + UUID().uuidString
+        let item = try await make(id, "IMG_0001.HEIC", bytes: 7, asset: "ASSET-S1")
+        #expect(store.localSize(of: item) == 7)
+        #expect(await store.isNameQueued("IMG_0001.HEIC", serverUrl: dbServerUrl, account: storeAccount))
+        #expect(await store.isNameQueued("IMG_0001 1.HEIC", serverUrl: dbServerUrl, account: storeAccount) == false)
+        #expect(await store.isNameQueued("IMG_0001.HEIC", serverUrl: dbServerUrl + "/Other", account: storeAccount) == false)
+        await clean([id])
+    }
+
+    @Test("A rename moves the extracted file with the row: the new name is in the database, the old one is gone")
+    func renameOne() async throws {
+        let id = "ndtest-" + UUID().uuidString
+        let item = try await make(id, "IMG_0001.HEIC", bytes: 7, asset: "ASSET-S2")
+        let rows = await store.rename([NCConflictRename(metadata: item, newName: "IMG_0001 1.HEIC", livePhotoFile: nil)])
+        #expect(rows?.map(\.fileName) == ["IMG_0001 1.HEIC"])
+        let saved = await stored(id)
+        #expect(saved?.fileName == "IMG_0001 1.HEIC")
+        #expect(saved?.fileNameView == "IMG_0001 1.HEIC")
+        #expect(saved?.serverUrlFileName == NCConflictNaming.join(dbServerUrl, "IMG_0001 1.HEIC"))
+        #expect(exists(id, "IMG_0001 1.HEIC"))
+        #expect(store.localSize(of: saved ?? item) == 7)
+        #expect(await waitUntilGone(id, "IMG_0001.HEIC"))
+        #expect(await store.isNameQueued("IMG_0001.HEIC", serverUrl: dbServerUrl, account: storeAccount) == false)
+        #expect(await store.isNameQueued("IMG_0001 1.HEIC", serverUrl: dbServerUrl, account: storeAccount))
+        await clean([id])
+    }
+
+    @Test("A Live Photo: the partner is found in the queue, both rows get the new name and point at each other")
+    func renamePair() async throws {
+        let photoId = "ndtest-" + UUID().uuidString
+        let videoId = "ndtest-" + UUID().uuidString
+        let photo = try await make(photoId, "IMG_0002.HEIC", kind: .photo, bytes: 5, asset: "ASSET-S3")
+        let video = try await make(videoId, "IMG_0002.mov", kind: .video, bytes: 9, asset: "ASSET-S3")
+        #expect(await store.mate(of: photo)?.ocId == videoId)
+        #expect(await store.mate(of: video)?.ocId == photoId)
+        let rows = await store.rename([NCConflictRename(metadata: photo, newName: "IMG_0002 1.HEIC", livePhotoFile: "IMG_0002 1.mov"),
+                                       NCConflictRename(metadata: video, newName: "IMG_0002 1.mov", livePhotoFile: "IMG_0002 1.HEIC")])
+        #expect(rows?.count == 2)
+        let newPhoto = await stored(photoId)
+        let newVideo = await stored(videoId)
+        #expect(newPhoto?.fileName == "IMG_0002 1.HEIC")
+        #expect(newPhoto?.livePhotoFile == "IMG_0002 1.mov")
+        #expect(newVideo?.fileName == "IMG_0002 1.mov")
+        #expect(newVideo?.livePhotoFile == "IMG_0002 1.HEIC")
+        #expect(exists(photoId, "IMG_0002 1.HEIC") && exists(videoId, "IMG_0002 1.mov"))
+        await clean([photoId, videoId])
+    }
+
+    @Test("A Live Photo whose second copy fails: nothing changes, the first new copy is dropped, no row is renamed")
+    func renamePairFails() async throws {
+        let photoId = "ndtest-" + UUID().uuidString
+        let videoId = "ndtest-" + UUID().uuidString
+        let photo = try await make(photoId, "IMG_0003.HEIC", kind: .photo, bytes: 5, asset: "ASSET-S4")
+        let video = try await make(videoId, "IMG_0003.mov", kind: .video, bytes: 9, asset: "ASSET-S4")
+        // A folder that does not exist makes the second copy fail.
+        let rows = await store.rename([NCConflictRename(metadata: photo, newName: "IMG_0003 1.HEIC", livePhotoFile: "x"),
+                                       NCConflictRename(metadata: video, newName: "no-such-folder/IMG_0003 1.mov", livePhotoFile: "y")])
+        #expect(rows == nil)
+        #expect(await stored(photoId)?.fileName == "IMG_0003.HEIC")
+        #expect(await stored(videoId)?.fileName == "IMG_0003.mov")
+        #expect(await stored(photoId)?.livePhotoFile == "IMG_0003.mov")
+        #expect(exists(photoId, "IMG_0003.HEIC") && exists(videoId, "IMG_0003.mov"))
+        #expect(await waitUntilGone(photoId, "IMG_0003 1.HEIC"))
+        await clean([photoId, videoId])
     }
 }

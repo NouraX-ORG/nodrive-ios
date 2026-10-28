@@ -15,10 +15,19 @@ protocol NCConflictStore {
     func mate(of metadata: tableMetadata) async -> tableMetadata?
     /// Already in NoDrive: leave the upload queue and enter the upload history (no upload, no notification).
     func markDone(_ metadata: tableMetadata) async
-    /// Gives the waiting upload a new name (the app's extracted copy moves with it) and returns the updated row.
-    func rename(_ metadata: tableMetadata, to newName: String, livePhotoFile: String?) async -> tableMetadata
+    /// Gives the waiting uploads of one photo (or the two parts of a Live Photo) their new names, all or none: the
+    /// app's extracted copies move with them. Returns the updated rows in the order given, or `nil` when a copy
+    /// failed (then nothing was changed).
+    func rename(_ renames: [NCConflictRename]) async -> [tableMetadata]?
     /// Records a name in the upload history of an Auto upload destination.
     func recordUploaded(account: String, serverUrlBase: String, fileName: String, assetLocalIdentifier: String, date: Date) async
+}
+
+/// One waiting upload and the name it gets.
+struct NCConflictRename {
+    let metadata: tableMetadata
+    let newName: String
+    let livePhotoFile: String?
 }
 
 /// The real store: the app's Realm database and file helpers, existing ones only.
@@ -31,11 +40,10 @@ struct NCDatabaseConflictStore: NCConflictStore {
         policies.policy(account: account)
     }
 
+    /// The place of a file of the app's extracted copies. Unlike the upstream overload with `fileName`, it never
+    /// creates an empty file there.
     private func path(of metadata: tableMetadata, fileName: String) -> String {
-        utility.getDirectoryProviderStorageOcId(metadata.ocId,
-                                                fileName: fileName,
-                                                userId: metadata.userId,
-                                                urlBase: metadata.urlBase)
+        utility.getDirectoryProviderStorageOcId(metadata.ocId, userId: metadata.userId, urlBase: metadata.urlBase) + "/" + fileName
     }
 
     func localSize(of metadata: tableMetadata) -> Int64 {
@@ -64,26 +72,44 @@ struct NCDatabaseConflictStore: NCConflictStore {
         await database.completeExistingAutoUploadAsync(metadata)
     }
 
-    func rename(_ metadata: tableMetadata, to newName: String, livePhotoFile: String?) async -> tableMetadata {
-        let oldPath = path(of: metadata, fileName: metadata.fileName)
-        let newPath = path(of: metadata, fileName: newName)
-        let updated = metadata.detachedCopy()
-        updated.fileName = newName
-        updated.fileNameView = newName
-        updated.serverUrlFileName = utility.createServerUrl(serverUrl: metadata.serverUrl, fileName: newName)
-        if let livePhotoFile {
-            updated.livePhotoFile = livePhotoFile
-        }
-        // The app's own extracted copy gets the new name: copy first, then the database, then drop the old copy.
-        // (It is a temporary file of the upload queue; the photo in the library is never touched.)
-        let copied = oldPath == newPath || utility.copyFile(atPath: oldPath, toPath: newPath)
-        if copied {
-            await database.addMetadataAsync(updated)
+    func rename(_ renames: [NCConflictRename]) async -> [tableMetadata]? {
+        // 1. Copy the files of every part first. The app's own extracted copy is a temporary file of the upload
+        //    queue; the photo in the library is never touched. When a copy fails, the copies made so far are
+        //    dropped and nothing else changes, so no part uploads alone under a number its partner never gets.
+        var made: [String] = []
+        var moves: [(from: String, to: String)] = []
+        for rename in renames {
+            let oldPath = path(of: rename.metadata, fileName: rename.metadata.fileName)
+            let newPath = path(of: rename.metadata, fileName: rename.newName)
             if oldPath != newPath {
-                utility.removeFile(atPath: oldPath)
+                guard utility.copyFile(atPath: oldPath, toPath: newPath) else {
+                    for copy in made {
+                        utility.removeFile(atPath: copy)
+                    }
+                    return nil
+                }
+                made.append(newPath)
             }
+            moves.append((oldPath, newPath))
         }
-        return copied ? updated : metadata
+
+        // 2. The database, 3. drop the old copies.
+        var updatedRows: [tableMetadata] = []
+        for rename in renames {
+            let updated = rename.metadata.detachedCopy()
+            updated.fileName = rename.newName
+            updated.fileNameView = rename.newName
+            updated.serverUrlFileName = utility.createServerUrl(serverUrl: rename.metadata.serverUrl, fileName: rename.newName)
+            if let livePhotoFile = rename.livePhotoFile {
+                updated.livePhotoFile = livePhotoFile
+            }
+            await database.addMetadataAsync(updated)
+            updatedRows.append(updated)
+        }
+        for move in moves where move.from != move.to {
+            utility.removeFile(atPath: move.from)
+        }
+        return updatedRows
     }
 
     func recordUploaded(account: String, serverUrlBase: String, fileName: String, assetLocalIdentifier: String, date: Date) async {
@@ -95,8 +121,11 @@ struct NCDatabaseConflictStore: NCConflictStore {
     }
 }
 
-/// Applies the setting "If a file is already in NoDrive" to a group of Auto upload items. One call at a time
-/// (an actor), so two upload passes cannot pick the same new number.
+/// Applies the setting "If a file is already in NoDrive" to a group of Auto upload items.
+///
+/// `resolve` runs one call at a time. A Swift actor alone does not give that (it lets another call in whenever one
+/// waits for the server or the database), so the calls queue on a small lock: two upload passes that overlap (the
+/// foreground and the background one) cannot pick the same new number for two different photos.
 ///
 /// Never in any choice: a DELETE, a MOVE onto an existing name, or touching an existing file on the Drive except
 /// under "Keep the phone copy". A server answer that is not clear is "retry later", never a guess.
@@ -105,16 +134,38 @@ actor NCConflictResolver {
     private let probe: NCRemoteProbe
     private let ledger: NCConflictRenameLedger
 
+    private var busy = false
+    private var queue: [CheckedContinuation<Void, Never>] = []
+
     init(store: NCConflictStore, probe: NCRemoteProbe, ledger: NCConflictRenameLedger) {
         self.store = store
         self.probe = probe
         self.ledger = ledger
     }
 
+    /// The lock is handed on to the next waiting call without ever being free in between.
+    private func acquire() async {
+        if busy {
+            await withCheckedContinuation { queue.append($0) }
+        } else {
+            busy = true
+        }
+    }
+
+    private func release() {
+        if queue.isEmpty {
+            busy = false
+        } else {
+            queue.removeFirst().resume()
+        }
+    }
+
     /// Takes the items of Auto upload that were just read from the library and returns those that must be uploaded
     /// now, with their (possibly new) names. The others were marked as done or wait for the next pass. Items that
     /// are not Auto upload items come back unchanged.
     func resolve(_ extracted: [tableMetadata]) async -> [tableMetadata] {
+        await acquire()
+        defer { release() }
         var result: [tableMetadata] = []
         var seen = Set<String>()
         let listed = Set(extracted.map(\.ocId))
@@ -223,27 +274,29 @@ actor NCConflictResolver {
             return []
         }
 
-        var upload: [tableMetadata] = []
-        for (index, part) in unit.enumerated() {
-            let mateName = unit.count == 2 ? newNames[1 - index] : nil
-            let updated = await store.rename(part, to: newNames[index], livePhotoFile: mateName)
-            guard updated.fileName == newNames[index] else { continue }
-            if let base = part.autoUploadServerUrlBase {
-                // A part that was renamed before keeps its first original name.
-                let earlier = await ledger.entry(account: part.account, serverUrlBase: base, newName: part.fileName)
-                await ledger.record(account: part.account,
-                                    serverUrlBase: base,
-                                    newName: newNames[index],
-                                    originalName: earlier?.originalName ?? part.fileName,
-                                    assetLocalIdentifier: part.assetLocalIdentifier,
-                                    date: part.creationDate as Date)
-                if earlier != nil {
-                    await ledger.remove(account: part.account, serverUrlBase: base, newName: part.fileName)
-                }
-            }
-            upload.append(updated)
+        let renames = unit.enumerated().map { index, part in
+            NCConflictRename(metadata: part,
+                             newName: newNames[index],
+                             livePhotoFile: unit.count == 2 ? newNames[1 - index] : nil)
         }
-        return upload
+        // All parts or none: a failed copy means retry later.
+        guard let updatedRows = await store.rename(renames), updatedRows.count == unit.count else { return [] }
+
+        for (index, part) in unit.enumerated() {
+            guard let base = part.autoUploadServerUrlBase else { continue }
+            // A part that was renamed before keeps its first original name.
+            let earlier = await ledger.entry(account: part.account, serverUrlBase: base, newName: part.fileName)
+            await ledger.record(account: part.account,
+                                serverUrlBase: base,
+                                newName: newNames[index],
+                                originalName: earlier?.originalName ?? part.fileName,
+                                assetLocalIdentifier: part.assetLocalIdentifier,
+                                date: part.creationDate as Date)
+            if earlier != nil {
+                await ledger.remove(account: part.account, serverUrlBase: base, newName: part.fileName)
+            }
+        }
+        return updatedRows
     }
 
     // MARK: - History

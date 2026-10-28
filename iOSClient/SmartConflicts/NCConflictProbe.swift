@@ -9,9 +9,32 @@ protocol NCRemoteProbe {
     func state(of serverUrlFileName: String, account: String) async -> NCConflictRemoteState
 }
 
+/// What the PROPFIND call answered: the result and the body of the answer.
+struct NCPropfindAnswer {
+    let error: NKError
+    let data: Data?
+}
+
 /// PROPFIND Depth 0 for `getcontentlength`, `resourcetype` and `oc:size`, with the account's own session.
 /// 404 is "missing", every other error is "unknown" (never a guess).
 struct NCWebDAVProbe: NCRemoteProbe {
+    /// The call to the server (the url of the name, the request body, the account). The tests replace it.
+    typealias Call = @Sendable (_ serverUrlFileName: String, _ requestBody: Data?, _ account: String) async -> NCPropfindAnswer
+
+    private let call: Call
+
+    init(call: @escaping Call = NCWebDAVProbe.nextcloudKitCall) {
+        self.call = call
+    }
+
+    static let nextcloudKitCall: Call = { serverUrlFileName, requestBody, account in
+        let results = await NextcloudKit.shared.readFileOrFolderAsync(serverUrlFileName: serverUrlFileName,
+                                                                      depth: "0",
+                                                                      requestBody: requestBody,
+                                                                      account: account)
+        return NCPropfindAnswer(error: results.error, data: results.responseData?.data)
+    }
+
     // tools/ci/server_round3_check.py reads this body between the two markers and sends exactly this text to a
     // real Nextcloud 35 in CI, so keep the markers.
     // PROPFIND-BODY-BEGIN
@@ -24,15 +47,12 @@ struct NCWebDAVProbe: NCRemoteProbe {
     // PROPFIND-BODY-END
 
     func state(of serverUrlFileName: String, account: String) async -> NCConflictRemoteState {
-        let results = await NextcloudKit.shared.readFileOrFolderAsync(serverUrlFileName: serverUrlFileName,
-                                                                      depth: "0",
-                                                                      requestBody: Self.requestBodyText.data(using: .utf8),
-                                                                      account: account)
-        if results.error == .success {
-            guard let data = results.responseData?.data else { return .unknown }
+        let answer = await call(serverUrlFileName, Self.requestBodyText.data(using: .utf8), account)
+        if answer.error == .success {
+            guard let data = answer.data else { return .unknown }
             return NCPropfindSizeParser.parse(data)
         }
-        return results.error.errorCode == 404 ? .missing : .unknown
+        return answer.error.errorCode == 404 ? .missing : .unknown
     }
 }
 
