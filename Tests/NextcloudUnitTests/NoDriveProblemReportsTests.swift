@@ -118,6 +118,37 @@ struct NoDriveReportScrubbingTests {
         #expect(json.contains(#""name":"kept""#))
     }
 
+    @Test("A key cut off at the end or at the start: the short last line with + and / goes too")
+    func cutKeys() {
+        // Cut before its END line: the BEGIN line is followed by a line break, and the last body line is short.
+        let long = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VtpTcMhIvqzx4KQw1u8E"
+        let endCut = scrub("-----BEGIN PRIVATE KEY-----\n\(long)\nk9R+Lxn/b0ClNl77fkc==\nnext line")
+        #expect(!endCut.contains("k9R+") && !endCut.contains("MIIEvQ"), "\(endCut)")
+        #expect(endCut.contains("next line"))
+
+        // Cut before its BEGIN line: base64 lines up to the END line.
+        let startCut = scrub("\(long)\nk9R+Lxn/b0ClNl77fkc==\n-----END PRIVATE KEY-----\nafter")
+        #expect(!startCut.contains("k9R+") && !startCut.contains("MIIEvQ"), "\(startCut)")
+        #expect(startCut.contains("after"))
+        #expect(scrub(startCut) == startCut)
+        #expect(scrub(endCut) == endCut)
+
+        // A short tail line alone, before the END line.
+        let shortTail = scrub("log line\nk9R+Lxn/b0ClNl77fkc==\n-----END RSA PRIVATE KEY-----")
+        #expect(!shortTail.contains("k9R+"), "\(shortTail)")
+        #expect(shortTail.contains("log line"))
+    }
+
+    @Test("Image-scale file names, long folder paths and encoded folders stay; real addresses go")
+    func namesAreKept() {
+        #expect(scrub("Design/icon@2x.png") == "Design/icon@2x.png")
+        #expect(scrub("Design/icon@3x.PNG") == "Design/icon@3x.PNG")
+        let longPath = "Documents/ProjectAlphaQuarterlyPlanning/MeetingNotesOctober/Summary.md"
+        #expect(scrub(longPath) == longPath)
+        #expect(scrub("Photos%2Fjane%40example.com") == "Photos%2F<email>")
+        #expect(scrub("mail jane@example.com and icon@2x.png") == "mail <email> and icon@2x.png")
+    }
+
     @Test("Long base64 runs go, paths that are long stay")
     func base64() {
         let blob = (0..<150).map { index -> String in
@@ -961,6 +992,45 @@ struct NoDriveReportDecisionTests {
             #expect(harness.asked == (enabled ? 0 : 1))
             #expect(harness.messages.count == 1, "one banner: \(harness.messages)")
         }
+    }
+
+    @Test("A diagnostic job that runs right after the first activation is the same crash, not a second one")
+    func diagnosticRightAfterActivation() async {
+        for enabled in [true, false] {
+            let harness = ReportsHarness()
+            harness.engine.setEnabled(enabled)
+            harness.confirmAnswers = [true, true]
+            harness.leaveRun(.foreground)
+            harness.relaunch()
+            harness.engine.prepareLaunch()
+            harness.engine.didBecomeActive()            // queues the start-up step; it has not run yet
+            NCMetricKitStore(directory: harness.directory.appendingPathComponent("metrickit")).save(text: "MetricKit crash diagnostic\nsignal: 11\n", version: "7")
+            await harness.engine.diagnosticArrived()    // the MetricKit job that was already waiting
+            await harness.engine.previousRunTask?.value
+            let puts = harness.transport.calls.filter { $0.hasPrefix("PUT") }
+            #expect(puts.count == 1, "one crash, one upload (switch \(enabled))")
+            #expect(harness.asked == (enabled ? 0 : 1), "asked \(harness.asked) (switch \(enabled))")
+            #expect(harness.messages.count == 1, "one banner: \(harness.messages)")
+        }
+    }
+
+    @Test("A crash with older reports waiting: one share lookup, one banner")
+    func crashWithWaitingReports() async {
+        let harness = ReportsHarness()
+        harness.engine.setEnabled(true)
+        harness.transport.uploadStatuses = [503]
+        _ = await harness.engine.sendManual(note: "older")      // kept on the phone
+        harness.messages = []
+        harness.transport.calls = []
+        harness.clock = harness.clock.addingTimeInterval(5)
+        harness.leaveRun(.foreground)
+        harness.relaunch()
+        harness.engine.prepareLaunch()
+        await harness.engine.processPreviousRun()
+        #expect(harness.transport.uploads.count == 2, "the new report and the older one")
+        #expect(harness.transport.calls.filter { $0.hasPrefix("LIST") }.count == 1, "\(harness.transport.calls)")
+        #expect(harness.transport.shareCalls == 1)
+        #expect(harness.messages.count == 1, "one banner: \(harness.messages)")
     }
 
     @Test("A manual report works with the switch off")

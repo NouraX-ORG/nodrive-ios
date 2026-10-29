@@ -20,8 +20,13 @@ enum NCProblemReportScrubber {
     /// PEM private-key blocks, also one that was cut off (a log size limit) before its end line.
     private static let privateKeyBlock = rule(
         #"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"#, "<private-key>")
+    /// The body lines go as long as they are plain base64 lines; the line break after the BEGIN line is allowed.
     private static let privateKeyCut = rule(
-        #"-----BEGIN [A-Z ]*PRIVATE KEY-----(?:[A-Za-z0-9+/=]+[ \t]*\r?\n?)*"#, "<private-key>")
+        #"-----BEGIN [A-Z ]*PRIVATE KEY-----(?:[ \t]*\r?\n?[ \t]*[A-Za-z0-9+/=]+(?=[ \t]*(?:\r?\n|\z)))*"#, "<private-key>")
+    /// The tail of a key whose start was cut off (a size limit at the front): base64 lines up to the END line.
+    private static let privateKeyTail = rule(
+        #"^[A-Za-z0-9+/=]+(?:\r?\n[A-Za-z0-9+/=]+)*\r?\n-----END [A-Z ]*PRIVATE KEY-----"#,
+        "<private-key>", options: [.anchorsMatchLines])
 
     /// Session cookies by name: `oc_sessionPassphrase`, `nc_session_id`, `__Host-*` and the instance cookie
     /// `oc<instance id>`. Name and value go.
@@ -67,12 +72,15 @@ enum NCProblemReportScrubber {
 
     /// `name@host.tld`, and the URL-encoded form `name%40host.tld` (login links, `?user=jane%40example.com`, DAV paths).
     /// The name is at most 64 characters, so a long run of name characters costs a few steps per position, not a scan
-    /// to its end.
-    private static let email = rule(#"[A-Za-z0-9._%+\-]{1,64}(?:@|%40)[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+"#, "<email>")
+    /// to its end. An encoded slash (`%2F`) ends a name, so `Photos%2Fjane%40example.com` keeps its folder. The
+    /// image-scale file names (`icon@2x.png`) are not addresses and are kept.
+    private static let email = rule(
+        #"(?<!%|%[0-9A-F])(?:[A-Za-z0-9._+\-]|%(?!2F|40)[0-9A-F]{2}){1,64}(?:@|%40)(?!\d{1,2}x\.(?:png|jpe?g|gif|webp|svg|heic|pdf)(?![A-Za-z0-9\-]))[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+"#,
+        "<email>", options: [.caseInsensitive])
 
     /// Rules in the order they must run: cookies and headers before the generic secret shapes.
     private static let rules: [Rule] = [
-        privateKeyBlock, privateKeyCut, sessionCookies, authorizationHeader, cookieHeader,
+        privateKeyBlock, privateKeyCut, privateKeyTail, sessionCookies, authorizationHeader, cookieHeader,
         basicValue, bearerValue, e2eeFields, secretFields, queryValues
     ]
 
@@ -103,11 +111,21 @@ enum NCProblemReportScrubber {
             let range = match.range
             result += ns.substring(with: NSRange(location: last, length: range.location - last))
             let run = ns.substring(with: range)
-            let slashes = run.reduce(0) { $1 == "/" ? $0 + 1 : $0 }
-            result += slashes * 20 > run.count ? run : "<removed>"
+            result += isPath(run) ? run : "<removed>"
             last = range.location + range.length
         }
         result += ns.substring(from: last)
         return result
+    }
+
+    /// A long run that is a path of folder and file names: mostly slashes, or at least two slashes with no `+` and
+    /// (almost) no digits. Random base64 has about one digit in six characters, so it does not pass for a path.
+    private static func isPath(_ run: String) -> Bool {
+        var slashes = 0, digits = 0, plus = 0
+        for character in run {
+            if character == "/" { slashes += 1 } else if character == "+" { plus += 1 } else if character.isNumber { digits += 1 }
+        }
+        if slashes * 20 > run.count { return true }
+        return slashes >= 2 && plus == 0 && digits <= 2
     }
 }

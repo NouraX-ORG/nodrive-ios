@@ -50,6 +50,8 @@ final class NCProblemReports {
     private var previousRunReported = false
     /// True while `processPreviousRun` runs: a diagnostic that MetricKit delivers meanwhile stays in the store for it.
     private var processingPreviousRun = false
+    /// The start-up step queued by `didBecomeActive`, so a test can wait for it.
+    private(set) var previousRunTask: Task<Void, Never>?
     private var lastFlush: Date?
     private var collector: NCMetricKitCollector?
 
@@ -142,8 +144,11 @@ final class NCProblemReports {
     func didBecomeActive() {
         runMarker.write(.foreground, build: dependencies.build)
         if !previousRunHandled {
+            // Both flags are set here, before the task is queued: a diagnostic job already waiting on the main
+            // actor must find the previous run taken (diagnosticArrived would report it as its own crash).
             previousRunHandled = true
-            Task { await processPreviousRun() }
+            processingPreviousRun = true
+            previousRunTask = Task { await processPreviousRun() }
         } else {
             Task { await flushPending(force: false) }
         }
@@ -178,14 +183,25 @@ final class NCProblemReports {
         let parts = [exception].compactMap { $0 } + diagnostics
         // From here on the previous run is decided; a later diagnostic is the same event (see diagnosticArrived).
         processingPreviousRun = false
-        if !parts.isEmpty {
-            previousRunReported = true
-            await deliver(.crash, crashText: parts.joined(separator: "\n\n"))
-        } else if previousRunUnclean {
-            previousRunReported = true
-            await deliver(.uncleanExit, crashText: nil)
+        // One round for everything this start sends: the share to Support is looked at once and the round is
+        // announced once (the new report and any older ones that were waiting).
+        let round = NCProblemReportShareRound()
+        var fresh: NCProblemReportOutcome?
+        if !previousRunReported {
+            if !parts.isEmpty {
+                previousRunReported = true
+                fresh = await deliver(.crash, crashText: parts.joined(separator: "\n\n"), round: round, announceResult: false)
+            } else if previousRunUnclean {
+                previousRunReported = true
+                fresh = await deliver(.uncleanExit, crashText: nil, round: round, announceResult: false)
+            }
         }
-        await flushPending(force: false)
+        let waiting = await flushPending(force: false, round: round, announceResult: false)
+        // The older reports speak for the round when they went out; a failed retry of them stays quiet.
+        let waitingSent = waiting == .keptForLater ? nil : waiting
+        if let outcome = waitingSent ?? fresh {
+            announce(outcome)
+        }
     }
 
     /// A diagnostic that MetricKit delivered after the start. It is its own crash report only when no report was
@@ -201,13 +217,14 @@ final class NCProblemReports {
     }
 
     /// Switch on: send now. Switch off: ask once; Not now forgets the event.
-    func deliver(_ kind: NCProblemReportKind, crashText: String?) async {
+    @discardableResult
+    func deliver(_ kind: NCProblemReportKind, crashText: String?, round: NCProblemReportShareRound = NCProblemReportShareRound(),
+                 announceResult: Bool = true) async -> NCProblemReportOutcome? {
         if isEnabled {
-            _ = await sendReport(kind: kind, note: "", crashText: crashText, automatic: true)
-            return
+            return await sendReport(kind: kind, note: "", crashText: crashText, automatic: true, round: round, announceResult: announceResult)
         }
-        guard await dependencies.confirm() else { return }
-        _ = await sendReport(kind: kind, note: "", crashText: crashText, automatic: false)
+        guard await dependencies.confirm() else { return nil }
+        return await sendReport(kind: kind, note: "", crashText: crashText, automatic: false, round: round, announceResult: announceResult)
     }
 
     // MARK: Sending
@@ -217,7 +234,8 @@ final class NCProblemReports {
         await sendReport(kind: .manual, note: note, crashText: nil, automatic: false)
     }
 
-    private func sendReport(kind: NCProblemReportKind, note: String, crashText: String?, automatic: Bool) async -> NCProblemReportOutcome {
+    private func sendReport(kind: NCProblemReportKind, note: String, crashText: String?, automatic: Bool,
+                            round: NCProblemReportShareRound = NCProblemReportShareRound(), announceResult: Bool = true) async -> NCProblemReportOutcome {
         // Right after a start the account's session may not be set up yet.
         var polls = Int((dependencies.transportWait / 0.5).rounded(.up))
         while polls > 0, dependencies.transport() == nil, dependencies.accountExists() {
@@ -235,22 +253,24 @@ final class NCProblemReports {
             NCProblemReportBuilder.build(kind: kind, note: note, crashText: crashText, logs: readLogs(), info: reportInfo, date: date)
         }.value
         let fileName = NCProblemReportBuilder.fileName(date: date, appVersion: reportInfo.appVersion)
-        let outcome = await sender(automatic: automatic, transport: transport).send(zip: zip, fileName: fileName)
-        announce(outcome)
+        let outcome = await sender(automatic: automatic, transport: transport).send(zip: zip, fileName: fileName, round: round)
+        if announceResult { announce(outcome) }
         return outcome
     }
 
     /// Sends the reports kept on the phone, at most once per `flushInterval` unless `force` (a new sign-in).
-    func flushPending(force: Bool) async {
-        guard let transport = dependencies.transport() else { return }
+    /// Returns the outcome it announces (or would announce), nil when nothing was sent.
+    @discardableResult
+    func flushPending(force: Bool, round: NCProblemReportShareRound = NCProblemReportShareRound(),
+                      announceResult: Bool = true) async -> NCProblemReportOutcome? {
+        guard let transport = dependencies.transport() else { return nil }
         let now = dependencies.now()
-        if !force, let last = lastFlush, now.timeIntervalSince(last) < dependencies.flushInterval { return }
+        if !force, let last = lastFlush, now.timeIntervalSince(last) < dependencies.flushInterval { return nil }
         let explicit = sender(automatic: false, transport: transport)
         let automatic = sender(automatic: true, transport: transport)
-        guard explicit.hasPending || automatic.hasPending else { return }
+        guard explicit.hasPending || automatic.hasPending else { return nil }
         lastFlush = now
         // One round: the share to Support is looked at once, and the round is announced once.
-        let round = NCProblemReportShareRound()
         var outcomes: [NCProblemReportOutcome] = []
         if let outcome = await explicit.sendPending(round: round) { outcomes.append(outcome) }
         if isEnabled {
@@ -259,7 +279,9 @@ final class NCProblemReports {
             // The switch is off: reports that were waiting only because it was on are not sent, and not kept.
             automatic.discardPending()
         }
-        if let outcome = outcomes.last(where: { $0 != .keptForLater }) { announce(outcome) }
+        guard let outcome = outcomes.last(where: { $0 != .keptForLater }) else { return outcomes.last }
+        if announceResult { announce(outcome) }
+        return outcome
     }
 
     private func announce(_ outcome: NCProblemReportOutcome) {

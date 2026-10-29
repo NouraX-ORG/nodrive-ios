@@ -97,12 +97,12 @@ struct NCProblemReportSender {
     // MARK: A new report
 
     /// Sends the zip, or keeps it for later. `fileName` is the name the report has in the Drive.
-    func send(zip: Data, fileName: String) async -> NCProblemReportOutcome {
+    func send(zip: Data, fileName: String, round: NCProblemReportShareRound = NCProblemReportShareRound()) async -> NCProblemReportOutcome {
         guard let transport else {
             keep(zip, as: fileName)
             return .noAccount
         }
-        let outcome = await upload(zip: zip, fileName: fileName, transport: transport, round: NCProblemReportShareRound())
+        let outcome = await upload(zip: zip, fileName: fileName, transport: transport, round: round)
         if outcome == .keptForLater {
             keep(zip, as: fileName, accountId: transport.accountId)
         }
