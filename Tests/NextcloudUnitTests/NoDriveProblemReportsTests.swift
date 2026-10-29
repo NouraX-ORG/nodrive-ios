@@ -408,7 +408,9 @@ struct NoDriveReportSizeTests {
     func newest() {
         let data = Data("aaaa\nbbbb\ncccc\n".utf8)
         #expect(String(decoding: NCProblemReportBuilder.newestLines(of: data, atMost: 100), as: UTF8.self) == "aaaa\nbbbb\ncccc\n")
-        #expect(String(decoding: NCProblemReportBuilder.newestLines(of: data, atMost: 11), as: UTF8.self) == "cccc\n")
+        // the cut falls on a line start: that line is kept; one byte less and the line is dropped
+        #expect(String(decoding: NCProblemReportBuilder.newestLines(of: data, atMost: 11), as: UTF8.self) == "bbbb\ncccc\n")
+        #expect(String(decoding: NCProblemReportBuilder.newestLines(of: data, atMost: 10), as: UTF8.self) == "cccc\n")
         #expect(NCProblemReportBuilder.newestLines(of: data, atMost: 0).isEmpty)
     }
 }

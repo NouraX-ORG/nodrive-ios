@@ -96,3 +96,20 @@ Files we never change, so upstream's updates arrive without conflicts: all other
 `COPYING.iOS`, `LICENSES/`, `AUTHORS.md`, `REUSE.toml`, the copyright headers.
 
 `git diff --name-status 35.2.1 HEAD` shows the full list at any time.
+
+## Hooks of Problem reports
+
+The feature keeps its logic in our own folder `iOSClient/ProblemReports/` (with its `en.lproj/ProblemReports.strings`)
+and touches upstream files only through the two one-line hooks below, each marked with a `// NoDrive:` comment.
+`python3 tools/rebrand.py` writes them (function `problem_reports`) and fails with "anchor not found" when upstream
+moved the code; after a merge take upstream's side of the file, run `rebrand.py`, and move the anchor if it fails.
+
+| Id | File and anchor | Hook |
+|---|---|---|
+| R1 | `iOSClient/AppDelegate.swift`, right after `NextcloudKit.configureLogger(...)` | `NCProblemReports.shared.start()` (installs the exception handler and MetricKit, starts the run marker) |
+| R2 | `iOSClient/Settings/Advanced/NCSettingsAdvancedView.swift`, before the section `// Delete in Cache & Clear Cache` | `NCProblemReportsSection(controller: model.controller)` |
+
+If upstream ever turns Crashlytics on or installs its own `NSSetUncaughtExceptionHandler`, ours chains the handler that
+was there before it (`NSGetUncaughtExceptionHandler()`), and the branding unit test keeps checking
+`disable_crash_service`. The log file names (`log.txt`, `log-<date>.txt`) and `NCPreferences.sharedLogDirectory` come
+from NextcloudKit and upstream: if they change, a report has no logs and the unit test "log folder helper" fails.

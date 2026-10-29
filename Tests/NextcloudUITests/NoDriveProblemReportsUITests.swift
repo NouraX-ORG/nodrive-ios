@@ -132,7 +132,9 @@ final class NoDriveProblemReportsUITests: XCTestCase {
         let toggle = reportsSwitch(app)
         XCTAssertTrue(scrollTo(toggle, in: app), "the switch is gone")
         XCTAssertEqual(toggle.value as? String, "0", "the switch changed by itself")
-        toggle.tap()
+        // The element is the whole row: a tap in its middle hits the title, so tap where the switch is.
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        settle(app, seconds: 1)
         XCTAssertEqual(toggle.value as? String, "1", "the switch could not be turned on")
         save("06-switch-on")
         endNormally(app)
