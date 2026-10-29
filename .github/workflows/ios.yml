@@ -17,6 +17,8 @@ on:
       - platform/ios
       - feature/workspace-apps
       - feature/workspace-apps-fixes
+      - feature/smart-conflicts
+      - feature/problem-reports
   workflow_dispatch:
     inputs:
       products_run_id:
@@ -26,6 +28,11 @@ on:
         type: string
       only_workspace:
         description: 'Screens job: run only the Workspace apps UI test (not the four screenshot walks)'
+        required: false
+        default: false
+        type: boolean
+      only_reports:
+        description: 'Screens job: run only the problem-reports UI test (not the walks or the Workspace test)'
         required: false
         default: false
         type: boolean
@@ -84,6 +91,12 @@ jobs:
       - name: The Workspace checks can fail (each broken log must be caught)
         run: python tools/ci/workspace-check.py --self-test
 
+      - name: The problem-report test hooks exist in Debug builds only
+        run: python tools/ci/workspace-check.py --debug-only iOSClient/ProblemReports/NCProblemReportUITestHooks.swift
+
+      - name: The problem-report checks can fail (each broken run must be caught)
+        run: python tools/ci/report-check.py --self-test
+
   server-login:
     name: Server login (a real Nextcloud 35 in Docker; the app's web view sign-in)
     needs: branding
@@ -106,6 +119,10 @@ jobs:
       - name: Check how the app's sign-in works against the real server code
         run: bash tools/ci/server-app-login.sh check
 
+      - name: Problem reports server checks (the folder, never replacing a report, the read-only share to nourax-support)
+        if: ${{ !cancelled() }}
+        run: bash tools/ci/server-app-login.sh reports
+
       - name: Stop the server
         if: ${{ always() }}
         run: |
@@ -119,6 +136,7 @@ jobs:
           name: server-login-report
           path: |
             build/server-login/report.md
+            build/server-login/reports.md
             build/server-login/status.json
             build/server-login/navigation-apps-*.json
             build/server-login/webview-ua-primary.png
@@ -307,7 +325,7 @@ jobs:
     # also after a unit-test failure (the build products exist), or with products of an earlier run
     if: ${{ !cancelled() && needs.branding.result == 'success' && (needs.ios.result == 'success' || needs.ios.result == 'failure' || (needs.ios.result == 'skipped' && inputs.products_run_id != '')) }}
     runs-on: xcode-27
-    timeout-minutes: 120
+    timeout-minutes: 180
     permissions:
       contents: read
       actions: read   # download-artifact from an earlier run (products_run_id)
@@ -401,7 +419,8 @@ jobs:
           export NODRIVE_WS_USER=citest NODRIVE_WS_APP_PASSWORD="$WS_PW"
           printf '127.0.0.1 foreign.nodrive-ci.test\n::1 foreign.nodrive-ci.test\n' | sudo tee -a /etc/hosts
           sudo -E nohup "$(command -v python3)" tools/ci/drive-stand-in.py --cert "$SI/chain.pem" --key "$SI/leaf.key" \
-            --log "$RESULTS/stand-in.jsonl" --workspace --nav-delay 6 > "$RESULTS/stand-in.out" 2>&1 &
+            --log "$RESULTS/stand-in.jsonl" --workspace --nav-delay 6 \
+            --reports-uploads "$RESULTS/stand-in-uploads" > "$RESULTS/stand-in.out" 2>&1 &
           for i in $(seq 1 30); do
             curl -fsS --cacert "$SI/ca.pem" -o /dev/null https://drive.nourax.org/status.php && break
             sleep 0.5
@@ -421,37 +440,37 @@ jobs:
       - name: simctl install, launch and screenshots (shipped NoDrive.app)
         run: |
           bash tools/ci/screens.sh prepare-first "$UDID"
-          if [ "${{ inputs.only_workspace }}" != "true" ]; then
+          if [ "${{ inputs.only_workspace }}" != "true" ] && [ "${{ inputs.only_reports }}" != "true" ]; then
             bash tools/ci/screens.sh switch "$UDID" en en_US light
             bash tools/ci/screens.sh launch "$UDID" app/NoDrive.app "$SHOTS/simctl" "$RESULTS"
           fi
 
       - name: UI walk, English (en-light)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true && inputs.only_reports != true }}
         run: |
           bash tools/ci/screens.sh switch "$UDID" en en_US light
           bash tools/ci/screens.sh walk "$UDID" en-light en en_US
 
       - name: UI walk, German (de-light)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true && inputs.only_reports != true }}
         run: |
           bash tools/ci/screens.sh switch "$UDID" de de_DE light
           bash tools/ci/screens.sh walk "$UDID" de-light de de_DE
 
       - name: UI walk, Arabic right-to-left (ar-light)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true && inputs.only_reports != true }}
         run: |
           bash tools/ci/screens.sh switch "$UDID" ar ar_SA light
           bash tools/ci/screens.sh walk "$UDID" ar-light ar ar_SA
 
       - name: UI walk, English dark mode (en-dark)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true && inputs.only_reports != true }}
         run: |
           bash tools/ci/screens.sh switch "$UDID" en en_US dark
           bash tools/ci/screens.sh walk "$UDID" en-dark en en_US
 
       - name: Workspace apps menu, signed in (light)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_reports != true }}
         run: |
           # a clean simulator: the account of an earlier run is in the keychain and the app group
           bash tools/ci/screens.sh prepare-first "$UDID"
@@ -459,7 +478,7 @@ jobs:
           bash tools/ci/screens.sh workspace "$UDID" workspace-light
 
       - name: Workspace apps menu, signed in (dark)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_reports != true }}
         run: |
           # a clean simulator: the account of an earlier run is in the keychain and the app group
           bash tools/ci/screens.sh prepare-first "$UDID"
@@ -467,12 +486,33 @@ jobs:
           bash tools/ci/screens.sh workspace "$UDID" workspace-dark
 
       - name: Workspace checks (credential only to the own server, no login page, no stale sessions, expiry)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_reports != true }}
         run: |
           python3 tools/ci/workspace-check.py "$RESULTS/stand-in.jsonl" --walk "$SHOTS" --json "$RESULTS/workspace-check.json"
 
-      - name: Network gate (no Nextcloud hosts; sign-in opened drive.nourax.org)
+      - name: Problem reports, signed in (light)
         if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true }}
+        run: |
+          # a clean simulator: the account of an earlier run is in the keychain and the app group
+          bash tools/ci/screens.sh prepare-first "$UDID"
+          bash tools/ci/screens.sh switch "$UDID" en en_US light
+          bash tools/ci/screens.sh reports "$UDID" reports-light
+
+      - name: Problem reports, signed in (dark)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true }}
+        run: |
+          bash tools/ci/screens.sh prepare-first "$UDID"
+          bash tools/ci/screens.sh switch "$UDID" en en_US dark
+          bash tools/ci/screens.sh reports "$UDID" reports-dark
+
+      - name: Problem reports check (kinds, order, headers, shares, sizes, no secret in a zip)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true }}
+        run: |
+          python3 tools/ci/report-check.py --log "$RESULTS/stand-in.jsonl" --uploads "$RESULTS/stand-in-uploads" \
+            --variants reports-light reports-dark --walk "$SHOTS" --json "$RESULTS/report-check.json"
+
+      - name: Network gate (no Nextcloud hosts; sign-in opened drive.nourax.org)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true && inputs.only_reports != true }}
         run: |
           bash tools/ci/screens.sh capture-stop "$RESULTS"
           python3 tools/ci/network-gate.py --dns-text "$RESULTS/dns.txt" --dns-processes "$RESULTS/dns-processes.txt" \
@@ -483,7 +523,7 @@ jobs:
         if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
         run: |
           python3 tools/ci/screens-report.py --shots "$SHOTS" --results "$RESULTS" \
-            --variants ${{ inputs.only_workspace == true && 'workspace-light workspace-dark' || 'en-light de-light ar-light en-dark workspace-light workspace-dark' }} \
+            --variants ${{ inputs.only_reports == true && 'reports-light reports-dark' || inputs.only_workspace == true && 'workspace-light workspace-dark' || 'en-light de-light ar-light en-dark workspace-light workspace-dark reports-light reports-dark' }} \
             --docs-out "$GITHUB_WORKSPACE/screenshots-docs" --json "$RESULTS/screens-report.json"
 
       - name: No throwaway password in any result file

@@ -38,6 +38,22 @@ Workspace apps menu uses (tools/ci/server_login_check.py proves those against th
   host foreign.nodrive-ci.test: /probe, /redirected, /blank, /window-open, /nomail/   another host (links, a
                                       redirect, a new window, window.open, and the NoMail-style menu entry)
 
+With --reports-uploads DIR (needs --workspace) it also keeps the user's "Problem reports" folder like the server
+does (tools/ci/server_reports_check.py proves the same answers against the real server code), for the UI test of the
+problem reports:
+
+  MKCOL /remote.php/dav/files/<user>/Problem reports   201, then 405 (already there)
+  PUT   .../Problem reports/<name>.zip                 201 and the zip saved under DIR/<variant>/; 412 when the name
+                                                       exists and If-None-Match: * came; a PUT over an existing name
+                                                       without that header replaces it (204) and is logged as such
+  GET   /ocs/v2.php/apps/files_sharing/api/v1/shares?path=...   the shares of the folder
+  POST  /ocs/v2.php/apps/files_sharing/api/v1/shares   the first one of a run is refused like a server that has no
+                                                       account `nourax-support` (404, "Sharee does not exist"); the
+                                                       next ones are accepted and the listing then shows the share
+  POST  /__ci/reports-reset?variant=NAME               a new run (folder, share and counters start again)
+Every one of these is logged by name and fact only (event, file name, size, headers named, share type, permissions,
+share target, path): never a header value, a cookie or a password.
+
   sudo python3 tools/ci/drive-stand-in.py --cert leaf.pem --key leaf.key --log stand-in.jsonl [--workspace]
 """
 
@@ -55,7 +71,7 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 HOST = 'drive.nourax.org'
 FLOW_TOKEN = 'nodrive-ci-flow-token'
@@ -366,6 +382,9 @@ class Handler(BaseHTTPRequestHandler):
                 'link': link, 'subjectRich': 'New mail from CI', 'messageRich': 'A message waits in Mail',
                 'actions': [{'label': 'Open mail', 'link': link, 'type': 'WEB', 'primary': True}]}]))
             return True
+        if path == '/ocs/v2.php/apps/files_sharing/api/v1/shares' and self._reports():
+            self._shares_get()
+            return True
         if path.startswith('/ocs/'):
             self._record(404)
             self._json(404, self._ocs(404, []))
@@ -407,6 +426,139 @@ class Handler(BaseHTTPRequestHandler):
             return True
         return False
 
+    # --- reports mode: the "Problem reports" folder, the zips and the shares ---------------------------------
+    def _body(self):
+        """The request body: by Content-Length, or chunked."""
+        if (self.headers.get('Transfer-Encoding') or '').lower() == 'chunked':
+            data = b''
+            while True:
+                size_line = self.rfile.readline().strip()
+                size = int(size_line.split(b';')[0] or b'0', 16)
+                if size == 0:
+                    self.rfile.readline()
+                    break
+                data += self.rfile.read(size)
+                self.rfile.readline()
+            return data
+        length = int(self.headers.get('Content-Length') or 0)
+        return self.rfile.read(length) if length else b''
+
+    def _reports(self):
+        ws = self.server.workspace
+        return ws.get('reports') if ws else None
+
+    def _reports_path(self, path):
+        """('folder', None), ('file', name) or None for a path in the user's Problem reports folder."""
+        ws = self.server.workspace
+        prefix = f"/remote.php/dav/files/{ws['user']}/"
+        if not path.startswith(prefix):
+            return None
+        rest = unquote(path[len(prefix):]).strip('/')
+        if rest == 'Problem reports':
+            return ('folder', None)
+        if rest.startswith('Problem reports/') and '/' not in rest[len('Problem reports/'):]:
+            return ('file', rest[len('Problem reports/'):])
+        return None
+
+    def _share_object(self, share_id, path):
+        ws = self.server.workspace
+        return {'id': str(share_id), 'share_type': 0, 'uid_owner': ws['user'], 'displayname_owner': 'Demo User',
+                'permissions': 1, 'can_edit': False, 'can_delete': False, 'stime': int(time.time()), 'parent': None,
+                'expiration': None, 'token': None, 'uid_file_owner': ws['user'], 'note': '', 'label': '',
+                'displayname_file_owner': 'Demo User', 'path': path, 'item_type': 'folder',
+                'mimetype': 'httpd/unix-directory', 'storage_id': 'home::' + ws['user'], 'storage': 1,
+                'item_source': 100, 'file_source': 100, 'file_parent': 2, 'file_target': path,
+                'share_with': 'nourax-support', 'share_with_displayname': 'Nourax Support',
+                'mail_send': 0, 'hide_download': 0, 'attributes': None}
+
+    def do_MKCOL(self):
+        self._body()
+        reports = self._reports()
+        target = self._reports_path(urlsplit(self.path).path) if reports else None
+        if not reports or target != ('folder', None) or not self._basic_ok():
+            self._record(404)
+            self._json(404, {'message': 'not served by the CI stand-in'})
+            return
+        if reports['folder']:
+            self._record(405, {'event': 'report-mkcol'})
+            self._send(405, '', 'text/plain')
+        else:
+            reports['folder'] = True
+            self._record(201, {'event': 'report-mkcol'})
+            self._send(201, '', 'text/plain')
+
+    def do_PUT(self):
+        body = self._body()
+        reports = self._reports()
+        target = self._reports_path(urlsplit(self.path).path) if reports else None
+        if not reports or not target or target[0] != 'file' or not self._basic_ok() or not reports['folder']:
+            self._record(404)
+            self._json(404, {'message': 'not served by the CI stand-in'})
+            return
+        name = target[1]
+        none_match = self.headers.get('If-None-Match')
+        facts = {'event': 'report-upload', 'name': name, 'size': len(body), 'if_none_match': none_match,
+                 'overwrite_header': self.headers.get('Overwrite') is not None}
+        if name in reports['files']:
+            if none_match == '*':
+                self._record(412, dict(facts, event='report-upload-conflict'))
+                self._send(412, '', 'text/plain')
+                return
+            # the server would replace the file: the check fails if the app ever asks for that
+            self._record(204, dict(facts, event='report-replaced'))
+            self._send(204, '', 'text/plain')
+            return
+        reports['files'].add(name)
+        reports['count'] += 1
+        folder = os.path.join(reports['uploads'], reports['variant'])
+        os.makedirs(folder, exist_ok=True)
+        saved = f"{reports['count']:02d}-{os.path.basename(name)}"
+        with open(os.path.join(folder, saved), 'wb') as f:
+            f.write(body)
+        self._record(201, dict(facts, saved_as=saved))
+        self._send(201, '', 'text/plain', {'OC-FileId': '00000042occi', 'ETag': '"ci42"'})
+
+    def _shares_get(self):
+        reports = self._reports()
+        if not self._basic_ok():
+            self._record(401)
+            self._json(401, self._ocs(401, []))
+            return
+        query = parse_qs(urlsplit(self.path).query)
+        wanted = (query.get('path') or [''])[0]
+        listed = reports['shares'] if wanted == '/Problem reports' else []
+        shares = [self._share_object(i + 1, wanted) for i, _ in enumerate(listed)]
+        self._record(200, {'event': 'report-share-list', 'share_path': wanted, 'shares_listed': len(shares)})
+        self._json(200, self._ocs(200, shares))
+
+    def _shares_post(self, body):
+        reports = self._reports()
+        if not self._basic_ok():
+            self._record(401)
+            self._json(401, self._ocs(401, []))
+            return
+        form = parse_qs(body.decode('utf-8', 'replace'), keep_blank_values=True)
+        facts = {'event': 'report-share-post'}
+        # field NAMES, and the values of the four fields the app sends (none of them is a secret); the path of the
+        # share is logged as share_path so it never replaces the request's own path
+        for key in ('shareType', 'permissions', 'shareWith'):
+            if key in form:
+                facts[key] = form[key][0]
+        if 'path' in form:
+            facts['share_path'] = form['path'][0]
+        facts['fields'] = sorted(form)
+        reports['share_posts'] += 1
+        if reports['share_posts'] == 1:
+            # a server without the account nourax-support (the answer of the real server is recorded by
+            # tools/ci/server_reports_check.py, which runs against a real server)
+            self._record(404, dict(facts, refused=True))
+            self._json(404, {'ocs': {'meta': {'status': 'failure', 'statuscode': 404, 'message': 'Sharee does not exist'},
+                                     'data': []}})
+            return
+        reports['shares'].append(facts.get('shareWith', ''))
+        self._record(200, dict(facts, refused=False))
+        self._json(200, self._ocs(200, self._share_object(len(reports['shares']), facts.get('share_path', ''))))
+
     def do_GET(self):
         path = urlsplit(self.path).path
         if path in ('/status.php', '/index.php/status.php'):
@@ -437,11 +589,17 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {'message': 'not served by the CI stand-in'})
 
     def do_POST(self):
-        length = int(self.headers.get('Content-Length') or 0)
-        if length:
-            self.rfile.read(min(length, 1 << 16))
+        body = self._body()
         path = urlsplit(self.path).path
-        if path in ('/index.php/login/v2', '/login/v2'):
+        if self._reports() and path == '/ocs/v2.php/apps/files_sharing/api/v1/shares':
+            self._shares_post(body)
+        elif self._reports() and path == '/__ci/reports-reset':
+            variant = re.sub(r'[^A-Za-z0-9_.-]', '', (parse_qs(urlsplit(self.path).query).get('variant') or ['run'])[0]) or 'run'
+            reports = self._reports()
+            reports.update(folder=False, files=set(), share_posts=0, shares=[], count=0, variant=variant)
+            self._record(200, {'event': 'reports-reset', 'variant': variant})
+            self._json(200, {'ok': True})
+        elif path in ('/index.php/login/v2', '/login/v2'):
             self._record(200, {'event': 'login-flow-v2-start'})
             self._json(200, LOGIN_V2)
         elif path in ('/login/v2/poll', '/index.php/login/v2/poll'):
@@ -515,6 +673,8 @@ def main():
     ap.add_argument('--port', type=int, default=443)
     ap.add_argument('--nav-delay', type=float, default=0.0,
                     help='seconds to wait before the apps list is sent (the sidebar can then open before it arrives)')
+    ap.add_argument('--reports-uploads', metavar='DIR',
+                    help='also keep the "Problem reports" folder (needs --workspace); uploaded zips are saved under DIR/<variant>/')
     ap.add_argument('--workspace', action='store_true',
                     help='also answer for a signed-in account (NODRIVE_WS_USER, NODRIVE_WS_APP_PASSWORD in the environment)')
     args = ap.parse_args()
@@ -524,6 +684,12 @@ def main():
         if not user or not password:
             sys.exit('drive-stand-in: --workspace needs NODRIVE_WS_USER and NODRIVE_WS_APP_PASSWORD in the environment')
         workspace = {'user': user, 'password': password, 'sessions': {}, 'renewed': set(), 'renew_next': False}
+        if args.reports_uploads:
+            os.makedirs(args.reports_uploads, exist_ok=True)
+            workspace['reports'] = {'uploads': args.reports_uploads, 'folder': False, 'files': set(), 'share_posts': 0,
+                                    'shares': [], 'count': 0, 'variant': 'run'}
+    elif args.reports_uploads:
+        sys.exit('drive-stand-in: --reports-uploads needs --workspace')
 
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
@@ -538,7 +704,8 @@ def main():
     ctx.sni_callback = sni
 
     server = DualStackTLSServer(('::', args.port), Handler, ctx, args.log, workspace, args.nav_delay)
-    server.write_log({'t': round(time.time(), 3), 'event': 'listening', 'port': args.port, 'workspace': bool(workspace)})
+    server.write_log({'t': round(time.time(), 3), 'event': 'listening', 'port': args.port, 'workspace': bool(workspace),
+                      'reports': bool(workspace and workspace.get('reports'))})
     print(f'drive-stand-in: listening on [::]:{args.port} (IPv4 and IPv6), log {args.log}', flush=True)
     server.serve_forever()
 

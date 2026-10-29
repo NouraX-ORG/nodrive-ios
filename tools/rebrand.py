@@ -114,11 +114,14 @@ TEST_FILES = [
     ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveWorkspaceMenuTests.swift'),
     ('NextcloudUITests', 'NextcloudUITests', 'NoDriveScreenshotUITests.swift'),
     ('NextcloudUITests', 'NextcloudUITests', 'NoDriveWorkspaceUITests.swift'),
+    ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveProblemReportsTests.swift'),
+    ('NextcloudUITests', 'NextcloudUITests', 'NoDriveProblemReportsUITests.swift'),
 ]
 # Our own source folders of the app target, each a new group inside its parent group:
 # (target, folder, parent group name). Every .swift file of the folder is added.
 APP_SOURCE_FOLDERS = [
     ('Nextcloud', 'iOSClient/Workspace', 'iOSClient'),
+    ('Nextcloud', 'iOSClient/ProblemReports', 'iOSClient'),
 ]
 # Product of the UI-test target. Its runner app ("<product>-Runner") sits on the simulator's home
 # screen during the screenshot walk, so it must not carry the Nextcloud name. The target name
@@ -549,6 +552,37 @@ class PBX:
                 self.add_to_list(gid, 'children', f'\t\t\t\t{fref} /* {name} */,\n')
         self.add_to_list(parents[0], 'children', f'\t\t\t\t{gid} /* {group_name} */,\n')
 
+    def add_strings_tables(self, target, folder):
+        """Register `<folder>/en.lproj/*.strings` (a NoDrive-owned English string table) as a localized resource of
+        `target`: a PBXVariantGroup with one `en` file, in the folder's group and in the Resources phase. The folder
+        was added by add_source_folder. Ids are derived from the path, so a second run changes nothing."""
+        lproj = self.st.path(f'{folder}/en.lproj')
+        if not os.path.isdir(lproj):
+            return
+        gid = hashlib.sha1(f'nodrive:group:{folder}'.encode()).hexdigest()[:24].upper()
+        for name in sorted(n for n in os.listdir(lproj) if n.endswith('.strings')):
+            rel = f'{folder}/en.lproj/{name}'
+            vid = hashlib.sha1(f'nodrive:variantgroup:{rel}'.encode()).hexdigest()[:24].upper()
+            fref = hashlib.sha1(f'nodrive:fileref:{rel}'.encode()).hexdigest()[:24].upper()
+            bfile = hashlib.sha1(f'nodrive:buildfile:{target}:{rel}'.encode()).hexdigest()[:24].upper()
+            if not re.search(r'^\t\t' + fref + ' ', self.text, re.M):
+                self.insert_sorted_in_section(
+                    'PBXFileReference', fref,
+                    f'\t\t{fref} /* en */ = {{isa = PBXFileReference; lastKnownFileType = text.plist.strings; '
+                    f'name = en; path = en.lproj/{name}; sourceTree = "<group>"; }};\n')
+            if not re.search(r'^\t\t' + vid + ' ', self.text, re.M):
+                self.insert_sorted_in_section(
+                    'PBXVariantGroup', vid,
+                    f'\t\t{vid} /* {name} */ = {{\n\t\t\tisa = PBXVariantGroup;\n\t\t\tchildren = (\n'
+                    f'\t\t\t\t{fref} /* en */,\n\t\t\t);\n\t\t\tname = {pbx_quote(name)};\n'
+                    f'\t\t\tsourceTree = "<group>";\n\t\t}};\n')
+            if not re.search(r'^\t\t' + bfile + ' ', self.text, re.M):
+                self.insert_sorted_in_section(
+                    'PBXBuildFile', bfile,
+                    f'\t\t{bfile} /* {name} in Resources */ = {{isa = PBXBuildFile; fileRef = {vid} /* {name} */; }};\n')
+            self.add_to_list(gid, 'children', f'\t\t\t\t{vid} /* {name} */,\n')
+            self.add_to_list(self.phase_id(target, 'Resources'), 'files', f'\t\t\t\t{bfile} /* {name} in Resources */,\n')
+
     def repoint_file(self, old_path, new_path):
         """Point the PBXFileReference with path old_path (or already new_path) at new_path."""
         new_name = os.path.basename(new_path)
@@ -824,6 +858,18 @@ def wrap_privacy_button(st):
     st.set(rel, text[:a] + guard + indented + '                }\n' + text[b:])
 
 
+def problem_reports(st):
+    """Hooks of the feature "Problem reports" (iOSClient/ProblemReports). Each hook is one call and one `// NoDrive:` line."""
+    insert_after(st, 'iOSClient/AppDelegate.swift',
+                 '            logDirectory: NCPreferences.sharedLogDirectory\n        )\n',
+                 '\n        // NoDrive: crash capture and problem reports, no third-party SDK (iOSClient/ProblemReports, R1)\n'
+                 '        NCProblemReports.shared.start()\n')
+    insert_before(st, 'iOSClient/Settings/Advanced/NCSettingsAdvancedView.swift',
+                  '            // Delete in Cache & Clear Cache\n',
+                  '            // NoDrive: "Send problem reports to Nourax" and "Report a problem" (iOSClient/ProblemReports, R2)\n'
+                  '            NCProblemReportsSection(controller: model.controller)\n')
+
+
 def plists(st, base):
     group = f'group.{base}'
     for rel in BRAND_PLISTS:
@@ -870,6 +916,7 @@ def project(st, base):
         pbx.add_source_file(target, group, name)
     for target, folder, parent in APP_SOURCE_FOLDERS:
         pbx.add_source_folder(target, folder, parent)
+        pbx.add_strings_tables(target, folder)
     # UI-test product (and so its runner app) named after NoDrive; see UI_TEST_PRODUCT
     for cfg in pbx.config_ids('NextcloudUITests'):
         pbx.set_setting(cfg, 'PRODUCT_NAME', UI_TEST_PRODUCT)
@@ -1144,6 +1191,7 @@ def run(st, base):
     brand_swift(st, base)
     intro_swift(st)
     swift_code(st)
+    problem_reports(st)
     plists(st, base)
     project(st, base)
     storyboards(st)

@@ -1,0 +1,21 @@
+/* NoDrive: texts of the problem reports (iOSClient/ProblemReports). English only; translations are a to-do. */
+"_nodrive_reports_switch_" = "Send problem reports to Nourax";
+"_nodrive_reports_summary_" = "If the app has a problem, send a report to Nourax Support so we can fix it. Reports are saved in your NoDrive and shared with Nourax Support. They never include passwords.";
+"_nodrive_reports_report_" = "Report a problem";
+"_nodrive_reports_prompt_" = "What went wrong?";
+"_nodrive_reports_included_link_" = "What's included";
+"_nodrive_reports_send_" = "Send";
+"_nodrive_reports_included_header_" = "A problem report contains:";
+"_nodrive_reports_included_version_" = "the app version and build";
+"_nodrive_reports_included_device_" = "your device model, iOS version and language";
+"_nodrive_reports_included_time_" = "the time of the report and the address of your NoDrive server";
+"_nodrive_reports_included_note_" = "your note, if you wrote one";
+"_nodrive_reports_included_crash_" = "what the app was doing when it stopped, if it crashed";
+"_nodrive_reports_included_logs_" = "the app's recent logs. They include the names of your files and folders, because we need them to find the problem.";
+"_nodrive_reports_included_footer_" = "Passwords, tokens and cookies are always removed, and email addresses are replaced. The report is saved in your NoDrive in the folder \"Problem reports\" and shared with Nourax Support.";
+"_nodrive_reports_sent_" = "Problem report sent";
+"_nodrive_reports_saved_" = "Saved in your NoDrive › Problem reports.";
+"_nodrive_reports_retry_" = "The report could not be sent now. NoDrive will try again later.";
+"_nodrive_reports_after_signin_" = "NoDrive will send the report after you sign in.";
+"_nodrive_reports_closed_" = "NoDrive closed unexpectedly. Send a problem report?";
+"_nodrive_reports_not_now_" = "Not now";

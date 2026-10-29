@@ -21,6 +21,9 @@
 #   screens.sh workspace <udid> <variant>
 #        the Workspace apps UI test against the stand-in's test account (needs XCTESTRUN, SHOTS, RESULTS,
 #        NODRIVE_WS_USER and NODRIVE_WS_APP_PASSWORD in the environment)
+#   screens.sh reports <udid> <variant>
+#        the problem-report UI test, signed in as for `workspace`; the stand-in (started with --reports-uploads) starts
+#        a new run first and keeps the uploaded zips under $RESULTS/stand-in-uploads/<variant>/
 set -euo pipefail
 
 APP_ID=org.nourax.nodrive
@@ -321,6 +324,57 @@ workspace() {
   return $status
 }
 
+reports() {
+  local udid=$1 variant=$2 status=0
+  mkdir -p "$SHOTS/$variant" "$RESULTS"
+  # A new run for the stand-in: the folder, the share and the counters start again (the first share request of
+  # a run is refused, like a server that has no account nourax-support yet)
+  if ! curl -fsS --cacert "$RESULTS/stand-in-root.pem" -X POST \
+      "https://drive.nourax.org/__ci/reports-reset?variant=$variant" > /dev/null; then
+    echo "reports $variant: the stand-in did not accept the reset (started without --reports-uploads?)"
+    return 1
+  fi
+  set +e
+  # The account goes to the app through the test runner's environment, not through a command line.
+  TEST_RUNNER_NODRIVE_VARIANT="$variant" TEST_RUNNER_NODRIVE_SHOTS_DIR="$SHOTS" \
+  TEST_RUNNER_NODRIVE_UITEST_ACCOUNT="https://drive.nourax.org|$NODRIVE_WS_USER|$NODRIVE_WS_APP_PASSWORD" \
+    xcodebuild test-without-building \
+      -xctestrun "$XCTESTRUN" \
+      -destination "id=$udid" \
+      -only-testing:NextcloudUITests/NoDriveProblemReportsUITests \
+      -parallel-testing-enabled NO \
+      -resultBundlePath "$RESULTS/ui-$variant.xcresult" \
+      > "$RESULTS/ui-$variant.log" 2>&1
+  status=$?
+  set -e
+  xcbeautify --renderer github-actions < "$RESULTS/ui-$variant.log" || true
+  if ! grep -Eq "Executed [1-9][0-9]* tests?" "$RESULTS/ui-$variant.log"; then
+    echo "reports $variant: no test ran (check -only-testing and the .xctestrun)"
+    status=1
+  fi
+  xcrun xcresulttool get test-results summary --path "$RESULTS/ui-$variant.xcresult" \
+    > "$RESULTS/ui-$variant-summary.json" 2>/dev/null || true
+  xcrun simctl spawn "$udid" log show --last 40m --style compact \
+    --predicate 'process == "Nextcloud"' 2>/dev/null | tail -n 4000 > "$RESULTS/ui-$variant-app.log" || true
+  # NextcloudKit's own log (the files a report carries), in the app group
+  local group
+  group=$(xcrun simctl get_app_container "$udid" "$APP_ID" "group.$APP_ID" 2>/dev/null || true)
+  if [ -n "$group" ] && [ -d "$group/Logs" ]; then
+    for f in "$group"/Logs/*; do
+      [ -f "$f" ] && cp "$f" "$RESULTS/ui-$variant-nextcloudkit-$(basename "$f")"
+    done
+  fi
+  # A test that was skipped (no account in the environment) still counts as "Executed" in the log: it must fail here.
+  local skipped
+  skipped=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("skippedTests", 0))' "$RESULTS/ui-$variant-summary.json" 2>/dev/null || echo unreadable)
+  if [ "$skipped" != "0" ]; then
+    echo "reports $variant: skipped tests: $skipped (0 expected; a missing summary also fails)"
+    status=1
+  fi
+  echo "reports $variant: xcodebuild exit $status; files: $(ls "$SHOTS/$variant" | tr '\n' ' ')"
+  return $status
+}
+
 cmd=${1:-}; shift || true
 case "$cmd" in
   check-tools) check_tools "$@" ;;
@@ -333,5 +387,6 @@ case "$cmd" in
   launch) launch "$@" ;;
   walk) walk "$@" ;;
   workspace) workspace "$@" ;;
+  reports) reports "$@" ;;
   *) echo "usage: see the header of $0" >&2; exit 2 ;;
 esac
