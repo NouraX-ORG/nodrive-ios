@@ -373,7 +373,7 @@ struct NoDriveReportSizeTests {
         #expect(zip.count <= NCProblemReportBuilder.maxZipBytes)
         #expect(NCProblemReportBuilder.maxZipBytes == 5_000_000)
         let archive = try #require(TestZip(zip))
-        #expect(archive.items.allSatisfy(\.crcOK))
+        #expect(archive.items.allSatisfy { $0.crcOK })
         #expect(archive.data("report.json") != nil)
         let kept = try #require(archive.text("logs/log.txt"))
         let lastLine = String(decoding: new.suffix(200), as: UTF8.self).split(separator: "\n").last.map(String.init) ?? ""
@@ -428,7 +428,7 @@ struct NoDriveReportZipTests {
         ])
         let archive = try #require(TestZip(zip))
         #expect(archive.items.map(\.name) == ["report.json", "crash.txt", "logs/log.txt", "logs/empty.txt"])
-        #expect(archive.items.allSatisfy(\.crcOK))
+        #expect(archive.items.allSatisfy { $0.crcOK })
         #expect(archive.data("crash.txt") == text)
         #expect(archive.data("logs/log.txt") == random)
         #expect(archive.data("logs/empty.txt") == empty)
