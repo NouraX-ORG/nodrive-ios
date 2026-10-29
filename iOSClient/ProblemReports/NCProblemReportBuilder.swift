@@ -174,25 +174,43 @@ enum NCProblemReportBuilder {
 
     // MARK: Reading the app's log folder
 
-    /// The log files of NextcloudKit's logger (`log.txt`, `log-<date>.txt`), each as its newest bytes.
+    /// The log files of NextcloudKit's logger (`log.txt`, `log-<date>.txt`), newest file first, at most `maxBytes` in
+    /// total: the logger starts a new file every day and never deletes one, so the folder only grows. A file that is
+    /// read from the middle loses its first, partial line. Call it off the main actor.
     static func readLogs(in directory: URL?, maxBytes: Int = maxLogBytes) -> [NCProblemReportLogFile] {
         guard let directory,
               let urls = try? FileManager.default.contentsOfDirectory(
                 at: directory, includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey], options: [.skipsHiddenFiles])
         else { return [] }
-        var result: [NCProblemReportLogFile] = []
+        var files: [(url: URL, modified: Date)] = []
         for url in urls {
             let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .contentModificationDateKey])
             guard values?.isRegularFile == true else { continue }
-            guard let handle = try? FileHandle(forReadingFrom: url) else { continue }
-            defer { try? handle.close() }
+            files.append((url, values?.contentModificationDate ?? .distantPast))
+        }
+        files.sort { $0.modified != $1.modified ? $0.modified > $1.modified : $0.url.lastPathComponent > $1.url.lastPathComponent }
+
+        var remaining = maxBytes
+        var result: [NCProblemReportLogFile] = []
+        for file in files {
+            guard remaining > 0 else { break }
+            guard let handle = try? FileHandle(forReadingFrom: file.url) else { continue }
             let size = (try? handle.seekToEnd()) ?? 0
-            let start = size > UInt64(maxBytes) ? size - UInt64(maxBytes) : 0
+            let take = min(size, UInt64(remaining))
+            let start = size - take
             try? handle.seek(toOffset: start)
-            let data = (try? handle.readToEnd()) ?? Data()
-            result.append(NCProblemReportLogFile(name: url.lastPathComponent,
-                                                 modified: values?.contentModificationDate ?? .distantPast,
-                                                 data: data))
+            var data = (try? handle.readToEnd()) ?? Data()
+            try? handle.close()
+            remaining -= data.count
+            if start > 0 {
+                // Read from the middle of the file: the first line is partial.
+                if let newline = data.firstIndex(of: 0x0A) {
+                    data = Data(data[data.index(after: newline)...])
+                } else {
+                    data = Data()
+                }
+            }
+            result.append(NCProblemReportLogFile(name: file.url.lastPathComponent, modified: file.modified, data: data))
         }
         return result
     }

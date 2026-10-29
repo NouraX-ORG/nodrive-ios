@@ -405,6 +405,10 @@ def main():
                         if str(e.get('step', '')).startswith(('banner-', 'question')):
                             steps[e['step']] = e.get('seen', e.get('buttons'))
                 facts['ui'] = steps
+                # Every banner the UI test looked for must have been seen.
+                for step, seen in steps.items():
+                    if step.startswith('banner-') and seen is not True:
+                        problems.append(f'{variant}: the UI test did not see the banner "{step}"')
         all_facts[variant] = facts
         print(f'{variant}: {json.dumps(facts, ensure_ascii=False)}')
     if args.json:

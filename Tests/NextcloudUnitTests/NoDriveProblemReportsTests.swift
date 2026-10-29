@@ -143,6 +143,33 @@ struct NoDriveReportScrubbingTests {
         #expect(scrub("Photos/Holiday 2026/IMG_0001.HEIC") == "Photos/Holiday 2026/IMG_0001.HEIC")
     }
 
+    @Test("URL-encoded addresses go too: a query value and a WebDAV path")
+    func encodedEmails() {
+        let result = scrub("GET /login?user=jane%40example.com&redirect_url=%2Fapps PROPFIND /remote.php/dav/files/jane.doe%40Example.ORG/Photos/IMG_0001.HEIC")
+        #expect(!result.localizedCaseInsensitiveContains("example"))
+        #expect(result.contains("/login?user=<email>&redirect_url=%2Fapps"))
+        #expect(result.contains("/files/<email>/Photos/IMG_0001.HEIC"))
+        #expect(scrub("Photos/100%40 off/IMG_0001.HEIC") == "Photos/100%40 off/IMG_0001.HEIC")
+    }
+
+    @Test("A very long text without addresses is scrubbed in reasonable time")
+    func longTextIsFast() {
+        let text = String(repeating: "a.", count: 100_000)
+        let start = ContinuousClock.now
+        _ = scrub(text)
+        #expect(ContinuousClock.now - start < .seconds(20))
+    }
+
+    @Test("A second pass keeps the rest of a dictionary header dump")
+    func dictionaryDump() {
+        let text = "headers: [\"Authorization\": \"Basic YWJjOmRlZmdoaWprbG1ub3BxcnN0dQ==\", \"OCS-APIRequest\": \"true\"] cookies: [\"Cookie\": \"a=b; c=d\", \"X-Test\": \"1\"]"
+        let once = scrub(text)
+        #expect(once.contains("\"OCS-APIRequest\": \"true\""))
+        #expect(once.contains("\"X-Test\": \"1\""))
+        #expect(!once.contains("YWJj") && !once.contains("c=d"))
+        #expect(scrub(once) == once)
+    }
+
     @Test("Scrubbing twice changes nothing")
     func idempotent() {
         let text = """
@@ -404,6 +431,38 @@ struct NoDriveReportSizeTests {
         #expect(kept.contains("Photos/Holiday 2026/IMG_0001.HEIC"))
     }
 
+    @Test("The log folder is read newest first and at most 8,000,000 bytes in total")
+    func logFolderIsCapped() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("logs-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let line = Data(String(repeating: "0123456789abcde\n", count: 62_500).utf8)    // 1,000,000 bytes
+        #expect(line.count == 1_000_000)
+        for index in 0..<30 {
+            let url = folder.appendingPathComponent(String(format: "log-%02d.txt", index))
+            try line.write(to: url)
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1_000_000 + Double(index))],
+                                                  ofItemAtPath: url.path)
+        }
+        let logs = NCProblemReportBuilder.readLogs(in: folder)
+        #expect(logs.reduce(0) { $0 + $1.data.count } <= NCProblemReportBuilder.maxLogBytes)
+        #expect(logs.count == 8)
+        #expect(Set(logs.map(\.name)) == Set((22..<30).map { String(format: "log-%02d.txt", $0) }), "only the newest files")
+    }
+
+    @Test("A log read from the middle starts at a line start")
+    func logFromTheMiddle() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("logs-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Data(String(repeating: "0123456789\n", count: 10_000).utf8).write(to: folder.appendingPathComponent("log.txt"))
+        let logs = NCProblemReportBuilder.readLogs(in: folder, maxBytes: 1_000)
+        let data = try #require(logs.first?.data)
+        #expect(logs.count == 1 && !data.isEmpty && data.count <= 1_000)
+        let lines = String(decoding: data, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false).dropLast()
+        #expect(lines.allSatisfy { $0 == "0123456789" }, "the partial first line must be gone")
+    }
+
     @Test("newestLines keeps whole lines from the end")
     func newest() {
         let data = Data("aaaa\nbbbb\ncccc\n".utf8)
@@ -600,6 +659,22 @@ struct NoDriveReportCrashTests {
         #expect(raw.contains("not json"))
     }
 
+    @Test("The iOS 27 version filter compares; it does not search inside the text")
+    func versionFilter() {
+        func matches(_ text: String) -> Bool {
+            NCMetricKitCollector.versionMatches(text, shortVersion: "35.2.1", build: "7")
+        }
+        #expect(matches("35.2.1"))
+        #expect(matches("7"))
+        #expect(matches("35.2.1 (7)"))
+        #expect(matches("Optional(\"35.2.1\")"))
+        #expect(matches(""))
+        #expect(matches("nil"))
+        #expect(!matches("35.2.17"))
+        #expect(!matches("1.7.0"), "a short build number must not match every version that contains it")
+        #expect(!matches("34.0.9"))
+    }
+
     @Test("Stored MetricKit diagnostics are returned once")
     func store() {
         let directory = folder()
@@ -622,6 +697,7 @@ private nonisolated(unsafe) var chainProbe = false
 
 final class FakeReportTransport: NCProblemReportTransport, @unchecked Sendable {
     var host = "drive.nourax.org"
+    var accountId = "citest https://drive.nourax.org"
     var calls: [String] = []
     var uploads: [(remotePath: String, headers: [String: String], size: Int)] = []
     var folderStatus = 201
@@ -658,6 +734,21 @@ final class FakeReportTransport: NCProblemReportTransport, @unchecked Sendable {
     var shareCalls: Int { calls.filter { $0.hasPrefix("SHARE") }.count }
 }
 
+/// The log files the fake `logs` closure returns. The engine reads them on a background task.
+final class ReportLogsBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var files: [NCProblemReportLogFile]
+
+    init(_ files: [NCProblemReportLogFile]) {
+        self.files = files
+    }
+
+    var value: [NCProblemReportLogFile] {
+        get { lock.lock(); defer { lock.unlock() }; return files }
+        set { lock.lock(); defer { lock.unlock() }; files = newValue }
+    }
+}
+
 @MainActor
 final class ReportsHarness {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("reports-\(UUID().uuidString)", isDirectory: true)
@@ -669,7 +760,12 @@ final class ReportsHarness {
     var asked = 0
     var messages: [String] = []
     var clock = Date(timeIntervalSince1970: 1_793_000_000)
-    var logs: [NCProblemReportLogFile] = [NCProblemReportLogFile(name: "log.txt", modified: Date(), data: Data("a line\n".utf8))]
+    var metricKitWait: TimeInterval = 0.3
+    let logsBox = ReportLogsBox([NCProblemReportLogFile(name: "log.txt", modified: Date(), data: Data("a line\n".utf8))])
+    var logs: [NCProblemReportLogFile] {
+        get { logsBox.value }
+        set { logsBox.value = newValue }
+    }
     var engine: NCProblemReports!
 
     init() {
@@ -679,19 +775,20 @@ final class ReportsHarness {
     }
 
     func makeEngine() -> NCProblemReports {
-        NCProblemReports(dependencies: .init(
+        let logsBox = self.logsBox
+        return NCProblemReports(dependencies: .init(
             directory: directory, defaults: defaults, build: "7", shortVersion: "35.2.1", detectionEnabled: true,
             now: { [unowned self] in self.clock },
             info: { NoDriveReportContentsTests.info },
             transport: { [unowned self] in self.signedIn ? self.transport : nil },
             accountExists: { [unowned self] in self.signedIn },
-            logs: { [unowned self] in self.logs },
+            logs: { logsBox.value },
             confirm: { [unowned self] in
                 self.asked += 1
                 return self.confirmAnswers.isEmpty ? false : self.confirmAnswers.removeFirst()
             },
             notify: { [unowned self] text in self.messages.append(text) },
-            metricKitWait: 0.3, transportWait: 0.3, flushInterval: 600))
+            metricKitWait: metricKitWait, transportWait: 0.3, flushInterval: 600))
     }
 
     /// A new launch: a fresh engine on the same folder.
@@ -843,6 +940,27 @@ struct NoDriveReportDecisionTests {
         NCMetricKitStore(directory: quiet.directory.appendingPathComponent("metrickit")).save(text: "late", version: "7")
         await quiet.engine.diagnosticArrived()
         #expect(quiet.transport.uploads.count == 1)
+    }
+
+    @Test("A diagnostic that arrives while the previous run waits for MetricKit is the same crash, not a second one")
+    func diagnosticDuringTheWait() async throws {
+        for enabled in [true, false] {
+            let harness = ReportsHarness()
+            harness.metricKitWait = 1
+            harness.engine.setEnabled(enabled)
+            harness.confirmAnswers = [true]
+            harness.leaveRun(.foreground)
+            harness.relaunch()
+            harness.engine.prepareLaunch()
+            let processing = Task { await harness.engine.processPreviousRun() }
+            try await Task.sleep(for: .milliseconds(100))
+            NCMetricKitStore(directory: harness.directory.appendingPathComponent("metrickit")).save(text: "MetricKit crash diagnostic\nsignal: 11\n", version: "7")
+            await harness.engine.diagnosticArrived()
+            await processing.value
+            #expect(harness.transport.calls.filter { $0.hasPrefix("PUT") }.count == 1, "one crash, one upload (switch \(enabled))")
+            #expect(harness.asked == (enabled ? 0 : 1))
+            #expect(harness.messages.count == 1, "one banner: \(harness.messages)")
+        }
     }
 
     @Test("A manual report works with the switch off")
@@ -1033,6 +1151,107 @@ struct NoDriveReportSendingTests {
         #expect(transport.host == "drive.nourax.org")
         let info = harness.transport.uploads.first
         #expect(info?.remotePath.hasPrefix("Problem reports/") == true)
+    }
+
+    @Test("Two reports waiting after an offline period: the share is looked at once and the round says sent once")
+    func twoPendingOneMessage() async {
+        let harness = ReportsHarness()
+        harness.transport.uploadStatuses = [503, 503]
+        _ = await harness.engine.sendManual(note: "one")
+        harness.clock = harness.clock.addingTimeInterval(10)
+        _ = await harness.engine.sendManual(note: "two")
+        harness.transport.sharedWith = ["nourax-support"]
+        harness.messages = []
+        harness.clock = harness.clock.addingTimeInterval(601)
+        await harness.engine.flushPending(force: false)
+        #expect(harness.transport.uploads.count == 2)
+        #expect(harness.messages == ["Problem report sent"])
+        #expect(harness.transport.calls.filter { $0.hasPrefix("LIST") }.count == 1)
+    }
+
+    @Test("Two waiting reports and a share that fails: saved, said once, the share asked for once")
+    func twoPendingShareFails() async {
+        let harness = ReportsHarness()
+        harness.transport.uploadStatuses = [503, 503]
+        _ = await harness.engine.sendManual(note: "one")
+        harness.clock = harness.clock.addingTimeInterval(10)
+        _ = await harness.engine.sendManual(note: "two")
+        harness.messages = []
+        harness.clock = harness.clock.addingTimeInterval(601)
+        await harness.engine.flushPending(force: false)
+        #expect(harness.transport.uploads.count == 2)
+        #expect(harness.messages == ["Saved in your NoDrive › Problem reports."])
+        #expect(harness.transport.shareCalls == 1)
+    }
+
+    @Test("Reports waiting in both rooms go out in one round with one message")
+    func bothRoomsOneMessage() async {
+        let harness = ReportsHarness()
+        harness.signedIn = false
+        harness.engine.setEnabled(true)
+        harness.leaveRun(.foreground)
+        harness.relaunch()
+        harness.engine.prepareLaunch()
+        await harness.engine.processPreviousRun()               // waits in pending-auto
+        _ = await harness.engine.sendManual(note: "mine")       // waits in pending
+        harness.signedIn = true
+        harness.transport.sharedWith = ["nourax-support"]
+        harness.messages = []
+        await harness.engine.flushPending(force: true)
+        #expect(harness.transport.uploads.count == 2)
+        #expect(harness.messages == ["Problem report sent"])
+    }
+
+    @Test("The newest five are kept over both waiting rooms")
+    func fiveInTotal() async {
+        let harness = ReportsHarness()
+        harness.signedIn = false
+        harness.engine.setEnabled(true)
+        for index in 0..<8 {
+            harness.clock = Date(timeIntervalSince1970: 1_793_000_000 + Double(index) * 10)
+            if index.isMultiple(of: 2) {
+                _ = await harness.engine.sendManual(note: "n\(index)")
+            } else {
+                harness.leaveRun(.foreground)
+                harness.relaunch()
+                harness.engine.prepareLaunch()
+                await harness.engine.processPreviousRun()
+            }
+        }
+        let names = ["pending", "pending-auto"].flatMap { room in
+            NCProblemReportSender(transport: nil, pendingDirectory: harness.directory.appendingPathComponent(room),
+                                  workDirectory: harness.directory.appendingPathComponent("work")).pendingFiles().map(\.lastPathComponent)
+        }.sorted()
+        #expect(names.count == 5, "\(names)")
+        #expect(names.first?.hasPrefix("2026-10-26_07-33-50") == true, "\(names)")
+    }
+
+    @Test("A report kept for one account is dropped, not sent, after another account signs in")
+    func accountChangeDropsKeptReports() async {
+        let harness = ReportsHarness()
+        harness.transport.accountId = "anna https://drive.nourax.org"
+        harness.transport.uploadStatuses = [503]
+        #expect(await harness.engine.sendManual(note: "") == .keptForLater)
+        harness.transport.accountId = "ben https://drive.nourax.org"
+        harness.transport.sharedWith = ["nourax-support"]
+        harness.clock = harness.clock.addingTimeInterval(601)
+        await harness.engine.flushPending(force: false)
+        #expect(harness.transport.uploads.isEmpty)
+        let room = harness.directory.appendingPathComponent("pending")
+        let left = (try? FileManager.default.contentsOfDirectory(atPath: room.path)) ?? []
+        #expect(left.isEmpty, "the report and its account note are gone: \(left)")
+    }
+
+    @Test("A report kept for the same account is sent after a restart")
+    func sameAccountKeepsReports() async {
+        let harness = ReportsHarness()
+        harness.transport.uploadStatuses = [503]
+        #expect(await harness.engine.sendManual(note: "") == .keptForLater)
+        harness.relaunch()
+        harness.transport.sharedWith = ["nourax-support"]
+        harness.clock = harness.clock.addingTimeInterval(601)
+        await harness.engine.flushPending(force: false)
+        #expect(harness.transport.uploads.count == 1)
     }
 
     @Test("The shifted name keeps the pattern")

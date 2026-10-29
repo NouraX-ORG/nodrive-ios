@@ -132,9 +132,10 @@ def main():
     say('### B4 After the account exists')
     support_password = secrets.token_hex(16)
     print(f'::add-mask::{support_password}', flush=True)
-    done = subprocess.run(['docker', 'exec', '-u', 'www-data', '-e', f'OC_PASS={support_password}', args.container,
+    # The value goes through the environment, never on a command line ("-e OC_PASS" takes it from there).
+    done = subprocess.run(['docker', 'exec', '-u', 'www-data', '-e', 'OC_PASS', args.container,
                            'php', 'occ', 'user:add', '--password-from-env', '--display-name', 'Nourax Support', SUPPORT],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, env={**os.environ, 'OC_PASS': support_password})
     check(done.returncode == 0, f'occ user:add {SUPPORT}', f'exit {done.returncode}')
     status, ocs = owner.share('/' + FOLDER, SUPPORT)
     data = ocs.get('data') or {}

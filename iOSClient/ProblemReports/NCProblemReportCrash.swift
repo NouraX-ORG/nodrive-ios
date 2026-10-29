@@ -172,6 +172,19 @@ final class NCMetricKitCollector: NSObject, MXMetricManagerSubscriber {
         }
     }
 
+    /// True when a diagnostic's application version is this build: equal to the short version or the build number
+    /// (also as `short (build)`), after an `Optional(...)` wrapper and quotes are taken off. An unknown version
+    /// (empty, `nil`) counts as a match, as before.
+    static func versionMatches(_ text: String, shortVersion: String, build: String) -> Bool {
+        var version = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if version.hasPrefix("Optional("), version.hasSuffix(")") {
+            version = String(version.dropFirst("Optional(".count).dropLast())
+        }
+        version = version.trimmingCharacters(in: CharacterSet(charactersIn: "\"")).trimmingCharacters(in: .whitespaces)
+        if version.isEmpty || version == "nil" { return true }
+        return version == shortVersion || version == build || version == "\(shortVersion) (\(build))"
+    }
+
     // iOS 17 to 26
     func didReceive(_ payloads: [MXDiagnosticPayload]) {
         for payload in payloads {
@@ -196,9 +209,9 @@ final class NCMetricKitCollector: NSObject, MXMetricManagerSubscriber {
         modernTask = Task.detached {
             for await report in manager.diagnosticReports {
                 guard case .crash = report.result else { continue }
-                // The environment names the build that crashed; "contains" because the type may be optional.
+                // The environment names the build that crashed (the type may be optional, hence the text form).
                 let version = "\(report.environment.applicationVersion)"
-                guard version.isEmpty || version.contains(shortVersion) || version.contains(build) else { continue }
+                guard Self.versionMatches(version, shortVersion: shortVersion, build: build) else { continue }
                 guard let data = try? JSONEncoder().encode(report) else { continue }
                 store.save(text: NCProblemReportCrash.crashText(fromDiagnosticJSON: data), version: version)
                 onSaved?()

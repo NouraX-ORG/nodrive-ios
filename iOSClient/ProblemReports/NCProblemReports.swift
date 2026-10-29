@@ -30,7 +30,8 @@ final class NCProblemReports {
         /// The signed-in account's server, or nil without an account.
         var transport: () -> NCProblemReportTransport?
         var accountExists: () -> Bool
-        var logs: () -> [NCProblemReportLogFile]
+        /// Reads the log files. It runs on a background task (the folder can be large), so it must not use the main actor.
+        var logs: @Sendable () -> [NCProblemReportLogFile]
         /// "NoDrive closed unexpectedly. Send a problem report?" -> true for Send, false for Not now.
         var confirm: () async -> Bool
         /// A small message ("Problem report sent").
@@ -47,6 +48,8 @@ final class NCProblemReports {
     private var previousRunUnclean = false
     private var previousRunHandled = false
     private var previousRunReported = false
+    /// True while `processPreviousRun` runs: a diagnostic that MetricKit delivers meanwhile stays in the store for it.
+    private var processingPreviousRun = false
     private var lastFlush: Date?
     private var collector: NCMetricKitCollector?
 
@@ -78,7 +81,8 @@ final class NCProblemReports {
     private func sender(automatic: Bool, transport: NCProblemReportTransport?) -> NCProblemReportSender {
         NCProblemReportSender(transport: transport,
                               pendingDirectory: directory.appendingPathComponent(automatic ? "pending-auto" : "pending", isDirectory: true),
-                              workDirectory: directory.appendingPathComponent("work", isDirectory: true))
+                              workDirectory: directory.appendingPathComponent("work", isDirectory: true),
+                              otherPendingDirectory: directory.appendingPathComponent(automatic ? "pending" : "pending-auto", isDirectory: true))
     }
 
     private func prepareDirectory() {
@@ -159,6 +163,7 @@ final class NCProblemReports {
     /// `unclean-exit` when the marker said so. For an unclean exit with no exception it waits for MetricKit.
     func processPreviousRun() async {
         previousRunHandled = true
+        processingPreviousRun = true
         try? FileManager.default.removeItem(at: uncleanFlag)
         let exception = NCProblemReportCrash.takePendingException(at: exceptionFile)
         var diagnostics = metricStore.takeAll()
@@ -171,6 +176,8 @@ final class NCProblemReports {
             diagnostics = metricStore.takeAll()
         }
         let parts = [exception].compactMap { $0 } + diagnostics
+        // From here on the previous run is decided; a later diagnostic is the same event (see diagnosticArrived).
+        processingPreviousRun = false
         if !parts.isEmpty {
             previousRunReported = true
             await deliver(.crash, crashText: parts.joined(separator: "\n\n"))
@@ -184,7 +191,9 @@ final class NCProblemReports {
     /// A diagnostic that MetricKit delivered after the start. It is its own crash report only when no report was
     /// made for the previous run; otherwise it is the same event and is dropped.
     func diagnosticArrived() async {
-        guard previousRunHandled else { return }   // the start-up step takes it
+        // The start-up step takes it: before it ran, and while it waits for MetricKit (it finds the diagnostic
+        // in the store; taking it here too would give one crash two reports and two questions).
+        guard previousRunHandled, !processingPreviousRun else { return }
         let texts = metricStore.takeAll()
         guard !texts.isEmpty, !previousRunReported else { return }
         previousRunReported = true
@@ -219,10 +228,11 @@ final class NCProblemReports {
         let date = dependencies.now()
         var info = dependencies.info()
         if let host = transport?.host { info.serverHost = host }
-        let logs = dependencies.logs()
+        let readLogs = dependencies.logs
         let reportInfo = info
+        // Reading the log folder, scrubbing and zipping all happen off the main actor.
         let zip = await Task.detached(priority: .utility) {
-            NCProblemReportBuilder.build(kind: kind, note: note, crashText: crashText, logs: logs, info: reportInfo, date: date)
+            NCProblemReportBuilder.build(kind: kind, note: note, crashText: crashText, logs: readLogs(), info: reportInfo, date: date)
         }.value
         let fileName = NCProblemReportBuilder.fileName(date: date, appVersion: reportInfo.appVersion)
         let outcome = await sender(automatic: automatic, transport: transport).send(zip: zip, fileName: fileName)
@@ -239,13 +249,17 @@ final class NCProblemReports {
         let automatic = sender(automatic: true, transport: transport)
         guard explicit.hasPending || automatic.hasPending else { return }
         lastFlush = now
-        if let outcome = await explicit.sendPending(), outcome != .keptForLater { announce(outcome) }
+        // One round: the share to Support is looked at once, and the round is announced once.
+        let round = NCProblemReportShareRound()
+        var outcomes: [NCProblemReportOutcome] = []
+        if let outcome = await explicit.sendPending(round: round) { outcomes.append(outcome) }
         if isEnabled {
-            if let outcome = await automatic.sendPending(), outcome != .keptForLater { announce(outcome) }
+            if let outcome = await automatic.sendPending(round: round) { outcomes.append(outcome) }
         } else {
             // The switch is off: reports that were waiting only because it was on are not sent, and not kept.
-            for url in automatic.pendingFiles() { try? FileManager.default.removeItem(at: url) }
+            automatic.discardPending()
         }
+        if let outcome = outcomes.last(where: { $0 != .keptForLater }) { announce(outcome) }
     }
 
     private func announce(_ outcome: NCProblemReportOutcome) {
@@ -318,6 +332,7 @@ enum NCProblemReportPresenter {
         guard UIApplication.shared.applicationState == .active, let scene = activeScene() else { return nil }
         let window = scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first
         guard var controller = window?.rootViewController else { return nil }
+        // The passcode screen is recognised by its class name (the lock screen is upstream code with no shared marker).
         if String(describing: type(of: controller)).contains("Passcode") { return nil }
         while let presented = controller.presentedViewController {
             if presented is UIAlertController || String(describing: type(of: presented)).contains("Passcode") { return nil }

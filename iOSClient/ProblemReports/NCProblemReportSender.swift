@@ -9,6 +9,8 @@ import NextcloudKit
 protocol NCProblemReportTransport {
     /// The host the requests go to (the account's server).
     var host: String { get }
+    /// Names the signed-in account (user and server). Reports kept on the phone are tied to it.
+    var accountId: String { get }
     /// MKCOL of a folder in the user's files: 201 created, 405 already there.
     func makeFolder(_ name: String) async -> Int
     /// PUT of a local file into the user's files with the headers; 201 created, 412 when the name exists.
@@ -26,6 +28,8 @@ struct NCNextcloudKitReportTransport: NCProblemReportTransport {
     let userId: String
 
     var host: String { URL(string: urlBase)?.host ?? "" }
+
+    var accountId: String { account }
 
     private var filesBase: String { "\(urlBase)/remote.php/dav/files/\(userId)" }
 
@@ -67,18 +71,28 @@ enum NCProblemReportOutcome: Equatable {
     case noAccount
 }
 
+/// What the share step found, remembered for the rest of one round of sends: the share is looked at once, and
+/// every later report of the round gets the same answer ("sent" when the folder is shared, otherwise "saved").
+final class NCProblemReportShareRound {
+    var outcome: NCProblemReportOutcome?
+}
+
 /// Uploads reports and keeps the ones that could not be sent. Nothing here talks to any host but the transport's.
 struct NCProblemReportSender {
     /// The folder in the user's files, and the account that gets read access to it.
     static let folderName = "Problem reports"
     static let supportUser = "nourax-support"
     static let keepPending = 5
+    /// A kept report names the account it was made for in a file next to it (`<name>.zip.account`).
+    private static let accountSuffix = ".account"
 
     let transport: NCProblemReportTransport?
     /// Where unsent reports wait (the app's own folder).
     let pendingDirectory: URL
     /// Where the zip is written while it is uploaded.
     let workDirectory: URL
+    /// The other waiting room; the newest five reports are kept over both.
+    var otherPendingDirectory: URL?
 
     // MARK: A new report
 
@@ -88,30 +102,36 @@ struct NCProblemReportSender {
             keep(zip, as: fileName)
             return .noAccount
         }
-        var shareTried = false
-        let outcome = await upload(zip: zip, fileName: fileName, transport: transport, shareTried: &shareTried)
+        let outcome = await upload(zip: zip, fileName: fileName, transport: transport, round: NCProblemReportShareRound())
         if outcome == .keptForLater {
-            keep(zip, as: fileName)
+            keep(zip, as: fileName, accountId: transport.accountId)
         }
         return outcome
     }
 
-    /// Tries the reports kept on the phone, oldest first. Returns nil when there was nothing to send, and the
-    /// outcome of the last one otherwise. A failure stops the round (the next report or sign-in tries again).
-    func sendPending() async -> NCProblemReportOutcome? {
+    /// Tries the reports kept on the phone, oldest first. Returns nil when there was nothing to send, the outcome
+    /// of the last report that went out otherwise, and `.keptForLater` when the first one already failed. A
+    /// failure stops the round (the next report or sign-in tries again). Reports made for another account are
+    /// dropped, not sent: they would put the old user's file names into the new user's Drive.
+    func sendPending(round: NCProblemReportShareRound = NCProblemReportShareRound()) async -> NCProblemReportOutcome? {
         guard let transport else { return nil }
-        var last: NCProblemReportOutcome?
-        var shareTried = false
+        var delivered: NCProblemReportOutcome?
+        var failed = false
         for url in pendingFiles() {
+            if let owner = accountOfPending(url), owner != transport.accountId {
+                discard(url)
+                continue
+            }
             guard let zip = try? Data(contentsOf: url) else { continue }
-            let outcome = await upload(zip: zip, fileName: url.lastPathComponent, transport: transport, shareTried: &shareTried)
-            last = outcome
+            let outcome = await upload(zip: zip, fileName: url.lastPathComponent, transport: transport, round: round)
             if outcome == .keptForLater {
+                failed = true
                 break
             }
-            try? FileManager.default.removeItem(at: url)
+            delivered = outcome
+            discard(url)
         }
-        return last
+        return delivered ?? (failed ? .keptForLater : nil)
     }
 
     var hasPending: Bool {
@@ -120,8 +140,8 @@ struct NCProblemReportSender {
 
     // MARK: Steps
 
-    /// MKCOL, PUT (never over an existing file), then the share to Support, at most once for this round.
-    private func upload(zip: Data, fileName: String, transport: NCProblemReportTransport, shareTried: inout Bool) async -> NCProblemReportOutcome {
+    /// MKCOL, PUT (never over an existing file), then the share to Support, looked at once for the round.
+    private func upload(zip: Data, fileName: String, transport: NCProblemReportTransport, round: NCProblemReportShareRound) async -> NCProblemReportOutcome {
         let folder = await transport.makeFolder(Self.folderName)
         guard folder == 201 || folder == 405 else { return .keptForLater }
 
@@ -149,12 +169,17 @@ struct NCProblemReportSender {
         }
         guard uploaded else { return .keptForLater }
 
-        // The share is tried once per round and report, never in a loop. Failing quietly is the normal case until
-        // the Workspace has created the account.
-        if shareTried {
-            return .savedNotShared
+        // The share is tried once per round, never in a loop, and the answer holds for every report of the round.
+        // Failing quietly is the normal case until the Workspace has created the account.
+        if let known = round.outcome {
+            return known
         }
-        shareTried = true
+        let outcome = await shareWithSupport(transport: transport)
+        round.outcome = outcome
+        return outcome
+    }
+
+    private func shareWithSupport(transport: NCProblemReportTransport) async -> NCProblemReportOutcome {
         let path = "/\(Self.folderName)"
         guard let sharedWith = await transport.usersSharedWith(path: path) else {
             return .savedNotShared
@@ -179,21 +204,55 @@ struct NCProblemReportSender {
 
     // MARK: Pending reports (the app's own files; the newest five are kept)
 
-    private func keep(_ zip: Data, as fileName: String) {
+    /// `accountId` is nil when there was no account: such a report goes to whoever signs in next.
+    private func keep(_ zip: Data, as fileName: String, accountId: String? = nil) {
         try? FileManager.default.createDirectory(at: pendingDirectory, withIntermediateDirectories: true)
-        try? zip.write(to: pendingDirectory.appendingPathComponent(fileName), options: .atomic)
-        // Names start with a UTC timestamp: sorted by name is sorted by time. Older ones beyond five go.
-        let files = pendingFiles()
+        let url = pendingDirectory.appendingPathComponent(fileName)
+        try? zip.write(to: url, options: .atomic)
+        if let accountId {
+            try? Data(accountId.utf8).write(to: Self.accountFile(of: url), options: .atomic)
+        }
+        // Names start with a UTC timestamp: sorted by name is sorted by time. Older ones beyond five go, counted
+        // over both waiting rooms.
+        let files = (pendingFiles() + otherPendingFiles()).sorted { $0.lastPathComponent < $1.lastPathComponent }
         if files.count > Self.keepPending {
-            for url in files.prefix(files.count - Self.keepPending) {
-                try? FileManager.default.removeItem(at: url)
+            for old in files.prefix(files.count - Self.keepPending) {
+                discard(old)
             }
         }
     }
 
     /// Oldest first.
     func pendingFiles() -> [URL] {
-        let urls = (try? FileManager.default.contentsOfDirectory(at: pendingDirectory, includingPropertiesForKeys: nil)) ?? []
+        Self.zips(in: pendingDirectory)
+    }
+
+    private func otherPendingFiles() -> [URL] {
+        otherPendingDirectory.map { Self.zips(in: $0) } ?? []
+    }
+
+    private static func zips(in directory: URL) -> [URL] {
+        let urls = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
         return urls.filter { $0.pathExtension == "zip" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    private static func accountFile(of zip: URL) -> URL {
+        zip.deletingLastPathComponent().appendingPathComponent(zip.lastPathComponent + accountSuffix)
+    }
+
+    private func accountOfPending(_ zip: URL) -> String? {
+        guard let data = try? Data(contentsOf: Self.accountFile(of: zip)) else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// Removes a kept report (the app's own file) with its account note.
+    private func discard(_ zip: URL) {
+        try? FileManager.default.removeItem(at: zip)
+        try? FileManager.default.removeItem(at: Self.accountFile(of: zip))
+    }
+
+    /// Removes every report kept here.
+    func discardPending() {
+        for url in pendingFiles() { discard(url) }
     }
 }

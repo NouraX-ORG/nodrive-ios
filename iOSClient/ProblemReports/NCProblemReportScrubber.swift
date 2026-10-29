@@ -29,11 +29,13 @@ enum NCProblemReportScrubber {
         #"(?<![A-Za-z0-9_])(?:oc_sessionPassphrase|nc_session_id|__Host-[A-Za-z0-9_\-]+|oc[a-z0-9]{8,})=[^\s;,"']*"#, "<cookie>")
 
     /// `Authorization: ...` and `Cookie: ...` / `Set-Cookie: ...`, as a header line or as a dictionary entry.
+    /// A value that is already the marker (and ends there) is left alone, so a second pass does not eat the rest of
+    /// a dictionary line such as `"Authorization": <removed>, "OCS-APIRequest": "true"`.
     private static let authorizationHeader = rule(
-        #"((?<![A-Za-z0-9_])["']?(?:Proxy-)?Authorization["']?[ \t]*[:=][ \t]*)("[^"\r\n]*"|'[^'\r\n]*'|[^\r\n]*)"#,
+        #"((?<![A-Za-z0-9_])["']?(?:Proxy-)?Authorization["']?[ \t]*[:=][ \t]*)("[^"\r\n]*"|'[^'\r\n]*'|<removed>(?=[,\]]|[ \t]*(?:\r|\n|$))|[^\r\n]*)"#,
         "$1<removed>", options: [.caseInsensitive])
     private static let cookieHeader = rule(
-        #"((?<![A-Za-z0-9_])["']?(?:Set-)?Cookie["']?[ \t]*[:=][ \t]*)("[^"\r\n]*"|'[^'\r\n]*'|[^\r\n]*)"#,
+        #"((?<![A-Za-z0-9_])["']?(?:Set-)?Cookie["']?[ \t]*[:=][ \t]*)("[^"\r\n]*"|'[^'\r\n]*'|<cookie>(?=[,\]]|[ \t]*(?:\r|\n|$))|[^\r\n]*)"#,
         "$1<cookie>", options: [.caseInsensitive])
 
     /// `Basic <base64>` and `Bearer <token>` outside a header line.
@@ -63,7 +65,10 @@ enum NCProblemReportScrubber {
     /// Long base64 runs (64 or more characters). A run that is mostly slashes is a path and is kept.
     private static let base64Run = try! NSRegularExpression(pattern: #"[A-Za-z0-9+/]{64,}={0,2}"#) // swiftlint:disable:this force_try
 
-    private static let email = rule(#"[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+"#, "<email>")
+    /// `name@host.tld`, and the URL-encoded form `name%40host.tld` (login links, `?user=jane%40example.com`, DAV paths).
+    /// The name is at most 64 characters, so a long run of name characters costs a few steps per position, not a scan
+    /// to its end.
+    private static let email = rule(#"[A-Za-z0-9._%+\-]{1,64}(?:@|%40)[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+"#, "<email>")
 
     /// Rules in the order they must run: cookies and headers before the generic secret shapes.
     private static let rules: [Rule] = [
