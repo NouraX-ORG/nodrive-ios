@@ -87,7 +87,8 @@ Runs on every push to `main` and `platform/ios`, and by hand (workflow_dispatch)
 |---|---|---|
 | Branding gate | `ubuntu-latest` | `rebrand.py --check`, `make-icons.py --check`, `check-branding.py` (about 15 s) |
 | Build and unit tests (iOS Simulator) | `xcode-27` | Select Xcode 27.1, check every xcodebuild option in `xcodebuild -help`, restore/save the Swift-package cache, validate the project file, simulated entitlements, `build-for-testing` (unsigned), package `NoDrive.app`, inspect ids and entitlements, sweep the built app (report), unit tests (about 17 min) |
-| Simulator screens | `xcode-27` | Install and launch `NoDrive.app`, UI walk in en, de, ar and dark mode with screenshots, the drive.nourax.org stand-in, DNS capture and network gate, screenshot report (about 60 min) |
+| Simulator screens | `xcode-27` | Install and launch `NoDrive.app`, UI walk in en, de, ar and dark mode with screenshots, the drive.nourax.org stand-in, DNS capture and network gate, the Workspace apps walk and the Problem reports walk (signed in, light and dark; the stand-in answers the WebDAV and share routes), `report-check.py`, screenshot report (about 2 h 20 min; limit 180 min) |
+| Server login | `ubuntu-24.04` | A real Nextcloud 35 (throwaway, in Docker): the web-view sign-in checks and `server_reports_check.py` (the Problem reports upload, share and permissions) |
 
 Why `xcode-27` and not `macos-latest`: `macos-latest` is macOS 26 with Xcode 26 only, which cannot
 build an iOS 27 project; GitHub's hosted `xcode-27` image (macOS 27, image `xcode-27-arm64`) has
@@ -101,7 +102,7 @@ Artifacts of each run:
 | `nodrive-ios-simulator-app` | 14 days | `nodrive-ios-simulator-app.zip` with `NoDrive.app` for the iOS Simulator (Apple silicon); not installable on an iPhone |
 | `nodrive-ios-test-results` | 14 days | build log, unit-test `.xcresult` and summary, product inspection, app sweep, simulated entitlements |
 | `nodrive-ios-screenshots` | 14 days | full-size screenshots per variant and the docs copies |
-| `nodrive-ios-screens-results` | 14 days | UI-test results, walk logs, accessibility texts, network capture summary, stand-in log, screenshot report |
+| `nodrive-ios-screens-results` | 14 days | UI-test results, walk logs, accessibility texts, network capture summary, stand-in log, uploaded report zips (`stand-in-uploads/`), `report-check.json`, screenshot report |
 | `nodrive-ios-build-products` | 3 days | input for the screens job (app, UI-test runner, `.xctestrun`) |
 
 To install the CI build on a Mac: download `nodrive-ios-simulator-app`, unzip it twice (the

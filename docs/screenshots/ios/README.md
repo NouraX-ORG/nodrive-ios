@@ -51,6 +51,21 @@ Workspace apps (`workspace-light/`, `workspace-dark/`): from run
 | `13-notifications.png` | The notification list with a link to the account's own server. |
 | `14-notification-page.png` | That link opened inside NoDrive, signed in. |
 
+Problem reports (`reports-light/`, `reports-dark/`): from run
+[40901561115](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40901561115) on `feature/problem-reports`
+(commit `1742115b08`, attempt 2), same device and settings. The account and the server answers come from the CI stand-in.
+
+| File | Screen |
+|---|---|
+| `01-advanced-section.png` | Settings → Advanced: the switch "Send problem reports to Nourax" (off) and "Report a problem". |
+| `02-whats-included.png` | "What's included": the contents of a report in plain words. |
+| `03-saved.png` | "Saved in your NoDrive › Problem reports." (the Drive has no `nourax-support` yet). |
+| `04-sent.png` | "Problem report sent". |
+| `05-closed-unexpectedly.png` | After an unclean exit with the switch off: "NoDrive closed unexpectedly. Send a problem report?" with Not now and Send. |
+| `06-switch-on.png` | The switch turned on. |
+| `07-sent-by-itself.png` | An unclean exit with the switch on: "Problem report sent", no question. |
+| `08-crash-sent.png` | After a crash: "Problem report sent". |
+
 Looked at for Nextcloud's name, logo, colours and links: none.
 
 Notes:
