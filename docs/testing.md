@@ -14,6 +14,11 @@ Workspace apps (feature `feature/workspace-apps`, then the fixes round `feature/
 that commit; the same checks run again on the merge commit and on `main`. The first round ran as
 [40399328940](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40399328940) (commit `0585f7e0f7`).
 
+Problem reports (feature `feature/problem-reports`): run [40901561115](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40901561115) (attempt 2), commit
+`1742115b08`, all 4 jobs green (Branding gate, Build and unit tests, Server login, Simulator screens). Attempt 1 failed
+only in the Workspace sidebar UI test (known flakes, below) and passed on the re-run. The merge to `main` adds only
+documents on top of that commit; the same checks run again on the merge commit and on `main`.
+
 Reference run: **[40206804804](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40206804804)**
 on `main` (commit `b03563c3c9`), all 3 jobs green. Xcode 27.1 (build 27A9275), runner image
 `xcode-27-arm64`, iPhone 17 simulator with iOS 27.0, unsigned (`CODE_SIGNING_ALLOWED=NO`).
@@ -55,7 +60,18 @@ on `main` (commit `b03563c3c9`), all 3 jobs green. Xcode 27.1 (build 27A9275), r
 | Web-view sign-in on a real Nextcloud server 35.0.2 (throwaway, in Docker): both app-password kinds | CI | pass | job "Server login", `report.md`: all checks passed (including `?nodrive=ws` accepted by server 35); cookies alone sign the page in, 304 on the apps list, a web log-out keeps the app signed in, revoking the app password ends the web session after 12 s |
 | The test account used by the UI test cannot exist in a Release build | CI | pass | `workspace-check.py --debug-only` in the Branding gate; `NCUITestAccount.swift` is inside `#if DEBUG` |
 | No Nextcloud text, link or colour in the Workspace screens or code | CI | pass | `check-branding.py`: 0 unclassified; screenshots of the Apps menu and the pages looked at: none; no new strings (names come from the server) |
-| Smart conflicts: the Auto upload screen has the row "If a file is already in NoDrive", default "Smart (recommended)"; its list has exactly the four choices with the contract's texts and Smart's summary "Skip it if it's the same size, otherwise keep both", and no "Ask me every time" | CI | pass (stand-in) | `NoDriveConflictSettingsUITests`, run [40696152657](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40696152657) (`only_round3`, commit `855350f705`): 1 test, 0 failures, light and dark; `walk.jsonl` `row-default` label "If a file is already in NoDrive, Smart (recommended)"; screenshots `01-auto-upload-row`, `02-choices` |
+| Problem reports: unit tests (scrubber, report zip, crash text, run marker, decisions, sender, one report per run) | CI | pass | run [40901561115](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40901561115), job "Build and unit tests": `unit-tests-summary.json` result `Passed`, `totalTestCount` 277, 0 failed, 0 skipped (204 before; the 73 new test functions are in `NoDriveProblemReportsTests`, among them `cutKeys`, `namesAreKept`, `diagnosticRightAfterActivation`, `crashWithWaitingReports`) |
+| Problem reports: Settings → Advanced shows the switch (off) and "Report a problem" | CI | pass (stand-in) | UI test `testProblemReports` passed in light (472 s) and dark (493 s); screenshots `reports-light/01-advanced-section`, `reports-dark/01-advanced-section` |
+| Problem reports: "What's included" lists the contents in plain words | CI | pass | screenshots `reports-*/02-whats-included` and the recorded screen text `02-whats-included.txt`; the 20 texts match the contract word for word (review) |
+| Problem reports: "Report a problem" with the switch off sends a report; while the Drive has no `nourax-support` the app says "Saved in your NoDrive › Problem reports."; the next report says "Problem report sent" | CI | pass (stand-in) | `report-check.py`: kinds `[manual, manual, unclean-exit, crash]`, MKCOL `[201, 405, 405, 405]`, share posts `[true, false]` (one POST while no share exists, none after), UI `banner-saved/sent/auto/crash: true`; screenshots `03-saved`, `04-sent` |
+| Problem reports: closing unexpectedly with the switch off asks once ("NoDrive closed unexpectedly. Send a problem report?"); "Not now" sends nothing | CI | pass (stand-in) | walk question `["Not now","Send"]`, no upload for that run; screenshot `05-closed-unexpectedly`; unit tests of the decision table and `diagnosticRightAfterActivation` (one report and at most one question even when MetricKit delivers during the launch) |
+| Problem reports: with the switch on, an unclean exit and a crash are sent without a question | CI | pass (stand-in) | `reports-light/dark`: `unclean-exit` then `crash` uploaded, `banner-auto` and `banner-crash` true, `crash.txt` carries the exception name; screenshots `06-switch-on`, `07-sent-by-itself`, `08-crash-sent`. MetricKit delivery cannot be tested in the simulator (owner row) |
+| Problem reports: size, name and share rules | CI | pass | `report-check: ok` (its self-test: good data passes, 15 kinds of bad data are caught): each zip at most 5,000,000 bytes, uploaded to `/Problem reports/<UTC time>_ios_<version>.zip` with `If-None-Match: *`, share `shareType 0`, `permissions 1`, `shareWith nourax-support`; unit tests: 412 gives a new name, 6 waiting reports keep the newest 5, no account keeps the report and sends it after the sign-in, one share round and one banner after a crash with older reports waiting |
+| Problem reports: passwords, tokens, cookies, keys and e-mail addresses are removed; file and folder names are kept | CI | pass | scrubber unit tests (`cutKeys`, `namesAreKept` and the earlier fixtures); `report-check.py` finds no raw Bearer value in any zip and `--scan-secret` finds the throwaway app password in none; the independent review ran a harness with random fake secrets ([round3-ios-reports-review-3.md](../../plans/round3-ios-reports-review-3.md)) |
+| Problem reports go only to the signed-in account's own server; nothing goes to Google | CI | pass | `network-gate`: `forbidden 0`; every report request in `stand-in.jsonl` is to `drive.nourax.org`; `disable_crash_service` is still `true` (branding unit test); `check-branding: 483 hits: 264 internal, 217 legal, 2 artwork, 0 unclassified` (no new "Nextcloud" text) |
+| Problem reports on a real Nextcloud 35 server (throwaway, in Docker) | CI | pass | job "Server login", `server_reports_check.py`: MKCOL 201 then 405; PUT with `If-None-Match: *` 201, again 412 and the content unchanged; share to the missing `nourax-support`: HTTP 404 "Please specify a valid account to share with"; after `occ user:add` the same POST gives 200, `share_type` 0, `permissions` 1; the support user can read the zip but gets 403 on add, change and delete: "all problem-report server checks passed" |
+| Problem reports never delete a file on the phone or on the Drive | CI | pass | review: the 7 `removeItem` calls are all inside the app's own `Application Support/NoDrive/ProblemReports/`; no WebDAV DELETE and no trash call in `iOSClient/ProblemReports` |
+| Smart conflicts: the Auto upload screen has the row "If a file is already in NoDrive", default "Smart (recommended)"; its list has exactly the four choices with the contract's texts and Smart's summary "Skip it if it's the same size, otherwise keep both", and no "Ask me every time" | CI | pass (stand-in) | `NoDriveConflictSettingsUITests`, run [40696152657](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40696152657) (`only_round3`, an earlier way to run it alone, now `only_conflicts`; commit `855350f705`): 1 test, 0 failures, light and dark; `walk.jsonl` `row-default` label "If a file is already in NoDrive, Smart (recommended)"; screenshots `01-auto-upload-row`, `02-choices` |
 | Each of the four choices can be selected, the row shows it, and the choice is kept after the app is closed and opened again | CI | pass (stand-in) | same run, `walk.jsonl` `chose` x4 and `kept-after-relaunch` ("… Keep both"); `03-keep-both`, `04-after-relaunch`, `05-smart-again` |
 | The experimental PhotoKit background upload (it would replace same-name files) is gone from the Auto upload screen and cannot be switched on | CI | pass | UI test: no "Experimental" section, no "PhotoKit background upload extension" switch; unit suite "NoDrive background upload extension": `disable_background_upload_extension` is true, `canConfigureBackgroundUploadExtension` and `shouldUseBackgroundUploadExtension` are false |
 | Smart conflicts decision: every choice against every state of the name (missing, same size, other size, folder, not clear): exact action; only "Keep the phone copy" ever uploads over a name that exists; the answer "not clear" is always "retry later" | CI | pass (unit) | suite "NoDrive conflict decision": 20 parameterised cases plus property tests; run [40687316684](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40687316684) (commit `855350f705`): all 250 unit tests passed, 0 failed |
@@ -95,6 +111,14 @@ on `main` (commit `b03563c3c9`), all 3 jobs green. Xcode 27.1 (build 27A9275), r
 | A link inside an app that points to another website opens in a separate browser panel, not inside the app page | owner | pending | e.g. a link in a mail |
 | A notification link (a "view" button in the notification list) that points to drive.nourax.org opens inside NoDrive, already signed in | owner | pending | |
 | Sign out (remove the account), then sign in again: any open app page closes at once; after signing in again an app opens signed in | owner | pending | after removal, no app page may show your data. Try it with an app page open, and once with an app opened from a notification |
+| Problem reports: Settings → Advanced (side menu → Settings → Advanced, scroll down) shows the switch "Send problem reports to Nourax" turned off, and a "Report a problem" row | owner | pending | iPhone or Mac simulator, signed in |
+| Report a problem: type a few words, tap "What's included" (read the list, go back), tap Send. A message appears at the top, and a file named like `2026-10-30_12-00-00_ios_35.2.1-nourax.1.zip` is in the "Problem reports" folder of your files | owner | pending | works with the switch off. Look in the NoDrive file list, then on drive.nourax.org |
+| Until the Workspace session creates the account `nourax-support` the message reads "Saved in your NoDrive › Problem reports."; afterwards it reads "Problem report sent" and the folder is shared read-only with Nourax Support | owner | pending | check Sharing of the folder on drive.nourax.org. The report is never lost either way |
+| Open the zip on your Mac: a note with an e-mail address shows `<email>`; no password, token or cookie is anywhere in `report.json`, `crash.txt` or `logs/` | owner | pending | file and folder names stay visible on purpose |
+| With the switch off, make the app close on its own (stop it with the Stop button in Xcode while NoDrive is on screen, then start it again): NoDrive asks "NoDrive closed unexpectedly. Send a problem report?". "Not now" sends nothing; "Send" sends one report | owner | pending | swiping the app away in the app switcher is not a problem and asks nothing |
+| With the switch on, the same unexpected close sends a report by itself and shows "Problem report sent", with no question | owner | pending | |
+| iPhone only, optional: after a real crash the next start sends one report that contains the crash text (`crash.txt`) | owner | pending | Apple hands crash data only to a real device; the simulator cannot show it |
+| If you already have a folder called "Problem reports" with your own files, NoDrive puts the report in it and shares the whole folder read-only with Nourax Support. Decide if that is acceptable | owner | pending | one answer for all three apps; see the to-do list |
 | Dark mode and German after sign-in | owner | pending | |
 | Device name under Settings → Security on drive.nourax.org | owner | pending | read it back for the Workspace session |
 | Sync works away from home (mobile data), after one sign-in at home | owner | pending | iPhone only |
@@ -112,9 +136,27 @@ on `main` (commit `b03563c3c9`), all 3 jobs green. Xcode 27.1 (build 27A9275), r
 - `drive.nourax.org` points to `127.0.0.1`/`::1` on the runner, where `tools/ci/drive-stand-in.py`
   answers `status.php` and the Login Flow v2 start with a plain page marked "CI stand-in". The
   simulator trusts a throw-away CI root only for this.
-- `tools/ci/network-gate.py` reads a DNS capture of the whole run and fails on any Nextcloud,
+- The screens job runs as five parallel shards (matrix in `.github/workflows/ios.yml`: smoke, walks, dark,
+  workspace, reports), each on its own runner and simulator. The job "Simulator screens report" merges their
+  artifacts, runs the network gate, the screenshot report and the docs copies over all of them, and uploads
+  `nodrive-ios-screenshots` and `nodrive-ios-screens-results` as before. A new UI test group is a new matrix
+  entry plus its steps (how-to at the top of the job in the workflow file).
+- `tools/ci/network-gate.py` reads the DNS captures (all shards, joined) and fails on any Nextcloud,
   ownCloud, Firebase or Crashlytics name. `tools/ci/screens-report.py` checks every screenshot and
   makes the 1200 px copies below.
+
+- Problem reports (`screens.sh reports`, UI test `NoDriveProblemReportsUITests`, light and dark): the app is launched
+  signed in with `NODRIVE_UITEST_REPORTS=1` and the stand-in in "reports" mode. It answers the WebDAV and share
+  routes like the real server (the first share answers "user does not exist", later ones 200) and saves each uploaded
+  zip. `tools/ci/report-check.py` then reads the stand-in log and the zips (order of the kinds, headers, share
+  fields, size, no secret). The simulator cannot deliver MetricKit data, so the crash is made with an uncaught
+  exception (`NODRIVE_UITEST_REPORTS=raise`). These hooks exist only in Debug builds (`#if DEBUG`).
+- Server check: `tools/ci/server_reports_check.py` runs in job "Server login" against a throwaway Nextcloud 35.
+
+Known CI flakes (not caused by a feature; re-run the failed job): "Failed to determine hittability of NoDrive Icon"
+(home-screen icon tap), and once in `NoDriveWorkspaceUITests.test1MenuSignedInPageAndForeignLink` the side menu read
+"Scanned images" instead of "Contacts" after the scroll back to Mail. The screens job (before the split into shards) took
+about 2 h; the longest shard (reports) takes about 40 min (limit 120 min); the runner pool may run fewer than five shards at once.
 
 ## Screenshot index (`docs/screenshots/ios/`)
 
@@ -155,6 +197,22 @@ logo, colours and links: none.
 | Notification list | [13-notifications](screenshots/ios/workspace-light/13-notifications.png) | [13-notifications](screenshots/ios/workspace-dark/13-notifications.png) |
 | Notification link opened inside NoDrive, signed in | [14-notification-page](screenshots/ios/workspace-light/14-notification-page.png) | [14-notification-page](screenshots/ios/workspace-dark/14-notification-page.png) |
 
+Problem reports, from the `nodrive-ios-screenshots` artifact of run [40901561115](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40901561115) (attempt 2, commit
+`1742115b08`, iPhone 17, iOS 27.0; the signed-in account is made by the CI stand-in,
+`docs/screenshots/ios/reports-{light,dark}/`, 1200 px copies). Looked at for Nextcloud's name, logo, colours and
+links: none.
+
+| Screen | light | dark |
+|---|---|---|
+| Settings → Advanced with the switch (off) and "Report a problem" | [01-advanced-section](screenshots/ios/reports-light/01-advanced-section.png) | [01-advanced-section](screenshots/ios/reports-dark/01-advanced-section.png) |
+| "What's included" | [02-whats-included](screenshots/ios/reports-light/02-whats-included.png) | [02-whats-included](screenshots/ios/reports-dark/02-whats-included.png) |
+| "Saved in your NoDrive › Problem reports." | [03-saved](screenshots/ios/reports-light/03-saved.png) | [03-saved](screenshots/ios/reports-dark/03-saved.png) |
+| "Problem report sent" | [04-sent](screenshots/ios/reports-light/04-sent.png) | [04-sent](screenshots/ios/reports-dark/04-sent.png) |
+| The question after an unexpected close | [05-closed-unexpectedly](screenshots/ios/reports-light/05-closed-unexpectedly.png) | [05-closed-unexpectedly](screenshots/ios/reports-dark/05-closed-unexpectedly.png) |
+| Switch turned on | [06-switch-on](screenshots/ios/reports-light/06-switch-on.png) | [06-switch-on](screenshots/ios/reports-dark/06-switch-on.png) |
+| Report sent by itself after an unclean exit | [07-sent-by-itself](screenshots/ios/reports-light/07-sent-by-itself.png) | [07-sent-by-itself](screenshots/ios/reports-dark/07-sent-by-itself.png) |
+| Report sent after a crash | [08-crash-sent](screenshots/ios/reports-light/08-crash-sent.png) | [08-crash-sent](screenshots/ios/reports-dark/08-crash-sent.png) |
+
 Smart conflicts, from the `nodrive-ios-screenshots` artifact of run [40696152657](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40696152657)
 (commit `855350f705`, iPhone 17, iOS 27.0; signed in by the CI stand-in, `docs/screenshots/ios/conflicts-{light,dark}/`,
 1200 px copies). Looked at for Nextcloud's name, logo, colours and links: none.
@@ -183,7 +241,10 @@ are owner tests.
    (no Files, Activity or Photos). Tap an app (it must open inside NoDrive, signed in, with no sign-in page),
    go back, tap NoMail (a browser panel, not signed in to NoDrive), then remove the account while an app page
    is open (the page must close) and sign in again (the pages must be signed out).
-6. Smart conflicts (Auto upload). Auto upload only looks at photos it has not uploaded before: a photo that is in this
+6. Problem reports: side menu → Settings → Advanced. Check that the switch is off, tap "Report a problem", write a few
+   words, look at "What's included", tap Send, then look for the zip in the "Problem reports" folder of your files.
+   Stop the app with the Stop button in Xcode while it is on screen and start it again to see the question.
+7. Smart conflicts (Auto upload). Auto upload only looks at photos it has not uploaded before: a photo that is in this
    install's upload history is skipped by name, and an edited photo keeps its name and date. So the test needs
    photos that this install has not seen yet:
    1. Before the first install (or on a second device that has no Auto upload), have some photos already on the
@@ -204,7 +265,7 @@ are owner tests.
    decides later): after a reinstall, a photo that was renamed once is uploaded again under the next number, and a
    different photo whose name is already in this install's upload history (for example `IMG_0001` after the
    counter wraps, with original file names on) is skipped by the library scan before Smart sees it.
-7. Go through the "owner" rows above, then read back the device name shown under
+8. Go through the "owner" rows above, then read back the device name shown under
    Settings → Security on drive.nourax.org.
 
 Building and the iPhone steps: [build.md](build.md).

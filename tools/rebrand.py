@@ -116,12 +116,15 @@ TEST_FILES = [
     ('NextcloudUITests', 'NextcloudUITests', 'NoDriveWorkspaceUITests.swift'),
     ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveSmartConflictsTests.swift'),
     ('NextcloudUITests', 'NextcloudUITests', 'NoDriveConflictSettingsUITests.swift'),
+    ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveProblemReportsTests.swift'),
+    ('NextcloudUITests', 'NextcloudUITests', 'NoDriveProblemReportsUITests.swift'),
 ]
 # Our own source folders of the app target, each a new group inside its parent group:
 # (target, folder, parent group name). Every .swift file of the folder is added.
 APP_SOURCE_FOLDERS = [
     ('Nextcloud', 'iOSClient/Workspace', 'iOSClient'),
     ('Nextcloud', 'iOSClient/SmartConflicts', 'iOSClient'),
+    ('Nextcloud', 'iOSClient/ProblemReports', 'iOSClient'),
 ]
 # Product of the UI-test target. Its runner app ("<product>-Runner") sits on the simulator's home
 # screen during the screenshot walk, so it must not carry the Nextcloud name. The target name
@@ -925,6 +928,18 @@ def smart_conflicts(st):
               '            if #available(iOS 27, *),\n')
 
 
+def problem_reports(st):
+    """Hooks of the feature "Problem reports" (iOSClient/ProblemReports). Each hook is one call and one `// NoDrive:` line."""
+    insert_after(st, 'iOSClient/AppDelegate.swift',
+                 '            logDirectory: NCPreferences.sharedLogDirectory\n        )\n',
+                 '\n        // NoDrive: crash capture and problem reports, no third-party SDK (iOSClient/ProblemReports, R1)\n'
+                 '        NCProblemReports.shared.start()\n')
+    insert_before(st, 'iOSClient/Settings/Advanced/NCSettingsAdvancedView.swift',
+                  '            // Delete in Cache & Clear Cache\n',
+                  '            // NoDrive: "Send problem reports to Nourax" and "Report a problem" (iOSClient/ProblemReports, R2)\n'
+                  '            NCProblemReportsSection(controller: model.controller)\n')
+
+
 def plists(st, base):
     group = f'group.{base}'
     for rel in BRAND_PLISTS:
@@ -1247,6 +1262,7 @@ def run(st, base):
     intro_swift(st)
     swift_code(st)
     smart_conflicts(st)
+    problem_reports(st)
     plists(st, base)
     project(st, base)
     storyboards(st)

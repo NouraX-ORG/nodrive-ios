@@ -68,6 +68,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             logDirectory: NCPreferences.sharedLogDirectory
         )
 
+        // NoDrive: crash capture and problem reports, no third-party SDK (iOSClient/ProblemReports, R1)
+        NCProblemReports.shared.start()
+
         #if DEBUG
 //      For the tags look NCGlobal LOG TAG
 

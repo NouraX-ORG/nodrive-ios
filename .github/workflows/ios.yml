@@ -31,8 +31,13 @@ on:
         required: false
         default: false
         type: boolean
-      only_round3:
-        description: 'Screens job: run only the round-3 UI tests (Smart conflicts setting), not the walks or the Workspace test'
+      only_reports:
+        description: 'Screens job: run only the problem-reports UI test (not the walks or the Workspace test)'
+        required: false
+        default: false
+        type: boolean
+      only_conflicts:
+        description: 'Screens job: run only the Smart conflicts UI test (not the walks, the Workspace test or the reports test)'
         required: false
         default: false
         type: boolean
@@ -91,6 +96,12 @@ jobs:
       - name: The Workspace checks can fail (each broken log must be caught)
         run: python tools/ci/workspace-check.py --self-test
 
+      - name: The problem-report test hooks exist in Debug builds only
+        run: python tools/ci/workspace-check.py --debug-only iOSClient/ProblemReports/NCProblemReportUITestHooks.swift
+
+      - name: The problem-report checks can fail (each broken run must be caught)
+        run: python tools/ci/report-check.py --self-test
+
   server-login:
     name: Server login (a real Nextcloud 35 in Docker; the app's web view sign-in)
     needs: branding
@@ -113,6 +124,10 @@ jobs:
       - name: Check how the app's sign-in works against the real server code
         run: bash tools/ci/server-app-login.sh check
 
+      - name: Problem reports server checks (the folder, never replacing a report, the read-only share to nourax-support)
+        if: ${{ !cancelled() }}
+        run: bash tools/ci/server-app-login.sh reports
+
       - name: Round 3 server checks (the size the app reads for Smart conflicts, on the real server code)
         if: ${{ !cancelled() }}
         run: bash tools/ci/server-app-login.sh round3
@@ -130,6 +145,7 @@ jobs:
           name: server-login-report
           path: |
             build/server-login/report.md
+            build/server-login/reports.md
             build/server-login/round3.md
             build/server-login/status.json
             build/server-login/navigation-apps-*.json
@@ -313,13 +329,44 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+
+  # ---------------------------------------------------------------------------------------------
+  # HOW TO ADD A NEW UI TEST GROUP (for example the Conflict setting, or a later NoAgenda test)
+  #
+  # The simulator UI tests run as parallel shards, one runner (one simulator) each. Every shard
+  # does the common setup below (Xcode, products, DNS capture, stand-in server, simulator) and
+  # then only its own steps. To add a group:
+  #   1. Add its name to the shard list in "strategy.matrix.shard" below (the last list in the
+  #      expression; the first two lists are the single-shard runs of the manual start inputs).
+  #   2. Add its steps in the block "SHARD STEPS", each guarded with
+  #        if: ${{ !cancelled() && steps.sim.outcome == 'success' && matrix.shard == '<name>' }}
+  #      and start the first step with `bash tools/ci/screens.sh prepare-first "$UDID"` (a clean
+  #      simulator that trusts the CI root). Checks that read one shard's own files (for example
+  #      workspace-check.py, report-check.py) belong in the same shard.
+  #   3. Add the new screenshot variants (the names the test writes below $SHOTS) to the --variants
+  #      list of the "Screenshot report" step in the job screens-report. If the group opens a
+  #      browser sign-in, change --expect-sign-ins of the "Network gate" step there as well.
+  # Everything a shard writes (screenshots/, results/) is uploaded as "nodrive-ios-screens-shard-<name>"
+  # and merged by screens-report into the artifacts "nodrive-ios-screenshots" and
+  # "nodrive-ios-screens-results" (the names the old single job used).
+  # A feature branch that added steps to the old single screens job resolves a merge with main by moving
+  # those steps into a new shard (or an existing one) as described above.
+  # ---------------------------------------------------------------------------------------------
   screens:
-    name: Simulator screens (install, launch, screenshots, network)
+    name: Simulator screens (${{ matrix.shard }})
     needs: [branding, ios]
     # also after a unit-test failure (the build products exist), or with products of an earlier run
     if: ${{ !cancelled() && needs.branding.result == 'success' && (needs.ios.result == 'success' || needs.ios.result == 'failure' || (needs.ios.result == 'skipped' && inputs.products_run_id != '')) }}
     runs-on: xcode-27
-    timeout-minutes: 180
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        # smoke: simctl install/launch/screenshots + English walk; walks: German + Arabic; dark: English dark;
+        # workspace: Workspace apps menu light+dark + checks; reports: Problem reports light+dark + check;
+        # conflicts: the Smart conflicts setting light+dark.
+        # The manual start inputs only_reports / only_workspace / only_conflicts run a single shard.
+        shard: ${{ fromJSON(inputs.only_reports == true && '["reports"]' || inputs.only_workspace == true && '["workspace"]' || inputs.only_conflicts == true && '["conflicts"]' || '["smoke","walks","dark","workspace","reports","conflicts"]') }}
     permissions:
       contents: read
       actions: read   # download-artifact from an earlier run (products_run_id)
@@ -334,9 +381,6 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-
-      - name: Install Pillow (screenshot report)
-        run: python -m pip install --disable-pip-version-check pillow
 
       - name: Select Xcode
         run: |
@@ -405,7 +449,7 @@ jobs:
           sudo dscacheutil -flushcache
           sudo killall -HUP mDNSResponder || true
           # A throwaway app password for the stand-in's test account (never printed, never on a command line;
-          # the stand-in and the UI test read it from the environment).
+          # the stand-in and the UI test read it from the environment). Every shard has its own.
           WS_PW=$(openssl rand -hex 16)
           echo "::add-mask::$WS_PW"
           echo "NODRIVE_WS_USER=citest" >> "$GITHUB_ENV"
@@ -413,7 +457,8 @@ jobs:
           export NODRIVE_WS_USER=citest NODRIVE_WS_APP_PASSWORD="$WS_PW"
           printf '127.0.0.1 foreign.nodrive-ci.test\n::1 foreign.nodrive-ci.test\n' | sudo tee -a /etc/hosts
           sudo -E nohup "$(command -v python3)" tools/ci/drive-stand-in.py --cert "$SI/chain.pem" --key "$SI/leaf.key" \
-            --log "$RESULTS/stand-in.jsonl" --workspace --nav-delay 6 > "$RESULTS/stand-in.out" 2>&1 &
+            --log "$RESULTS/stand-in.jsonl" --workspace --nav-delay 6 \
+            --reports-uploads "$RESULTS/stand-in-uploads" > "$RESULTS/stand-in.out" 2>&1 &
           for i in $(seq 1 30); do
             curl -fsS --cacert "$SI/ca.pem" -o /dev/null https://drive.nourax.org/status.php && break
             sleep 0.5
@@ -430,40 +475,47 @@ jobs:
           echo "UDID=$UDID" >> "$GITHUB_ENV"
           xcrun simctl list devices | grep "$UDID"
 
+      # ===== SHARD STEPS: each one guarded with matrix.shard; a shard's first step starts with prepare-first =====
+
+      # ----- shard smoke -----
       - name: simctl install, launch and screenshots (shipped NoDrive.app)
+        if: ${{ matrix.shard == 'smoke' }}
         run: |
           bash tools/ci/screens.sh prepare-first "$UDID"
-          if [ "${{ inputs.only_workspace }}" != "true" ] && [ "${{ inputs.only_round3 }}" != "true" ]; then
-            bash tools/ci/screens.sh switch "$UDID" en en_US light
-            bash tools/ci/screens.sh launch "$UDID" app/NoDrive.app "$SHOTS/simctl" "$RESULTS"
-          fi
+          bash tools/ci/screens.sh switch "$UDID" en en_US light
+          bash tools/ci/screens.sh launch "$UDID" app/NoDrive.app "$SHOTS/simctl" "$RESULTS"
 
       - name: UI walk, English (en-light)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true && inputs.only_round3 != true }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && matrix.shard == 'smoke' }}
         run: |
           bash tools/ci/screens.sh switch "$UDID" en en_US light
           bash tools/ci/screens.sh walk "$UDID" en-light en en_US
 
+      # ----- shard walks -----
       - name: UI walk, German (de-light)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true && inputs.only_round3 != true }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && matrix.shard == 'walks' }}
         run: |
+          bash tools/ci/screens.sh prepare-first "$UDID"
           bash tools/ci/screens.sh switch "$UDID" de de_DE light
           bash tools/ci/screens.sh walk "$UDID" de-light de de_DE
 
       - name: UI walk, Arabic right-to-left (ar-light)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true && inputs.only_round3 != true }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && matrix.shard == 'walks' }}
         run: |
           bash tools/ci/screens.sh switch "$UDID" ar ar_SA light
           bash tools/ci/screens.sh walk "$UDID" ar-light ar ar_SA
 
+      # ----- shard dark -----
       - name: UI walk, English dark mode (en-dark)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true && inputs.only_round3 != true }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && matrix.shard == 'dark' }}
         run: |
+          bash tools/ci/screens.sh prepare-first "$UDID"
           bash tools/ci/screens.sh switch "$UDID" en en_US dark
           bash tools/ci/screens.sh walk "$UDID" en-dark en en_US
 
+      # ----- shard workspace -----
       - name: Workspace apps menu, signed in (light)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_round3 != true }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && matrix.shard == 'workspace' }}
         run: |
           # a clean simulator: the account of an earlier run is in the keychain and the app group
           bash tools/ci/screens.sh prepare-first "$UDID"
@@ -471,15 +523,43 @@ jobs:
           bash tools/ci/screens.sh workspace "$UDID" workspace-light
 
       - name: Workspace apps menu, signed in (dark)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_round3 != true }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && matrix.shard == 'workspace' }}
         run: |
           # a clean simulator: the account of an earlier run is in the keychain and the app group
           bash tools/ci/screens.sh prepare-first "$UDID"
           bash tools/ci/screens.sh switch "$UDID" en en_US dark
           bash tools/ci/screens.sh workspace "$UDID" workspace-dark
 
+      - name: Workspace checks (credential only to the own server, no login page, no stale sessions, expiry)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && matrix.shard == 'workspace' }}
+        run: |
+          python3 tools/ci/workspace-check.py "$RESULTS/stand-in.jsonl" --walk "$SHOTS" --json "$RESULTS/workspace-check.json"
+
+      # ----- shard reports -----
+      - name: Problem reports, signed in (light)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && matrix.shard == 'reports' }}
+        run: |
+          # a clean simulator: the account of an earlier run is in the keychain and the app group
+          bash tools/ci/screens.sh prepare-first "$UDID"
+          bash tools/ci/screens.sh switch "$UDID" en en_US light
+          bash tools/ci/screens.sh reports "$UDID" reports-light
+
+      - name: Problem reports, signed in (dark)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && matrix.shard == 'reports' }}
+        run: |
+          bash tools/ci/screens.sh prepare-first "$UDID"
+          bash tools/ci/screens.sh switch "$UDID" en en_US dark
+          bash tools/ci/screens.sh reports "$UDID" reports-dark
+
+      - name: Problem reports check (kinds, order, headers, shares, sizes, no secret in a zip)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && matrix.shard == 'reports' }}
+        run: |
+          python3 tools/ci/report-check.py --log "$RESULTS/stand-in.jsonl" --uploads "$RESULTS/stand-in-uploads" \
+            --variants reports-light reports-dark --walk "$SHOTS" --json "$RESULTS/report-check.json"
+
+      # ----- shard conflicts -----
       - name: Conflict setting, signed in (light)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && matrix.shard == 'conflicts' }}
         run: |
           # a clean simulator; Photos access is granted before the launch (the Auto upload screen needs it)
           bash tools/ci/screens.sh prepare-first "$UDID"
@@ -487,35 +567,125 @@ jobs:
           bash tools/ci/screens.sh conflicts "$UDID" conflicts-light
 
       - name: Conflict setting, signed in (dark)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true }}
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && matrix.shard == 'conflicts' }}
         run: |
           bash tools/ci/screens.sh prepare-first "$UDID"
           bash tools/ci/screens.sh switch "$UDID" en en_US dark
           bash tools/ci/screens.sh conflicts "$UDID" conflicts-dark
 
-      - name: Workspace checks (credential only to the own server, no login page, no stale sessions, expiry)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_round3 != true }}
+      # ===== END OF SHARD STEPS: the steps below are the same for every shard =====
+
+      - name: Stop the DNS capture (the Network gate in screens-report reads it)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        run: bash tools/ci/screens.sh capture-stop "$RESULTS"
+
+      - name: No throwaway password in any result file of this shard
+        # the password is different in every shard, so the scan runs here (screens-report checks that every shard did it)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
         run: |
-          python3 tools/ci/workspace-check.py "$RESULTS/stand-in.jsonl" --walk "$SHOTS" --json "$RESULTS/workspace-check.json"
+          python3 tools/ci/workspace-check.py --scan-secret "$RESULTS" "$SHOTS"
+          echo "no throwaway password found in shard ${{ matrix.shard }}" > "$RESULTS/secret-scan-ok-${{ matrix.shard }}.txt"
+
+      - name: Shard marker (keeps the upload layout the same for every shard)
+        if: ${{ !cancelled() }}
+        run: echo "${{ matrix.shard }}" > shard.txt
+
+      - name: Upload this shard's screenshots and results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: nodrive-ios-screens-shard-${{ matrix.shard }}
+          path: |
+            screenshots/
+            results/
+            shard.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+  screens-report:
+    name: Simulator screens report (network gate, screenshot report, docs copies)
+    needs: screens
+    # also when a shard failed (its files are still uploaded); not when screens did not run at all
+    if: ${{ !cancelled() && needs.screens.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SHOTS: ${{ github.workspace }}/screenshots
+      RESULTS: ${{ github.workspace }}/results
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install Pillow (screenshot report)
+        run: python -m pip install --disable-pip-version-check pillow
+
+      - name: Download every shard's screenshots and results
+        # no merge-multiple: the files every shard writes under one name (DNS capture, stand-in log) must stay apart
+        uses: actions/download-artifact@v8
+        with:
+          pattern: nodrive-ios-screens-shard-*
+          path: shards
+
+      - name: Merge the shards (screenshots/, results/, and the files every shard writes under one name)
+        run: |
+          ls shards
+          mkdir -p screenshots results
+          for dir in shards/*/; do
+            shard=$(basename "$dir"); shard=${shard#nodrive-ios-screens-shard-}
+            mkdir -p "results/per-shard/$shard"
+            if [ -d "${dir}screenshots" ]; then cp -a "${dir}screenshots/." screenshots/; fi
+            if [ -d "${dir}results" ]; then
+              for f in stand-in.jsonl dns.txt dns-processes.txt dns-read.err tcpdump.out stand-in.out dns.pcapng; do
+                if [ -e "${dir}results/$f" ]; then mv "${dir}results/$f" "results/per-shard/$shard/$f"; fi
+              done
+              cp -a "${dir}results/." results/
+            fi
+          done
+          # The Network gate looks at the DNS capture and the stand-in log of ALL shards together
+          for f in stand-in.jsonl dns.txt dns-processes.txt; do
+            : > "results/$f"
+            n=0
+            for part in results/per-shard/*/"$f"; do
+              if [ -f "$part" ]; then awk 1 "$part" >> "results/$f"; n=$((n + 1)); fi
+            done
+            echo "results/$f: $(wc -l < "results/$f") lines from $n shard(s)"
+          done
+          echo "PNG files: $(find screenshots -name '*.png' | wc -l)"
 
       - name: Network gate (no Nextcloud hosts; sign-in opened drive.nourax.org)
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' && inputs.only_workspace != true && inputs.only_round3 != true }}
+        if: ${{ !cancelled() && inputs.only_workspace != true && inputs.only_reports != true && inputs.only_conflicts != true }}
         run: |
-          bash tools/ci/screens.sh capture-stop "$RESULTS"
           python3 tools/ci/network-gate.py --dns-text "$RESULTS/dns.txt" --dns-processes "$RESULTS/dns-processes.txt" \
             --stand-in-log "$RESULTS/stand-in.jsonl" \
             --expect-sign-ins 4 --control www.apple.com --json "$RESULTS/network.json"
 
       - name: Screenshot report (Nourax colours, no Nextcloud text) and docs copies
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
+        if: ${{ !cancelled() }}
         run: |
           python3 tools/ci/screens-report.py --shots "$SHOTS" --results "$RESULTS" \
-            --variants ${{ inputs.only_round3 == true && 'conflicts-light conflicts-dark' || inputs.only_workspace == true && 'workspace-light workspace-dark' || 'en-light de-light ar-light en-dark workspace-light workspace-dark conflicts-light conflicts-dark' }} \
+            --variants ${{ inputs.only_reports == true && 'reports-light reports-dark' || inputs.only_workspace == true && 'workspace-light workspace-dark' || inputs.only_conflicts == true && 'conflicts-light conflicts-dark' || 'en-light de-light ar-light en-dark workspace-light workspace-dark reports-light reports-dark conflicts-light conflicts-dark' }} \
             --docs-out "$GITHUB_WORKSPACE/screenshots-docs" --json "$RESULTS/screens-report.json"
 
       - name: No throwaway password in any result file
-        if: ${{ !cancelled() && steps.sim.outcome == 'success' }}
-        run: python3 tools/ci/workspace-check.py --scan-secret "$RESULTS" "$SHOTS" "$GITHUB_WORKSPACE/screenshots-docs"
+        # Every shard scanned its own files for its own password (it differs per shard); here every shard must have done so.
+        if: ${{ !cancelled() }}
+        run: |
+          ls results/secret-scan-ok-*.txt
+          for dir in shards/*/; do
+            shard=$(basename "$dir"); shard=${shard#nodrive-ios-screens-shard-}
+            test -f "results/secret-scan-ok-$shard.txt" || { echo "PROBLEM: shard $shard did not finish its password scan"; exit 1; }
+          done
+
+      - name: Every shard succeeded
+        if: ${{ !cancelled() }}
+        run: |
+          if [ "${{ needs.screens.result }}" != "success" ]; then
+            echo "PROBLEM: the screens shards finished with: ${{ needs.screens.result }}"
+            exit 1
+          fi
 
       - name: Upload screenshots
         if: ${{ !cancelled() }}

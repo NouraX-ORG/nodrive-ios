@@ -7,22 +7,29 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		044D092013832C6C0DBFE8F0 /* ProblemReports.strings in Resources */ = {isa = PBXBuildFile; fileRef = 1E4ABFA0A963EA6C8D2BDD30 /* ProblemReports.strings */; };
 		05067528154D419F1924D93C /* NoDriveWorkspaceMenuTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A7C0B25C31A0A5C3B79658F /* NoDriveWorkspaceMenuTests.swift */; };
 		06D7B6706382FCA8D5FE44ED /* SmartConflicts.strings in Resources */ = {isa = PBXBuildFile; fileRef = 70FD5AA3296F64BDA5E8BA68 /* SmartConflicts.strings */; };
 		0BAB0EE6689CEB548AB05A76 /* NCWorkspaceWebViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44F9BD6FCFB8C05869A54B82 /* NCWorkspaceWebViewController.swift */; };
+		0CA98CED967F52B2BF28B050 /* NCProblemReportsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB8434F9924C3966CA4D4072 /* NCProblemReportsView.swift */; };
 		0CC32A18C7BCD8838F20A8CC /* NoDriveWorkspaceUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7995713C6CAC469356973BF0 /* NoDriveWorkspaceUITests.swift */; };
+		14ACCD3C5787FA9655634111 /* NCProblemReportCrash.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6BF578C24D63522FC5C1501 /* NCProblemReportCrash.swift */; };
 		1822F4B4AF1D8A8F5D445EBE /* NCWorkspaceCookies.swift in Sources */ = {isa = PBXBuildFile; fileRef = 735E4D35C26158B479C13E4D /* NCWorkspaceCookies.swift */; };
 		1DB8087BB1E7A599C783F6E1 /* NCConflictPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48E23B3A8915A2CCCC96CB36 /* NCConflictPolicy.swift */; };
 		22BA14432CF44BDBA2E6C291 /* NCDocumentEditorSupportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B74B947E07444CC9CFE0A6C /* NCDocumentEditorSupportTests.swift */; };
+		23631F13AFCE22B145CF6BC5 /* NCProblemReportRunMarker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 853F39C7C95EC3A5B41C7283 /* NCProblemReportRunMarker.swift */; };
 		23E0E301CA1268078AF6B940 /* NoDriveWorkspaceSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EE49ED5C6BB5E59A7D52CA1 /* NoDriveWorkspaceSessionTests.swift */; };
 		254B6D4FB9ED6D01ED6200F5 /* NoDriveWorkspaceWebTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A849E329FF766B9245CBB1D3 /* NoDriveWorkspaceWebTests.swift */; };
 		2C1D5D7623E2DE3300334ABB /* NCManageDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7BAADB51ED5A87C00B7EAD4 /* NCManageDatabase.swift */; };
 		2C1D5D7923E2DE9100334ABB /* NCBrand.swift in Sources */ = {isa = PBXBuildFile; fileRef = F76B3CCD1EAE01BD00921AC9 /* NCBrand.swift */; };
 		2C33C48223E2C475005F963B /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C33C48123E2C475005F963B /* NotificationService.swift */; };
 		2C33C48623E2C475005F963B /* Notification Service Extension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 2C33C47F23E2C475005F963B /* Notification Service Extension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		2EFA0A9A0CD45E7D287D1F07 /* NoDriveProblemReportsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F072165455E5CA52AB999EDF /* NoDriveProblemReportsTests.swift */; };
+		31CD4C1B4BCFCDA5EE088A2B /* NCProblemReportBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C5276C479B6F819874BA5A2 /* NCProblemReportBuilder.swift */; };
 		370D26AF248A3D7A00121797 /* NCCellMain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 370D26AE248A3D7A00121797 /* NCCellMain.swift */; };
 		3B7B5D751EC100ED68906C55 /* NCConflictNaming.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC18062234135F61F7CE2EB1 /* NCConflictNaming.swift */; };
 		3C3996E969B2CC354362329D /* NoDriveWorkspaceAppsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0328ABA86D0296C01BA158A /* NoDriveWorkspaceAppsTests.swift */; };
+		455FF32C4C7BA5FB62B3A79F /* NCProblemReportUITestHooks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F1C2C962F1A9152E0B16468 /* NCProblemReportUITestHooks.swift */; };
 		4F28A412511057356740386E /* NoDriveConflictSettingsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 147F4F9993C49C815E05DA69 /* NoDriveConflictSettingsUITests.swift */; };
 		5C6408CBDA0A1C7ECB627448 /* NoDriveBrandingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67D3CBA9F8EECF40CA6C503C /* NoDriveBrandingTests.swift */; };
 		60BEB6931563DF8EDF182420 /* NCWorkspaceAppsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02708EAA1B3CA4A7C264284A /* NCWorkspaceAppsModel.swift */; };
@@ -34,6 +41,8 @@
 		76EA871AF335F11928E5BEE7 /* NCConflictProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD804747D4F16FDC86760A4F /* NCConflictProbe.swift */; };
 		7F2F4661BEFE4054738A256F /* NCConflictDecision.swift in Sources */ = {isa = PBXBuildFile; fileRef = D98326D248A43B8B460C2506 /* NCConflictDecision.swift */; };
 		826A35D828C1BF8255017AA9 /* NoDriveScreenshotUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD1C978D335760DD60634793 /* NoDriveScreenshotUITests.swift */; };
+		86D217F18E4345BECA16F3F1 /* NCProblemReportZip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25C39012EB5532FC5C8F893C /* NCProblemReportZip.swift */; };
+		9BAE098365BE57C281C1948A /* NoDriveProblemReportsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A941485D68F7EC606E1741E /* NoDriveProblemReportsUITests.swift */; };
 		A12720261001000000000001 /* NCBackgroundUploadExtensionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F793E7C230417C7100F011FE /* NCBackgroundUploadExtensionManager.swift */; };
 		A1E2EE010000000000000002 /* NCEndToEndKeySet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1E2EE010000000000000001 /* NCEndToEndKeySet.swift */; };
 		A1E2EE010000000000000003 /* NCEndToEndKeySet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1E2EE010000000000000001 /* NCEndToEndKeySet.swift */; };
@@ -144,6 +153,8 @@
 		D21B7136BC8785DE7C61BBE8 /* NCWorkspaceSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B637BF1F3F7541E53F67A315 /* NCWorkspaceSession.swift */; };
 		D5B6AA7827200C7200D49C24 /* NCActivityTableViewCell.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B6AA7727200C7200D49C24 /* NCActivityTableViewCell.swift */; };
 		D5D9EF18F3F7F9335974F730 /* NCWorkspaceWeb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68452F68F2828656BD7D6F10 /* NCWorkspaceWeb.swift */; };
+		DA44432490E625B4A9AD0180 /* NCProblemReports.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A8AF6E7A6DA227A2BA16CE5 /* NCProblemReports.swift */; };
+		EC889B5F8A489DB78744CD4B /* NCProblemReportScrubber.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE2DC36760B6C59E048BB967 /* NCProblemReportScrubber.swift */; };
 		F0A1B2C430B5000100D4E5F6 /* NCMediaViewerFloatingTitleViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C330B5000100D4E5F6 /* NCMediaViewerFloatingTitleViewTests.swift */; };
 		F0A1B2C630B6000100D4E5F6 /* NCImageZoomViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0A1B2C530B6000100D4E5F6 /* NCImageZoomViewTests.swift */; };
 		F31165022F9674A1009A1E37 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = F31165012F9674A1009A1E37 /* AppIcon.icon */; };
@@ -1139,6 +1150,7 @@
 		F7FF2CB12842159500EBB7A1 /* NCSectionHeader.xib in Resources */ = {isa = PBXBuildFile; fileRef = F7FF2CB02842159500EBB7A1 /* NCSectionHeader.xib */; };
 		F7FFFCA02FB300440015441E /* NCAssistantSharedTextStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7FFFC9D2FB300440015441E /* NCAssistantSharedTextStore.swift */; };
 		F7FFFCA22FB300600015441E /* NCAssistantSharedTextStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7FFFC9D2FB300440015441E /* NCAssistantSharedTextStore.swift */; };
+		F902F10A006EA89770C99A26 /* NCProblemReportSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32D8C5A749EA0D927D18956C /* NCProblemReportSender.swift */; };
 		FF4EE94019704FF22512DE8F /* NCConflictRenameLedger.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30C18E169812A9393EFFF9F /* NCConflictRenameLedger.swift */; };
 /* End PBXBuildFile section */
 
@@ -1362,22 +1374,30 @@
 		147F4F9993C49C815E05DA69 /* NoDriveConflictSettingsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoDriveConflictSettingsUITests.swift; sourceTree = "<group>"; };
 		1A7C0B25C31A0A5C3B79658F /* NoDriveWorkspaceMenuTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoDriveWorkspaceMenuTests.swift; sourceTree = "<group>"; };
 		1A7F839D06C0C40A97AE1299 /* NCWorkspaceApps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCWorkspaceApps.swift; sourceTree = "<group>"; };
+		1A941485D68F7EC606E1741E /* NoDriveProblemReportsUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoDriveProblemReportsUITests.swift; sourceTree = "<group>"; };
+		1C5276C479B6F819874BA5A2 /* NCProblemReportBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCProblemReportBuilder.swift; sourceTree = "<group>"; };
+		25C39012EB5532FC5C8F893C /* NCProblemReportZip.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCProblemReportZip.swift; sourceTree = "<group>"; };
 		2C33C47F23E2C475005F963B /* Notification Service Extension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Notification Service Extension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		2C33C48123E2C475005F963B /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		2C33C48A23E2CC26005F963B /* Notification_Service_Extension-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Notification_Service_Extension-Bridging-Header.h"; sourceTree = "<group>"; };
+		32D8C5A749EA0D927D18956C /* NCProblemReportSender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCProblemReportSender.swift; sourceTree = "<group>"; };
 		370D26AE248A3D7A00121797 /* NCCellMain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCCellMain.swift; sourceTree = "<group>"; };
 		3C0B84648917C61B2780D7F5 /* NCAutoUploadConflicts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCAutoUploadConflicts.swift; sourceTree = "<group>"; };
 		439616AAA50F4360A761E5EF /* NCAlbumsPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCAlbumsPersistenceTests.swift; sourceTree = "<group>"; };
 		44F9BD6FCFB8C05869A54B82 /* NCWorkspaceWebViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCWorkspaceWebViewController.swift; sourceTree = "<group>"; };
 		48E23B3A8915A2CCCC96CB36 /* NCConflictPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCConflictPolicy.swift; sourceTree = "<group>"; };
 		4B74B947E07444CC9CFE0A6C /* NCDocumentEditorSupportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCDocumentEditorSupportTests.swift; sourceTree = "<group>"; };
+		508DBC0470FB6C787497D8CA /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/ProblemReports.strings; sourceTree = "<group>"; };
+		5F1C2C962F1A9152E0B16468 /* NCProblemReportUITestHooks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCProblemReportUITestHooks.swift; sourceTree = "<group>"; };
 		673B2D654516E5356BB2F6E0 /* NoDriveSmartConflictsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoDriveSmartConflictsTests.swift; sourceTree = "<group>"; };
 		67D3CBA9F8EECF40CA6C503C /* NoDriveBrandingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoDriveBrandingTests.swift; sourceTree = "<group>"; };
 		68452F68F2828656BD7D6F10 /* NCWorkspaceWeb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCWorkspaceWeb.swift; sourceTree = "<group>"; };
 		735E4D35C26158B479C13E4D /* NCWorkspaceCookies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCWorkspaceCookies.swift; sourceTree = "<group>"; };
 		74AB3FCAE004C5C9778AF8CB /* NCConflictPolicyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCConflictPolicyView.swift; sourceTree = "<group>"; };
 		7995713C6CAC469356973BF0 /* NoDriveWorkspaceUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoDriveWorkspaceUITests.swift; sourceTree = "<group>"; };
+		853F39C7C95EC3A5B41C7283 /* NCProblemReportRunMarker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCProblemReportRunMarker.swift; sourceTree = "<group>"; };
 		8932E90EC4278026D86CCCC9 /* NCContextMenuComment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCContextMenuComment.swift; sourceTree = "<group>"; };
+		8A8AF6E7A6DA227A2BA16CE5 /* NCProblemReports.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCProblemReports.swift; sourceTree = "<group>"; };
 		9D4BCA9B63197858EA5485F1 /* NCWorkspaceOrigin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCWorkspaceOrigin.swift; sourceTree = "<group>"; };
 		9EE49ED5C6BB5E59A7D52CA1 /* NoDriveWorkspaceSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoDriveWorkspaceSessionTests.swift; sourceTree = "<group>"; };
 		A1E2EE010000000000000001 /* NCEndToEndKeySet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCEndToEndKeySet.swift; sourceTree = "<group>"; };
@@ -1385,6 +1405,7 @@
 		A1E2EE020000000000000001 /* NCEndToEndKeySetAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCEndToEndKeySetAccess.swift; sourceTree = "<group>"; };
 		A1E2EE020000000000000002 /* NCEndToEndKeySetResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCEndToEndKeySetResolver.swift; sourceTree = "<group>"; };
 		A1E2EE020000000000000007 /* NCEndToEndKeySetResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCEndToEndKeySetResolverTests.swift; sourceTree = "<group>"; };
+		A6BF578C24D63522FC5C1501 /* NCProblemReportCrash.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCProblemReportCrash.swift; sourceTree = "<group>"; };
 		A849E329FF766B9245CBB1D3 /* NoDriveWorkspaceWebTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoDriveWorkspaceWebTests.swift; sourceTree = "<group>"; };
 		AA3C85E72D36B08C00F74F12 /* UITestBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITestBackend.swift; sourceTree = "<group>"; };
 		AA3C85EA2D36BBF400F74F12 /* OCSResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OCSResponse.swift; sourceTree = "<group>"; };
@@ -1528,11 +1549,14 @@
 		C0DECA012F65000100C0D001 /* NCCameraRollTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCCameraRollTests.swift; sourceTree = "<group>"; };
 		C0DEDA7E30C1000100A00001 /* NCAutoUploadDateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCAutoUploadDateTests.swift; sourceTree = "<group>"; };
 		C37013A795368A246A40598D /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/SmartConflicts.strings; sourceTree = "<group>"; };
+		CB8434F9924C3966CA4D4072 /* NCProblemReportsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCProblemReportsView.swift; sourceTree = "<group>"; };
 		D5B6AA7727200C7200D49C24 /* NCActivityTableViewCell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCActivityTableViewCell.swift; sourceTree = "<group>"; };
 		D98326D248A43B8B460C2506 /* NCConflictDecision.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCConflictDecision.swift; sourceTree = "<group>"; };
 		DC18062234135F61F7CE2EB1 /* NCConflictNaming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCConflictNaming.swift; sourceTree = "<group>"; };
+		DE2DC36760B6C59E048BB967 /* NCProblemReportScrubber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCProblemReportScrubber.swift; sourceTree = "<group>"; };
 		EA2CFE6B48E60CA984144299 /* NoDriveWorkspaceOriginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoDriveWorkspaceOriginTests.swift; sourceTree = "<group>"; };
 		F0328ABA86D0296C01BA158A /* NoDriveWorkspaceAppsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoDriveWorkspaceAppsTests.swift; sourceTree = "<group>"; };
+		F072165455E5CA52AB999EDF /* NoDriveProblemReportsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoDriveProblemReportsTests.swift; sourceTree = "<group>"; };
 		F0A1B2C330B5000100D4E5F6 /* NCMediaViewerFloatingTitleViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCMediaViewerFloatingTitleViewTests.swift; sourceTree = "<group>"; };
 		F0A1B2C530B6000100D4E5F6 /* NCImageZoomViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCImageZoomViewTests.swift; sourceTree = "<group>"; };
 		F31165012F9674A1009A1E37 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
@@ -2429,6 +2453,23 @@
 			path = Menu;
 			sourceTree = "<group>";
 		};
+		4348D3946B01CAB9D00A5C45 /* ProblemReports */ = {
+			isa = PBXGroup;
+			children = (
+				1C5276C479B6F819874BA5A2 /* NCProblemReportBuilder.swift */,
+				A6BF578C24D63522FC5C1501 /* NCProblemReportCrash.swift */,
+				853F39C7C95EC3A5B41C7283 /* NCProblemReportRunMarker.swift */,
+				DE2DC36760B6C59E048BB967 /* NCProblemReportScrubber.swift */,
+				32D8C5A749EA0D927D18956C /* NCProblemReportSender.swift */,
+				5F1C2C962F1A9152E0B16468 /* NCProblemReportUITestHooks.swift */,
+				25C39012EB5532FC5C8F893C /* NCProblemReportZip.swift */,
+				8A8AF6E7A6DA227A2BA16CE5 /* NCProblemReports.swift */,
+				CB8434F9924C3966CA4D4072 /* NCProblemReportsView.swift */,
+				1E4ABFA0A963EA6C8D2BDD30 /* ProblemReports.strings */,
+			);
+			path = ProblemReports;
+			sourceTree = "<group>";
+		};
 		8CA13FD395C93A794C7A0675 /* Workspace */ = {
 			isa = PBXGroup;
 			children = (
@@ -2490,6 +2531,7 @@
 				A849E329FF766B9245CBB1D3 /* NoDriveWorkspaceWebTests.swift */,
 				1A7C0B25C31A0A5C3B79658F /* NoDriveWorkspaceMenuTests.swift */,
 				673B2D654516E5356BB2F6E0 /* NoDriveSmartConflictsTests.swift */,
+				F072165455E5CA52AB999EDF /* NoDriveProblemReportsTests.swift */,
 			);
 			path = NextcloudUnitTests;
 			sourceTree = "<group>";
@@ -2541,6 +2583,7 @@
 				AD1C978D335760DD60634793 /* NoDriveScreenshotUITests.swift */,
 				7995713C6CAC469356973BF0 /* NoDriveWorkspaceUITests.swift */,
 				147F4F9993C49C815E05DA69 /* NoDriveConflictSettingsUITests.swift */,
+				1A941485D68F7EC606E1741E /* NoDriveProblemReportsUITests.swift */,
 			);
 			path = NextcloudUITests;
 			sourceTree = "<group>";
@@ -4074,6 +4117,7 @@
 				F79630EC215526B60015EEA5 /* Viewer */,
 				8CA13FD395C93A794C7A0675 /* Workspace */,
 				02D4785E1D83D0ECFA9F173D /* SmartConflicts */,
+				4348D3946B01CAB9D00A5C45 /* ProblemReports */,
 			);
 			path = iOSClient;
 			sourceTree = "<group>";
@@ -4802,6 +4846,7 @@
 				F7501C322212E57500FB1415 /* NCMedia.storyboard in Resources */,
 				F76687082B7D067400779E3F /* NCAudioRecorderViewController.storyboard in Resources */,
 				06D7B6706382FCA8D5FE44ED /* SmartConflicts.strings in Resources */,
+				044D092013832C6C0DBFE8F0 /* ProblemReports.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -4965,6 +5010,7 @@
 				254B6D4FB9ED6D01ED6200F5 /* NoDriveWorkspaceWebTests.swift in Sources */,
 				05067528154D419F1924D93C /* NoDriveWorkspaceMenuTests.swift in Sources */,
 				A264FC0C247FF90D8F426626 /* NoDriveSmartConflictsTests.swift in Sources */,
+				2EFA0A9A0CD45E7D287D1F07 /* NoDriveProblemReportsTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -4988,6 +5034,7 @@
 				826A35D828C1BF8255017AA9 /* NoDriveScreenshotUITests.swift in Sources */,
 				0CC32A18C7BCD8838F20A8CC /* NoDriveWorkspaceUITests.swift in Sources */,
 				4F28A412511057356740386E /* NoDriveConflictSettingsUITests.swift in Sources */,
+				9BAE098365BE57C281C1948A /* NoDriveProblemReportsUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -5776,6 +5823,15 @@
 				6ADDA6D35F149E7DE3C11664 /* NCConflictPolicyView.swift in Sources */,
 				76EA871AF335F11928E5BEE7 /* NCConflictProbe.swift in Sources */,
 				FF4EE94019704FF22512DE8F /* NCConflictRenameLedger.swift in Sources */,
+				31CD4C1B4BCFCDA5EE088A2B /* NCProblemReportBuilder.swift in Sources */,
+				14ACCD3C5787FA9655634111 /* NCProblemReportCrash.swift in Sources */,
+				23631F13AFCE22B145CF6BC5 /* NCProblemReportRunMarker.swift in Sources */,
+				DA44432490E625B4A9AD0180 /* NCProblemReports.swift in Sources */,
+				EC889B5F8A489DB78744CD4B /* NCProblemReportScrubber.swift in Sources */,
+				F902F10A006EA89770C99A26 /* NCProblemReportSender.swift in Sources */,
+				0CA98CED967F52B2BF28B050 /* NCProblemReportsView.swift in Sources */,
+				455FF32C4C7BA5FB62B3A79F /* NCProblemReportUITestHooks.swift in Sources */,
+				86D217F18E4345BECA16F3F1 /* NCProblemReportZip.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -5964,6 +6020,14 @@
 				C37013A795368A246A40598D /* en */,
 			);
 			name = SmartConflicts.strings;
+			sourceTree = "<group>";
+		};
+		1E4ABFA0A963EA6C8D2BDD30 /* ProblemReports.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				508DBC0470FB6C787497D8CA /* en */,
+			);
+			name = ProblemReports.strings;
 			sourceTree = "<group>";
 		};
 		AA517B7E2D660EFE00F8D37C /* Localizable.stringsdict */ = {

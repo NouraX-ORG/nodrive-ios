@@ -179,6 +179,8 @@ struct NCSettingsAdvancedView: View {
                     })
                 }
             }
+            // NoDrive: "Send problem reports to Nourax" and "Report a problem" (iOSClient/ProblemReports, R2)
+            NCProblemReportsSection(controller: model.controller)
             // Delete in Cache & Clear Cache
             Section(content: {
                 Picker(NSLocalizedString("_delete_old_files_", comment: ""), selection: $model.selectedInterval) {

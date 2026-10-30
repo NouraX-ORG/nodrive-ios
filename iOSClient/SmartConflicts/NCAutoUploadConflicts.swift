@@ -167,7 +167,7 @@ actor NCConflictResolver {
 
     /// A name in a folder that this resolver handed out for upload and whose row is still in the queue.
     /// The first photo to be resolved takes the name; another photo with the same name then renames or waits, so two
-    /// photos can never wait for each other, and a waiting photo always waits for one that is in flight.
+    /// photos can never wait for each other, and a waiting photo only waits for one that was handed out for upload.
     private struct NameClaim {
         let owner: String
         let ocIds: Set<String>

@@ -88,8 +88,9 @@ Runs on every push to `main`, `platform/ios` and the feature branches (`feature/
 |---|---|---|
 | Branding gate | `ubuntu-latest` | `rebrand.py --check`, `make-icons.py --check`, `check-branding.py` (about 15 s) |
 | Build and unit tests (iOS Simulator) | `xcode-27` | Select Xcode 27.1, check every xcodebuild option in `xcodebuild -help`, restore/save the Swift-package cache, validate the project file, simulated entitlements, `build-for-testing` (unsigned), package `NoDrive.app`, inspect ids and entitlements, sweep the built app (report), unit tests (about 17 min) |
-| Simulator screens | `xcode-27` | Install and launch `NoDrive.app`, UI walk in en, de, ar and dark mode with screenshots, the drive.nourax.org stand-in, DNS capture and network gate, screenshot report; the two UI tests after sign-in (Workspace apps, Smart conflicts) run in light and dark mode (about 130 min, job limit 180 min) |
-| Server login | `ubuntu-24.04` | A throwaway Nextcloud 35.0.2 in Docker: the web-view sign-in checks (`server_login_check.py`) and the round 3 checks (`server_round3_check.py`: the size the app reads for Smart conflicts, and that the unit-test fixtures keep the real answer shape) |
+| Simulator screens (6 parallel shards: smoke, walks, dark, workspace, reports, conflicts) | `xcode-27` | Each shard sets up its own simulator, the drive.nourax.org stand-in and a DNS capture, then runs only its group: smoke (install and launch `NoDrive.app`, English walk), walks (German, Arabic), dark (English dark mode), workspace (Workspace apps walk light and dark, `workspace-check.py`), reports (Problem reports walk light and dark, `report-check.py`), conflicts (the Smart conflicts setting "If a file is already in NoDrive" in Auto upload, light and dark). Each shard scans its own files for its throwaway password and uploads `nodrive-ios-screens-shard-<name>` (longest shard, reports, about 40 min; limit 120 min; the first walk after a fresh simulator is slower) |
+| Simulator screens report | `ubuntu-latest` | Merges the shard artifacts, then the network gate over every shard's DNS capture and stand-in log, the screenshot report and docs copies, and the check that every shard finished its password scan; uploads the two artifacts below under their old names |
+| Server login | `ubuntu-24.04` | A real Nextcloud 35 (throwaway, in Docker): the web-view sign-in checks and `server_reports_check.py` (the Problem reports upload, share and permissions) and `server_round3_check.py` (the size the app reads for Smart conflicts, and that the unit-test fixtures keep the real answer shape) |
 
 Why `xcode-27` and not `macos-latest`: `macos-latest` is macOS 26 with Xcode 26 only, which cannot
 build an iOS 27 project; GitHub's hosted `xcode-27` image (macOS 27, image `xcode-27-arm64`) has
@@ -102,8 +103,9 @@ Artifacts of each run:
 |---|---|---|
 | `nodrive-ios-simulator-app` | 14 days | `nodrive-ios-simulator-app.zip` with `NoDrive.app` for the iOS Simulator (Apple silicon); not installable on an iPhone |
 | `nodrive-ios-test-results` | 14 days | build log, unit-test `.xcresult` and summary, product inspection, app sweep, simulated entitlements |
+| `nodrive-ios-screens-shard-<name>` | 14 days | what one shard wrote (`screenshots/`, `results/`); merged into the two artifacts below by the report job |
 | `nodrive-ios-screenshots` | 14 days | full-size screenshots per variant and the docs copies |
-| `nodrive-ios-screens-results` | 14 days | UI-test results, walk logs, accessibility texts, network capture summary, stand-in log, screenshot report |
+| `nodrive-ios-screens-results` | 14 days | UI-test results, walk logs, accessibility texts, network capture summary, stand-in log, uploaded report zips (`stand-in-uploads/`), `report-check.json`, screenshot report |
 | `nodrive-ios-build-products` | 3 days | input for the screens job (app, UI-test runner, `.xctestrun`) |
 
 To install the CI build on a Mac: download `nodrive-ios-simulator-app`, unzip it twice (the
@@ -113,10 +115,10 @@ artifact zip, then `nodrive-ios-simulator-app.zip`), boot a simulator, then
 The screens job can be re-run alone with the products of an earlier run: Actions → iOS → Run
 workflow → `products_run_id` = that run's id.
 
-The screens job also runs the Workspace apps UI test and the Smart conflicts UI test (the Auto upload
-setting "If a file is already in NoDrive", light and dark, Photos access granted by
-`simctl privacy grant photos`). Dispatch inputs: `only_workspace` (only the Workspace test) and `only_round3`
-(only the Smart conflicts test).
+The screens job also runs the Workspace apps UI test, the Problem reports UI test and the Smart conflicts UI
+test (the Auto upload setting "If a file is already in NoDrive", light and dark, Photos access granted by
+`simctl privacy grant photos`), each in its own shard. Dispatch inputs: `only_workspace` (only the Workspace
+test), `only_reports` (only the Problem reports test) and `only_conflicts` (only the Smart conflicts test).
 
 ## On your own iPhone (optional, free Apple account)
 
