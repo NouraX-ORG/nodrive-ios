@@ -754,7 +754,7 @@ struct NoDriveConflictResolverTests {
         let (resolver, _) = makeResolver(store, FakeProbe())
         let result = await resolver.resolve([photoA, videoA, photoB, videoB])
         #expect(result.map(\.fileName) == ["IMG_0001.HEIC", "IMG_0001.mov", "IMG_0001 1.HEIC", "IMG_0001 1.mov"])
-        #expect(Set(store.renamed.map(\.ocId)) == ["p-b", "v-a"])
+        #expect(Set(store.renamed.map { $0.ocId }) == ["p-b", "v-a"])
     }
 
     @Test("A waiting photo only waits for one that was handed out: a row behind it in the queue never blocks it")

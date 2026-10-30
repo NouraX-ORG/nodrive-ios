@@ -303,8 +303,7 @@ actor NCConflictResolver {
     // MARK: - Names handed out
 
     private func claimKey(_ metadata: tableMetadata, name: String) -> String {
-        [metadata.account, metadata.serverUrl, name].joined(separator: "
-")
+        [metadata.account, metadata.serverUrl, name].joined(separator: "\n")
     }
 
     /// Both parts of a Live Photo have one asset, so they have one owner.
