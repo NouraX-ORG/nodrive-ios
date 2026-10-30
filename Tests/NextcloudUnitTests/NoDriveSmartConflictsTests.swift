@@ -47,12 +47,17 @@ private final class FakeStore: NCConflictStore {
     func policy(account: String) -> NCConflictPolicy { policies[account] ?? .smart }
     func localSize(of metadata: tableMetadata) -> Int64 { sizes[metadata.ocId] ?? metadata.size }
     func isNameQueued(_ fileName: String, serverUrl: String, account: String) async -> Bool { queued.contains(fileName) }
-    func isNameTakenByOtherItem(_ metadata: tableMetadata) async -> Bool {
+    func isNameUploadingByOtherItem(_ metadata: tableMetadata) async -> Bool {
         queue.contains {
             $0.fileNameView == metadata.fileNameView && $0.serverUrl == metadata.serverUrl && $0.ocId != metadata.ocId
                 && $0.assetLocalIdentifier != metadata.assetLocalIdentifier
-                && ($0.status == NCGlobal.shared.metadataStatusUploading || $0.ocId < metadata.ocId)
+                && $0.status == NCGlobal.shared.metadataStatusUploading
         }
+    }
+    func activeOcIds(among ocIds: Set<String>) async -> Set<String> {
+        Set(queue.filter {
+            ocIds.contains($0.ocId) && ($0.status == NCGlobal.shared.metadataStatusWaitUpload || $0.status == NCGlobal.shared.metadataStatusUploading)
+        }.map(\.ocId))
     }
     func mate(of metadata: tableMetadata) async -> tableMetadata? {
         waiting.first { $0.assetLocalIdentifier == metadata.assetLocalIdentifier && $0.isLivePhotoImage != metadata.isLivePhotoImage }
@@ -707,6 +712,80 @@ struct NoDriveConflictResolverTests {
         #expect(store.done.isEmpty && store.renamed.isEmpty)
     }
 
+    @Test("Two Live Photos with one name, photo and video ocIds crossed, Keep the NoDrive copy: one pair uploads, the other waits, then is done")
+    func sameNameLivePhotosKeepNoDrive() async {
+        let store = FakeStore()
+        store.policies[account] = .keepNoDrive
+        // The photo of A sorts before the photo of B, the video of B before the video of A.
+        let photoA = row("p-a", "IMG_0001.HEIC", asset: "ASSET-A", kind: .photo)
+        let videoA = row("v-b", "IMG_0001.mov", asset: "ASSET-A", kind: .video, size: 50)
+        let photoB = row("p-b", "IMG_0001.HEIC", asset: "ASSET-B", kind: .photo)
+        let videoB = row("v-a", "IMG_0001.mov", asset: "ASSET-B", kind: .video, size: 50)
+        store.queue = [photoA, videoA, photoB, videoB]
+        let probe = FakeProbe()
+        let (resolver, _) = makeResolver(store, probe)
+
+        var result = await resolver.resolve([photoA, videoA, photoB, videoB])
+        #expect(result.map(\.ocId) == ["p-a", "v-b"], "exactly one pair uploads")
+        #expect(store.done.isEmpty && store.renamed.isEmpty)
+
+        // The next pass: the first pair is still in flight, the second one keeps waiting (both parts together).
+        result = await resolver.resolve([photoB, videoB])
+        #expect(result.isEmpty)
+        #expect(store.done.isEmpty)
+
+        // The first pair is uploaded and gone from the queue: its names are on the Drive, the second pair is done.
+        store.queue.removeAll { $0.assetLocalIdentifier == "ASSET-A" }
+        probe.set("IMG_0001.HEIC", .file(size: 100))
+        probe.set("IMG_0001.mov", .file(size: 50))
+        result = await resolver.resolve([photoB, videoB])
+        #expect(result.isEmpty)
+        #expect(Set(store.done) == ["p-b", "v-a"])
+    }
+
+    @Test("Two Live Photos with one name, Smart: the second pair gets one common number for both parts")
+    func sameNameLivePhotosSmart() async {
+        let store = FakeStore()
+        let photoA = row("p-a", "IMG_0001.HEIC", asset: "ASSET-A", kind: .photo)
+        let videoA = row("v-b", "IMG_0001.mov", asset: "ASSET-A", kind: .video, size: 50)
+        let photoB = row("p-b", "IMG_0001.HEIC", asset: "ASSET-B", kind: .photo)
+        let videoB = row("v-a", "IMG_0001.mov", asset: "ASSET-B", kind: .video, size: 50)
+        store.queue = [photoA, videoA, photoB, videoB]
+        let (resolver, _) = makeResolver(store, FakeProbe())
+        let result = await resolver.resolve([photoA, videoA, photoB, videoB])
+        #expect(result.map(\.fileName) == ["IMG_0001.HEIC", "IMG_0001.mov", "IMG_0001 1.HEIC", "IMG_0001 1.mov"])
+        #expect(Set(store.renamed.map(\.ocId)) == ["p-b", "v-a"])
+    }
+
+    @Test("A waiting photo only waits for one that was handed out: a row behind it in the queue never blocks it")
+    func waitingPhotoIsNotBlockedByRowBehindIt() async {
+        let store = FakeStore()
+        store.policies[account] = .keepNoDrive
+        // "a" has the smaller ocId but is not part of this pass (it sits behind in the queue).
+        let behind = row("a", "IMG_0001.JPG", asset: "ASSET-A")
+        let head = row("z", "IMG_0001.JPG", asset: "ASSET-B")
+        store.queue = [head, behind]
+        let (resolver, _) = makeResolver(store, FakeProbe())
+        let result = await resolver.resolve([head])
+        #expect(result.map(\.ocId) == ["z"], "the one at the head of the queue uploads, it does not wait")
+        // The row behind it waits for the one in flight, and only for it.
+        let later = await resolver.resolve([behind])
+        #expect(later.isEmpty)
+    }
+
+    @Test("A claim ends when its row has left the queue: a failed upload never blocks the name")
+    func staleClaimDoesNotBlock() async {
+        let store = FakeStore()
+        store.policies[account] = .keepNoDrive
+        let first = row("a", "IMG_0001.JPG", asset: "ASSET-A")
+        let second = row("b", "IMG_0001.JPG", asset: "ASSET-B")
+        store.queue = [first, second]
+        let (resolver, _) = makeResolver(store, FakeProbe())
+        #expect(await resolver.resolve([first, second]).map(\.ocId) == ["a"])
+        first.status = NCGlobal.shared.metadataStatusUploadError
+        #expect(await resolver.resolve([second]).map(\.ocId) == ["b"])
+    }
+
     @Test("A photo with the same asset (its own seed) or a name nobody else uses is not taken")
     func sameAssetIsNotTaken() async {
         let store = FakeStore()
@@ -990,30 +1069,45 @@ struct NoDriveConflictDatabaseStoreTests {
         await clean([id])
     }
 
-    @Test("Another photo with the same name in the queue: an uploading one always counts, a waiting one only when it goes first; the same asset never")
-    func nameTakenByOtherItem() async throws {
+    @Test("Another photo with the same name in the queue: only an uploading one counts, a waiting one never; the same asset never")
+    func nameUploadingByOtherItem() async throws {
         let low = "ndtest-a-" + UUID().uuidString
         let high = "ndtest-b-" + UUID().uuidString
         let same = "ndtest-c-" + UUID().uuidString
         let lowItem = try await make(low, "IMG_0009.HEIC", bytes: 3, asset: "ASSET-T1")
         let highItem = try await make(high, "IMG_0009.HEIC", bytes: 3, asset: "ASSET-T2")
-        // Two waiting photos: only the one that goes second sees the name as taken, so they never wait for each other.
-        #expect(await store.isNameTakenByOtherItem(lowItem) == false)
-        #expect(await store.isNameTakenByOtherItem(highItem))
+        // Two waiting photos never count for each other (the resolver orders them with its own claims).
+        #expect(await store.isNameUploadingByOtherItem(lowItem) == false)
+        #expect(await store.isNameUploadingByOtherItem(highItem) == false)
         // An uploading row of the same asset never counts.
         let sameAsset = try await make(same, "IMG_0009.HEIC", bytes: 3, asset: "ASSET-T1")
         let sameUploading = sameAsset.detachedCopy()
         sameUploading.status = NCGlobal.shared.metadataStatusUploading
         await NCManageDatabase.shared.addMetadataAsync(sameUploading)
-        #expect(await store.isNameTakenByOtherItem(lowItem) == false)
+        #expect(await store.isNameUploadingByOtherItem(lowItem) == false)
         // An uploading row of another asset counts for every other photo.
         let uploading = highItem.detachedCopy()
         uploading.status = NCGlobal.shared.metadataStatusUploading
         await NCManageDatabase.shared.addMetadataAsync(uploading)
-        #expect(await store.isNameTakenByOtherItem(lowItem))
+        #expect(await store.isNameUploadingByOtherItem(lowItem))
         // Another name is not taken.
-        #expect(await store.isNameTakenByOtherItem(row("zz", "IMG_0010.HEIC", asset: "ASSET-T3")) == false)
+        #expect(await store.isNameUploadingByOtherItem(row("zz", "IMG_0010.HEIC", asset: "ASSET-T3")) == false)
         await clean([low, high, same])
+    }
+
+    @Test("The rows that are still in the queue: waiting or uploading, not an error, not a missing row")
+    func activeOcIds() async throws {
+        let waitingId = "ndtest-w-" + UUID().uuidString
+        let errorId = "ndtest-e-" + UUID().uuidString
+        let waitingItem = try await make(waitingId, "IMG_0011.HEIC", bytes: 3, asset: "ASSET-T4")
+        let errorItem = try await make(errorId, "IMG_0012.HEIC", bytes: 3, asset: "ASSET-T5")
+        let failed = errorItem.detachedCopy()
+        failed.status = NCGlobal.shared.metadataStatusUploadError
+        await NCManageDatabase.shared.addMetadataAsync(failed)
+        let active = await store.activeOcIds(among: [waitingItem.ocId, errorId, "ndtest-missing"])
+        #expect(active == [waitingId])
+        #expect(await store.activeOcIds(among: []).isEmpty)
+        await clean([waitingId, errorId])
     }
 
     @Test("A rename moves the extracted file with the row: the new name is in the database, the old one is gone")

@@ -11,10 +11,11 @@ protocol NCConflictStore {
     func localSize(of metadata: tableMetadata) -> Int64
     /// True when a queued or known item of the app already uses this name in this folder.
     func isNameQueued(_ fileName: String, serverUrl: String, account: String) async -> Bool
-    /// True when another photo of the phone (another row, another asset) is uploading under this name in this folder,
-    /// or is waiting for it and goes first. Of two waiting photos with one name only the one with the smaller `ocId`
-    /// counts for the other, so the two never wait for each other.
-    func isNameTakenByOtherItem(_ metadata: tableMetadata) async -> Bool
+    /// True when another photo of the phone (another row, another asset) is uploading under this name in this folder.
+    /// Waiting rows do not count here: the resolver keeps its own claims for the names it has handed out.
+    func isNameUploadingByOtherItem(_ metadata: tableMetadata) async -> Bool
+    /// Of these rows, the ocIds that are still in the upload queue (waiting or uploading).
+    func activeOcIds(among ocIds: Set<String>) async -> Set<String>
     /// The other part of a Live Photo that is waiting in the queue, if any.
     func mate(of metadata: tableMetadata) async -> tableMetadata?
     /// Already in NoDrive: leave the upload queue and enter the upload history (no upload, no notification).
@@ -60,20 +61,27 @@ struct NCDatabaseConflictStore: NCConflictStore {
                                                                fileName, serverUrl, account)) != nil
     }
 
-    func isNameTakenByOtherItem(_ metadata: tableMetadata) async -> Bool {
-        var format = "fileNameView == %@ AND serverUrl == %@ AND account == %@ AND ocId != %@ AND (status == %d OR status == %d)"
+    func isNameUploadingByOtherItem(_ metadata: tableMetadata) async -> Bool {
+        var format = "fileNameView == %@ AND serverUrl == %@ AND account == %@ AND ocId != %@ AND status == %d"
         var arguments: [Any] = [metadata.fileNameView,
                                 metadata.serverUrl,
                                 metadata.account,
                                 metadata.ocId,
-                                NCGlobal.shared.metadataStatusWaitUpload,
                                 NCGlobal.shared.metadataStatusUploading]
         if !metadata.assetLocalIdentifier.isEmpty {
             format += " AND assetLocalIdentifier != %@"
             arguments.append(metadata.assetLocalIdentifier)
         }
-        let rows = await database.getMetadatasAsync(predicate: NSPredicate(format: format, argumentArray: arguments))
-        return rows.contains { $0.status == NCGlobal.shared.metadataStatusUploading || $0.ocId < metadata.ocId }
+        return await database.getMetadataAsync(predicate: NSPredicate(format: format, argumentArray: arguments)) != nil
+    }
+
+    func activeOcIds(among ocIds: Set<String>) async -> Set<String> {
+        guard !ocIds.isEmpty else { return [] }
+        let rows = await database.getMetadatasAsync(predicate: NSPredicate(format: "ocId IN %@ AND (status == %d OR status == %d)",
+                                                                           Array(ocIds),
+                                                                           NCGlobal.shared.metadataStatusWaitUpload,
+                                                                           NCGlobal.shared.metadataStatusUploading))
+        return Set(rows.map(\.ocId))
     }
 
     func mate(of metadata: tableMetadata) async -> tableMetadata? {
@@ -157,6 +165,15 @@ actor NCConflictResolver {
     private var busy = false
     private var queue: [CheckedContinuation<Void, Never>] = []
 
+    /// A name in a folder that this resolver handed out for upload and whose row is still in the queue.
+    /// The first photo to be resolved takes the name; another photo with the same name then renames or waits, so two
+    /// photos can never wait for each other, and a waiting photo always waits for one that is in flight.
+    private struct NameClaim {
+        let owner: String
+        let ocIds: Set<String>
+    }
+    private var claims: [String: NameClaim] = [:]
+
     init(store: NCConflictStore, probe: NCRemoteProbe, ledger: NCConflictRenameLedger) {
         self.store = store
         self.probe = probe
@@ -189,6 +206,7 @@ actor NCConflictResolver {
         var result: [tableMetadata] = []
         var seen = Set<String>()
         let listed = Set(extracted.map(\.ocId))
+        await dropFinishedClaims()
 
         for row in extracted where !seen.contains(row.ocId) {
             seen.insert(row.ocId)
@@ -249,7 +267,7 @@ actor NCConflictResolver {
             // library scan can queue two photos with one name, and an upload that runs in the background session
             // is not on the Drive yet). The lock makes this check safe. "Keep the phone copy" replaces by choice.
             let taken = remote == .missing && policy != .keepPhone
-                ? await store.isNameTakenByOtherItem(part)
+                ? await isNameTakenByOther(part)
                 : false
             parts.append(NCConflictPart(name: part.fileName, localSize: store.localSize(of: part), remote: remote, takenByOther: taken))
         }
@@ -270,11 +288,48 @@ actor NCConflictResolver {
                     upload.append(part)
                 }
             }
+            if policy != .keepPhone {
+                claim(upload)
+            }
             return upload
 
         case .renameAll:
-            return await rename(unit)
+            let renamed = await rename(unit)
+            claim(renamed)
+            return renamed
         }
+    }
+
+    // MARK: - Names handed out
+
+    private func claimKey(_ metadata: tableMetadata, name: String) -> String {
+        [metadata.account, metadata.serverUrl, name].joined(separator: "
+")
+    }
+
+    /// Both parts of a Live Photo have one asset, so they have one owner.
+    private func claimOwner(_ metadata: tableMetadata) -> String {
+        metadata.assetLocalIdentifier.isEmpty ? metadata.ocId : metadata.assetLocalIdentifier
+    }
+
+    private func claim(_ rows: [tableMetadata]) {
+        for row in rows {
+            claims[claimKey(row, name: row.fileName)] = NameClaim(owner: claimOwner(row), ocIds: [row.ocId])
+        }
+    }
+
+    /// A claim ends when its row has left the queue (uploaded, failed or removed).
+    private func dropFinishedClaims() async {
+        guard !claims.isEmpty else { return }
+        let active = await store.activeOcIds(among: Set(claims.values.flatMap(\.ocIds)))
+        claims = claims.filter { !$0.value.ocIds.isDisjoint(with: active) }
+    }
+
+    private func isNameTakenByOther(_ part: tableMetadata) async -> Bool {
+        if let claim = claims[claimKey(part, name: part.fileName)], claim.owner != claimOwner(part) {
+            return true
+        }
+        return await store.isNameUploadingByOtherItem(part)
     }
 
     private func isSecondItem(_ part: tableMetadata) async -> Bool {
