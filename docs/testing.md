@@ -19,6 +19,12 @@ Problem reports (feature `feature/problem-reports`): run [40901561115](https://g
 only in the Workspace sidebar UI test (known flakes, below) and passed on the re-run. The merge to `main` adds only
 documents on top of that commit; the same checks run again on the merge commit and on `main`.
 
+Smart conflicts (feature `feature/smart-conflicts`, with the final fixes of review 1 to 3): run [41053798105](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41053798105),
+commit `20ce353bbb` (the branch merged with `main` after Problem reports), all 10 jobs green (Branding gate, Build and unit tests,
+Server login, the 6 Simulator screens shards, Simulator screens report); no re-run was needed. The code before the merge had
+passed as run [41017526380](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41017526380) (commit `fba37eeb52`). `main` was moved to
+`20ce353bbb` by a fast-forward, so the same checks ran again on `main`: run [41067448530](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41067448530), green after re-runs of the shard "smoke" (the known flake "Failed to determine hittability of NoDrive Icon") and of the shard "walks" (twice: the German walk did not find the first intro slide, a start-up timing flake that the branch `ci/settle-wait` works on; the code is the same as in the green run above). The documents on top of it are the only later change.
+
 Reference run: **[40206804804](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40206804804)**
 on `main` (commit `b03563c3c9`), all 3 jobs green. Xcode 27.1 (build 27A9275), runner image
 `xcode-27-arm64`, iPhone 17 simulator with iOS 27.0, unsigned (`CODE_SIGNING_ALLOWED=NO`).
@@ -33,6 +39,7 @@ on `main` (commit `b03563c3c9`), all 3 jobs green. Xcode 27.1 (build 27A9275), r
 | App, 8 extensions and test bundles build for the simulator, unsigned | CI | pass | job "Build and unit tests", `xcodebuild build-for-testing … CODE_SIGNING_ALLOWED=NO` succeeded; 0 Thread Sanitizer objects |
 | Bundle ids, display names, URL scheme, app group and keychain group of the built app and every extension | CI | pass | `tools/ci/inspect-products.py`: `org.nourax.nodrive` + 8 extension ids, display names NoDrive / NoDrive Assistant, scheme `nodrive`, `group.org.nourax.nodrive` in every entitlements section |
 | Unit tests (upstream + NoDrive) | CI | pass | run [40470638063](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40470638063) (Workspace apps head): `Test run with 204 tests in 22 suites passed`; result `Passed`, 204/204, 0 failed, 0 skipped (the reference run below had 145 before the Workspace tests) |
+| Merged head of Smart conflicts and Problem reports: unit tests, the 2 UI tests of the Smart conflicts setting, the real-server checks, the network gate | CI | pass | run [41053798105](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41053798105) (commit `20ce353bbb`): unit tests result `Passed`, 346/346, 0 failed, 0 skipped; `ui-conflicts-light` and `ui-conflicts-dark` 1 test each, passed, 0 skipped (shard "conflicts", about 47 min); `round3.md`: 15 checks passed, "all round 3 server checks passed"; `network.json` ok, `forbidden_names` 0; `screens-report.json` `problems` empty; every shard wrote its `secret-scan-ok` file; `rebrand.py --check`: 336 files, 0 would change; `check-branding`: 484 hits, 0 unclassified |
 | NoDrive branding unit tests (name, ids and app group, URL schemes, fixed server, version `35.2.1-nourax.1`, user agent matches server 35, Nextcloud services off, privacy link hidden, cobalt colour) | CI | pass | Suite "NoDrive branding": 9 of 9 passed |
 | Built app sweep (`check-branding.py --app`) | CI | report only | 833 hits, all classified by hand in [branding-sweep.md](branding-sweep.md); becoming a gate is a follow-up |
 | Launches (install with `simctl`, start, keeps running) | CI | pass | job "Simulator screens", step "simctl install, launch and screenshots" |
