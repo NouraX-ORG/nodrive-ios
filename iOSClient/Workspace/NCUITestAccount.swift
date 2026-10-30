@@ -69,23 +69,15 @@ enum NCUITestAccount {
                                         controller: nil)
         NSLog("NODRIVE-UITEST account created; root is \(type(of: window.rootViewController as Any)), scene state \(window.windowScene?.activationState.rawValue ?? -1)")
 
-        // createAccount shows the main screen on UIApplication.mainAppWindow, which is nil while the scene is not
-        // foreground-active (for example while a system prompt is up). Then the intro stays and the test waits
-        // in vain (run 41110301742). Give the normal path a moment, then show the main screen on the same window.
+        // Diagnostics only: the test must never show the main screen itself, because that would hide an app bug.
+        // Suspected (run 41110301742): createAccount shows the main screen on UIApplication.mainAppWindow, which
+        // may be nil while the scene is not foreground-active (for example while a system prompt is up), so the
+        // intro stays. That is an app issue to fix in NCAccount.createAccount, not here. Log what happened.
         for _ in 0..<20 {
             if window.rootViewController is NCMainTabBarController { return }
             try? await Task.sleep(for: .milliseconds(500))
         }
-        guard let controller = UIStoryboard(name: "Main", bundle: nil).instantiateInitialViewController() as? NCMainTabBarController else {
-            return
-        }
-        NSLog("NODRIVE-UITEST the main screen was not shown by the account creation; showing it")
-        controller.account = "\(requested.user) \(requested.urlBase)"
-        window.rootViewController = controller
-        window.makeKeyAndVisible()
-        if let scene = window.windowScene {
-            SceneManager.shared.register(scene: scene, withRootViewController: controller)
-        }
+        NSLog("NODRIVE-UITEST the main screen was not shown 10 s after the account creation; root is \(type(of: window.rootViewController as Any)), scene state \(window.windowScene?.activationState.rawValue ?? -1)")
     }
 }
 
