@@ -64,9 +64,9 @@ final class NoDriveAgendaUITests: XCTestCase {
         let app = try openAgenda()
         XCTAssertTrue(waitForText(app, "Dentist"), "the Day list has no Dentist")
         XCTAssertTrue(app.staticTexts["Dentist"].exists || app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Dentist'")).firstMatch.exists)
-        let writer = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Writer-Bot review'")).firstMatch
-        XCTAssertTrue(writer.waitForExistence(timeout: 20), "the Writer-Bot review is missing")
-        XCTAssertTrue(writer.label.contains("Writer-Bot"), "the row does not name its agent")
+        let writer = findRow(app, "Writer-Bot review")
+        XCTAssertNotNil(writer, "the Writer-Bot review is missing")
+        XCTAssertTrue(writer?.label.contains("Writer-Bot") == true, "the row does not name its agent")
         XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Budget talk'")).firstMatch.exists, "a declined invitation is shown")
         save("agenda-day")
 
@@ -79,8 +79,10 @@ final class NoDriveAgendaUITests: XCTestCase {
         app.segmentedControls["agendaViewPicker"].buttons["Day"].tap()
 
         // Detail sheet of a Gantt task
-        let task = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Write homepage copy'")).firstMatch
-        XCTAssertTrue(task.waitForExistence(timeout: 20), "Write homepage copy is missing")
+        guard let task = findRow(app, "Write homepage copy") else {
+            XCTFail("Write homepage copy is missing")
+            return
+        }
         task.tap()
         let open = app.buttons["agendaDetailOpen"]
         XCTAssertTrue(open.waitForExistence(timeout: 20), "the detail sheet has no Open in NoGantt button")
@@ -92,15 +94,14 @@ final class NoDriveAgendaUITests: XCTestCase {
     func test3ChipsAndSwitch() throws {
         guard user == "ali" else { throw XCTSkip("this check runs for ali") }
         let app = try openAgenda()
-        let writer = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Writer-Bot review'")).firstMatch
-        XCTAssertTrue(writer.waitForExistence(timeout: 60))
+        XCTAssertNotNil(findRow(app, "Writer-Bot review"))
         element(app, "agendaChip-agents").tap()
         Thread.sleep(forTimeInterval: 1)
-        XCTAssertFalse(writer.exists, "turning off My agents still shows the Writer-Bot review")
+        XCTAssertNil(findRow(app, "Writer-Bot review", timeout: 3), "turning off My agents still shows the Writer-Bot review")
         element(app, "agendaChip-agents").tap()
         app.segmentedControls["agendaScope"].buttons["Personal"].tap()
         Thread.sleep(forTimeInterval: 1)
-        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Client call'")).firstMatch.exists, "Personal still shows Work events")
+        XCTAssertNil(findRow(app, "Client call", timeout: 3), "Personal still shows Work events")
         save("agenda-personal-only")
         app.segmentedControls["agendaScope"].buttons["All"].tap()
     }
@@ -118,9 +119,9 @@ final class NoDriveAgendaUITests: XCTestCase {
     func test5TeamAsManager() throws {
         guard user == "mara" else { throw XCTSkip("this check runs for mara") }
         let app = try openAgenda()
-        let problem = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Banner design'")).firstMatch
-        XCTAssertTrue(problem.waitForExistence(timeout: 90), "the team problem for Banner design is missing")
-        XCTAssertTrue(problem.label.contains("Sara"))
+        let problem = findRow(app, "Banner design", timeout: 90)
+        XCTAssertNotNil(problem, "the team problem for Banner design is missing")
+        XCTAssertTrue(problem?.label.contains("Sara") == true)
         save("agenda-team")
         let showAll = element(app, "agendaShowAllTeam")
         if showAll.waitForExistence(timeout: 10) {
@@ -155,20 +156,44 @@ final class NoDriveAgendaUITests: XCTestCase {
         return app
     }
 
-    /// Opens NoAgenda from the sidebar and answers the one-time question if it comes.
+    /// Opens NoAgenda from the sidebar and answers the one-time question if it comes. After a change of account
+    /// the app may rebuild its main screen a little later and drop the screen: open it again until it stays.
     private func openAgenda() throws -> XCUIApplication {
         let app = try launchApp()
-        openSidebar(app)
-        let entry = app.descendants(matching: .any)["sidebarNoAgenda"]
-        XCTAssertTrue(waitFor(entry, in: app, timeout: 60, hittable: true), "the sidebar has no NoAgenda entry")
-        entry.tap()
-        let question = app.descendants(matching: .any)["agendaPersonalQuestion"]
-        if question.waitForExistence(timeout: 60) {
-            chooseWorkCalendar(app)
-            app.buttons["agendaPersonalDone"].tap()
+        let list = app.descendants(matching: .any)["agendaList"]
+        for attempt in 1...4 {
+            Thread.sleep(forTimeInterval: attempt == 1 ? 6 : 2)
+            openSidebar(app)
+            let entry = app.descendants(matching: .any)["sidebarNoAgenda"]
+            XCTAssertTrue(waitFor(entry, in: app, timeout: 60, hittable: true), "the sidebar has no NoAgenda entry")
+            entry.tap()
+            let question = app.descendants(matching: .any)["agendaPersonalQuestion"]
+            if question.waitForExistence(timeout: 40) {
+                chooseWorkCalendar(app)
+                app.buttons["agendaPersonalDone"].tap()
+            }
+            XCTAssertTrue(waitFor(list, in: app, timeout: 60), "NoAgenda did not open")
+            Thread.sleep(forTimeInterval: 8)
+            if list.exists { break }
         }
-        XCTAssertTrue(waitFor(app.descendants(matching: .any)["agendaList"], in: app, timeout: 60), "NoAgenda did not open")
         return app
+    }
+
+    /// A row (or problem) whose label holds `text`; the list is scrolled to find it.
+    private func findRow(_ app: XCUIApplication, _ text: String, timeout: TimeInterval = 60) -> XCUIElement? {
+        let element = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+        let list = app.descendants(matching: .any)["agendaList"]
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if element.exists { return element }
+            for _ in 0..<8 {
+                list.swipeUp()
+                if element.exists { return element }
+            }
+            for _ in 0..<8 { list.swipeDown() }
+            Thread.sleep(forTimeInterval: 2)
+        } while Date() < deadline
+        return nil
     }
 
     /// The Work calendar is not personal: its switch goes off (the Personal calendar stays on).
