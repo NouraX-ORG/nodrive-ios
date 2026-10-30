@@ -550,7 +550,8 @@ actor NCNetworkingProcess {
                 await database.deleteMetadataAsync(id: metadata.ocId)
             }
             // upload file(s)
-            for metadata in extractMetadatas {
+            // NoDrive: the setting "If a file is already in NoDrive" decides what uploads (iOSClient/SmartConflicts, H4)
+            for metadata in await NCAutoUploadConflicts.shared.resolve(extractMetadatas, backgroundResource: backgroundUploadResource != nil) {
                 guard timer != nil,
                       !isAppInBackground else {
                     return
@@ -568,7 +569,9 @@ actor NCNetworkingProcess {
 
                 // AUTO-UPLOAD: CHECK PROGRESS AND FILE EXISTS
                 //
-                if metadata.sessionSelector == global.selectorUploadAutoUpload {
+                // NoDrive: items NoDrive decided skip upstream's check (iOSClient/SmartConflicts, H5)
+                if metadata.sessionSelector == global.selectorUploadAutoUpload,
+                   !NCAutoUploadConflicts.shared.handles(metadata, backgroundResource: backgroundUploadResource != nil) {
                     if let uploadAccount = await database.getTableAccountAsync(predicate: NSPredicate(format: "account == %@", metadata.account)),
                        !uploadAccount.autoUploadForceReupload {
                         let existsResult = await networking.fileExists(serverUrlFileName: metadata.serverUrlFileName, account: metadata.account)

@@ -36,6 +36,11 @@ on:
         required: false
         default: false
         type: boolean
+      only_conflicts:
+        description: 'Screens job: run only the Smart conflicts UI test (not the walks, the Workspace test or the reports test)'
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
@@ -123,6 +128,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: bash tools/ci/server-app-login.sh reports
 
+      - name: Round 3 server checks (the size the app reads for Smart conflicts, on the real server code)
+        if: ${{ !cancelled() }}
+        run: bash tools/ci/server-app-login.sh round3
+
       - name: Stop the server
         if: ${{ always() }}
         run: |
@@ -137,6 +146,7 @@ jobs:
           path: |
             build/server-login/report.md
             build/server-login/reports.md
+            build/server-login/round3.md
             build/server-login/status.json
             build/server-login/navigation-apps-*.json
             build/server-login/webview-ua-primary.png
@@ -353,9 +363,10 @@ jobs:
       fail-fast: false
       matrix:
         # smoke: simctl install/launch/screenshots + English walk; walks: German + Arabic; dark: English dark;
-        # workspace: Workspace apps menu light+dark + checks; reports: Problem reports light+dark + check.
-        # The manual start inputs only_reports / only_workspace run a single shard.
-        shard: ${{ fromJSON(inputs.only_reports == true && '["reports"]' || inputs.only_workspace == true && '["workspace"]' || '["smoke","walks","dark","workspace","reports"]') }}
+        # workspace: Workspace apps menu light+dark + checks; reports: Problem reports light+dark + check;
+        # conflicts: the Smart conflicts setting light+dark.
+        # The manual start inputs only_reports / only_workspace / only_conflicts run a single shard.
+        shard: ${{ fromJSON(inputs.only_reports == true && '["reports"]' || inputs.only_workspace == true && '["workspace"]' || inputs.only_conflicts == true && '["conflicts"]' || '["smoke","walks","dark","workspace","reports","conflicts"]') }}
     permissions:
       contents: read
       actions: read   # download-artifact from an earlier run (products_run_id)
@@ -546,6 +557,22 @@ jobs:
           python3 tools/ci/report-check.py --log "$RESULTS/stand-in.jsonl" --uploads "$RESULTS/stand-in-uploads" \
             --variants reports-light reports-dark --walk "$SHOTS" --json "$RESULTS/report-check.json"
 
+      # ----- shard conflicts -----
+      - name: Conflict setting, signed in (light)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && matrix.shard == 'conflicts' }}
+        run: |
+          # a clean simulator; Photos access is granted before the launch (the Auto upload screen needs it)
+          bash tools/ci/screens.sh prepare-first "$UDID"
+          bash tools/ci/screens.sh switch "$UDID" en en_US light
+          bash tools/ci/screens.sh conflicts "$UDID" conflicts-light
+
+      - name: Conflict setting, signed in (dark)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && matrix.shard == 'conflicts' }}
+        run: |
+          bash tools/ci/screens.sh prepare-first "$UDID"
+          bash tools/ci/screens.sh switch "$UDID" en en_US dark
+          bash tools/ci/screens.sh conflicts "$UDID" conflicts-dark
+
       # ===== END OF SHARD STEPS: the steps below are the same for every shard =====
 
       - name: Stop the DNS capture (the Network gate in screens-report reads it)
@@ -629,7 +656,7 @@ jobs:
           echo "PNG files: $(find screenshots -name '*.png' | wc -l)"
 
       - name: Network gate (no Nextcloud hosts; sign-in opened drive.nourax.org)
-        if: ${{ !cancelled() && inputs.only_workspace != true && inputs.only_reports != true }}
+        if: ${{ !cancelled() && inputs.only_workspace != true && inputs.only_reports != true && inputs.only_conflicts != true }}
         run: |
           python3 tools/ci/network-gate.py --dns-text "$RESULTS/dns.txt" --dns-processes "$RESULTS/dns-processes.txt" \
             --stand-in-log "$RESULTS/stand-in.jsonl" \
@@ -639,7 +666,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           python3 tools/ci/screens-report.py --shots "$SHOTS" --results "$RESULTS" \
-            --variants ${{ inputs.only_reports == true && 'reports-light reports-dark' || inputs.only_workspace == true && 'workspace-light workspace-dark' || 'en-light de-light ar-light en-dark workspace-light workspace-dark reports-light reports-dark' }} \
+            --variants ${{ inputs.only_reports == true && 'reports-light reports-dark' || inputs.only_workspace == true && 'workspace-light workspace-dark' || inputs.only_conflicts == true && 'conflicts-light conflicts-dark' || 'en-light de-light ar-light en-dark workspace-light workspace-dark reports-light reports-dark conflicts-light conflicts-dark' }} \
             --docs-out "$GITHUB_WORKSPACE/screenshots-docs" --json "$RESULTS/screens-report.json"
 
       - name: No throwaway password in any result file

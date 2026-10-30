@@ -698,6 +698,8 @@ final class NCPreferences: NSObject {
     /// Reports whether this installation may expose the experimental background upload setting.
     /// Debug builds are always eligible; release builds are eligible only with a TestFlight receipt.
     static var canConfigureBackgroundUploadExtension: Bool {
+        // NoDrive: switched off, it would replace same-name files (iOSClient/SmartConflicts, H6)
+        if NCBrandOptions.shared.disable_background_upload_extension { return false }
 #if DEBUG
         return true
 #else

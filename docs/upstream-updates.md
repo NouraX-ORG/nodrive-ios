@@ -97,6 +97,31 @@ Files we never change, so upstream's updates arrive without conflicts: all other
 
 `git diff --name-status 35.2.1 HEAD` shows the full list at any time.
 
+## Hooks of Smart conflicts
+
+The feature keeps its logic in our own folder `iOSClient/SmartConflicts/` (with its `en.lproj/SmartConflicts.strings`)
+and touches upstream files only through the one-line hooks below, each marked with a `// NoDrive:` comment. `python3 tools/rebrand.py` writes them (and fails with "anchor not found" when
+upstream moved the code), so after a merge: take upstream's side of the file, run `rebrand.py`, read the failure
+if there is one, and move the anchor in `tools/rebrand.py` (function `smart_conflicts`).
+
+| Id | File and anchor | Hook |
+|---|---|---|
+| H1 | `iOSClient/Networking/NCAutoUpload.swift`, the check before `extractCameraRoll` (`if !uploadAccount.autoUploadForceReupload {`) | the condition is `NCAutoUploadConflicts.shared.upstreamPrecheck(uploadAccount)` (true only for "Keep the NoDrive copy") |
+| H2 | same file, `for extractedMetadata in extractedMetadatas {` | the loop runs over `await NCAutoUploadConflicts.shared.resolve(extractedMetadatas, backgroundResource: false)` |
+| H3 | same file, the Live Photo check `if extractedMetadata.isLivePhoto && !uploadAccount.autoUploadForceReupload` | `&& !NCAutoUploadConflicts.shared.handles(...)` |
+| H4 | `iOSClient/Networking/NCNetworkingProcess.swift`, `for metadata in extractMetadatas {` (after the `isEmpty` check, which stays) | the loop runs over `await NCAutoUploadConflicts.shared.resolve(extractMetadatas, backgroundResource: backgroundUploadResource != nil)` |
+| H5 | same file, under `// AUTO-UPLOAD: CHECK PROGRESS AND FILE EXISTS` | `, !NCAutoUploadConflicts.shared.handles(metadata, backgroundResource: ...)` |
+| H6 | `iOSClient/Settings/NCPreferences.swift`, `canConfigureBackgroundUploadExtension` (compiled into 9 targets) | first line `if NCBrandOptions.shared.disable_background_upload_extension { return false }`; the new option (`true`) is written into `Brand/NCBrand.swift` by `rebrand.py` |
+| H7 | `iOSClient/Networking/NCNetworking+Upload.swift`, after `addAutoUploadTransferAsync([tblAutoUpload])` | `#if !EXTENSION` / `await NCAutoUploadConflicts.shared.didUpload([tblAutoUpload])` / `#endif` |
+| H8 | `iOSClient/Data/NCMetadataUploadTranfersSuccess.swift`, after `addAutoUploadTransferAsync(autoUploads)` | `await NCAutoUploadConflicts.shared.didUpload(autoUploads)` |
+| H9 | `iOSClient/Settings/AutoUpload/NCAutoUploadView.swift`, after the settings group's `.opacity(...)` | `NCConflictPolicySection(account: model.session.account)` |
+
+If upstream renames `completeExistingAutoUploadAsync`, `addAutoUploadTransferAsync` or `getDirectoryProviderStorageOcId`,
+or changes how a finished upload is recorded, `iOSClient/SmartConflicts/NCAutoUploadConflicts.swift` stops
+compiling: that is the signal. If upstream makes the PhotoKit background upload extension the default path, H6 must
+stay (the unit test "NoDrive background upload extension" fails if it is lost): that extension replaces same-name
+files without asking.
+
 ## Hooks of Problem reports
 
 The feature keeps its logic in our own folder `iOSClient/ProblemReports/` (with its `en.lproj/ProblemReports.strings`)

@@ -429,6 +429,9 @@ struct NCAutoUploadView: View {
             .disabled(areSettingsDisabled)
             .opacity(areSettingsDisabled ? 0.5 : 1)
 
+            // NoDrive: "If a file is already in NoDrive" (iOSClient/SmartConflicts, H9)
+            NCConflictPolicySection(account: model.session.account)
+
             if #available(iOS 27, *),
                NCPreferences.canConfigureBackgroundUploadExtension,
                let capabilities = NCNetworking.shared.capabilities[model.session.account],

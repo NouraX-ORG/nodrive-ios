@@ -355,6 +355,10 @@ extension NCNetworking {
         await NCManageDatabase.shared.replaceMetadataAsync(ocId: metadata.ocIdTransfer, metadata: metadata)
         if let tblAutoUpload = results.autoUpload {
             await NCManageDatabase.shared.addAutoUploadTransferAsync([tblAutoUpload])
+#if !EXTENSION
+            // NoDrive: a renamed copy also records the photo's original name (iOSClient/SmartConflicts, H7)
+            await NCAutoUploadConflicts.shared.didUpload([tblAutoUpload])
+#endif
         }
         if let livePhoto = results.livePhoto {
             await NCManageDatabase.shared.setLivePhotoVideo(account: livePhoto.account,

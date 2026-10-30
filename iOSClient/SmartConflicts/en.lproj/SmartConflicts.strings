@@ -1,0 +1,7 @@
+/* NoDrive: texts of the Auto upload setting "If a file is already in NoDrive" (iOSClient/SmartConflicts). English only; translations are a to-do. */
+"_nodrive_conflict_setting_" = "If a file is already in NoDrive";
+"_nodrive_conflict_smart_" = "Smart (recommended)";
+"_nodrive_conflict_smart_summary_" = "Skip it if it's the same size, otherwise keep both";
+"_nodrive_conflict_keep_nodrive_" = "Keep the NoDrive copy";
+"_nodrive_conflict_keep_phone_" = "Keep the phone copy";
+"_nodrive_conflict_keep_both_" = "Keep both";

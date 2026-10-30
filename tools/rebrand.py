@@ -114,6 +114,8 @@ TEST_FILES = [
     ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveWorkspaceMenuTests.swift'),
     ('NextcloudUITests', 'NextcloudUITests', 'NoDriveScreenshotUITests.swift'),
     ('NextcloudUITests', 'NextcloudUITests', 'NoDriveWorkspaceUITests.swift'),
+    ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveSmartConflictsTests.swift'),
+    ('NextcloudUITests', 'NextcloudUITests', 'NoDriveConflictSettingsUITests.swift'),
     ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveProblemReportsTests.swift'),
     ('NextcloudUITests', 'NextcloudUITests', 'NoDriveProblemReportsUITests.swift'),
 ]
@@ -121,6 +123,7 @@ TEST_FILES = [
 # (target, folder, parent group name). Every .swift file of the folder is added.
 APP_SOURCE_FOLDERS = [
     ('Nextcloud', 'iOSClient/Workspace', 'iOSClient'),
+    ('Nextcloud', 'iOSClient/SmartConflicts', 'iOSClient'),
     ('Nextcloud', 'iOSClient/ProblemReports', 'iOSClient'),
 ]
 # Product of the UI-test target. Its runner app ("<product>-Runner") sits on the simulator's home
@@ -690,6 +693,9 @@ def brand_swift(st, base):
     s('disable_request_login_url', 'Bool', 'true')
     s('disable_multiaccount', 'Bool', 'true')
     s('disable_crash_service', 'Bool', 'true')
+    # Smart conflicts: the experimental PhotoKit background upload would replace same-name files without asking
+    insert_after(st, rel, '    var disable_crash_service: Bool = true\n',
+                 '    var disable_background_upload_extension: Bool = true // NoDrive: iOSClient/SmartConflicts, see NCPreferences\n')
     s('disable_show_more_nextcloud_apps_in_settings', 'Bool', 'true')
     s('disable_source_code_in_settings', 'Bool', 'true')
     # Nextcloud's push proxy is never set (it is only set when brand == "Nextcloud"; blank it anyway).
@@ -856,6 +862,70 @@ def wrap_privacy_button(st):
         fail(f'{rel}: privacy button block changed upstream')
     indented = ''.join(('    ' + ln if ln.strip() else ln) for ln in block.splitlines(keepends=True))
     st.set(rel, text[:a] + guard + indented + '                }\n' + text[b:])
+
+
+def smart_conflicts(st):
+    """Hooks of the feature "Smart conflicts" (iOSClient/SmartConflicts): the setting "If a file is already in
+    NoDrive" decides every Auto upload conflict. Each hook is one call (or one condition) and one `// NoDrive:` line."""
+    rel = 'iOSClient/Networking/NCAutoUpload.swift'
+    sub_exact(st, rel,
+              '            // Forced uploads intentionally replace existing server resources.\n'
+              '            if !uploadAccount.autoUploadForceReupload {\n',
+              '            // NoDrive: only "Keep the NoDrive copy" checks before the photo is read (iOSClient/SmartConflicts, H1)\n'
+              '            if NCAutoUploadConflicts.shared.upstreamPrecheck(uploadAccount) {\n')
+    sub_exact(st, rel,
+              '            for extractedMetadata in extractedMetadatas {\n',
+              '            // NoDrive: the setting "If a file is already in NoDrive" decides what uploads (iOSClient/SmartConflicts, H2)\n'
+              '            for extractedMetadata in await NCAutoUploadConflicts.shared.resolve(extractedMetadatas, backgroundResource: false) {\n')
+    sub_exact(st, rel,
+              '                if extractedMetadata.isLivePhoto && !uploadAccount.autoUploadForceReupload {\n',
+              "                // NoDrive: upstream's per-part check is skipped for items NoDrive decided (iOSClient/SmartConflicts, H3)\n"
+              '                if extractedMetadata.isLivePhoto && !uploadAccount.autoUploadForceReupload\n'
+              '                    && !NCAutoUploadConflicts.shared.handles(extractedMetadata, backgroundResource: false) {\n')
+    rel = 'iOSClient/Networking/NCNetworkingProcess.swift'
+    sub_exact(st, rel,
+              '            // upload file(s)\n'
+              '            for metadata in extractMetadatas {\n',
+              '            // upload file(s)\n'
+              '            // NoDrive: the setting "If a file is already in NoDrive" decides what uploads (iOSClient/SmartConflicts, H4)\n'
+              '            for metadata in await NCAutoUploadConflicts.shared.resolve(extractMetadatas, backgroundResource: backgroundUploadResource != nil) {\n')
+    sub_exact(st, rel,
+              '                // AUTO-UPLOAD: CHECK PROGRESS AND FILE EXISTS\n'
+              '                //\n'
+              '                if metadata.sessionSelector == global.selectorUploadAutoUpload {\n',
+              '                // AUTO-UPLOAD: CHECK PROGRESS AND FILE EXISTS\n'
+              '                //\n'
+              "                // NoDrive: items NoDrive decided skip upstream's check (iOSClient/SmartConflicts, H5)\n"
+              '                if metadata.sessionSelector == global.selectorUploadAutoUpload,\n'
+              '                   !NCAutoUploadConflicts.shared.handles(metadata, backgroundResource: backgroundUploadResource != nil) {\n')
+    sub_exact(st, 'iOSClient/Settings/NCPreferences.swift',
+              '    static var canConfigureBackgroundUploadExtension: Bool {\n#if DEBUG\n',
+              '    static var canConfigureBackgroundUploadExtension: Bool {\n'
+              '        // NoDrive: switched off, it would replace same-name files (iOSClient/SmartConflicts, H6)\n'
+              '        if NCBrandOptions.shared.disable_background_upload_extension { return false }\n'
+              '#if DEBUG\n')
+    insert_after(st, 'iOSClient/Networking/NCNetworking+Upload.swift',
+                 '            await NCManageDatabase.shared.addAutoUploadTransferAsync([tblAutoUpload])\n',
+                 '#if !EXTENSION\n'
+                 "            // NoDrive: a renamed copy also records the photo's original name (iOSClient/SmartConflicts, H7)\n"
+                 '            await NCAutoUploadConflicts.shared.didUpload([tblAutoUpload])\n'
+                 '#endif\n')
+    insert_after(st, 'iOSClient/Data/NCMetadataUploadTranfersSuccess.swift',
+                 '        await NCManageDatabase.shared.addAutoUploadTransferAsync(autoUploads)\n',
+                 "        // NoDrive: a renamed copy also records the photo's original name (iOSClient/SmartConflicts, H8)\n"
+                 '        await NCAutoUploadConflicts.shared.didUpload(autoUploads)\n')
+    sub_exact(st, 'iOSClient/Settings/AutoUpload/NCAutoUploadView.swift',
+              '            .disabled(areSettingsDisabled)\n'
+              '            .opacity(areSettingsDisabled ? 0.5 : 1)\n'
+              '\n'
+              '            if #available(iOS 27, *),\n',
+              '            .disabled(areSettingsDisabled)\n'
+              '            .opacity(areSettingsDisabled ? 0.5 : 1)\n'
+              '\n'
+              '            // NoDrive: "If a file is already in NoDrive" (iOSClient/SmartConflicts, H9)\n'
+              '            NCConflictPolicySection(account: model.session.account)\n'
+              '\n'
+              '            if #available(iOS 27, *),\n')
 
 
 def problem_reports(st):
@@ -1191,6 +1261,7 @@ def run(st, base):
     brand_swift(st, base)
     intro_swift(st)
     swift_code(st)
+    smart_conflicts(st)
     problem_reports(st)
     plists(st, base)
     project(st, base)

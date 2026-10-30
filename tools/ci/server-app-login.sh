@@ -10,6 +10,7 @@
 #          second kind is what a "Log in with Nourax" user has). Values are random, masked in the log and
 #          exported through $GITHUB_ENV (never printed).
 #   check  run tools/ci/server_login_check.py against that server (report in build/server-login/).
+#   round3 run tools/ci/server_round3_check.py (the size the app reads for Smart conflicts; report round3.md).
 #   reports run tools/ci/server_reports_check.py (the folder "Problem reports", never replacing a report, the read-only
 #          share to nourax-support; report reports.md).
 #   stop   remove the container.
@@ -70,10 +71,14 @@ case "${1:-}" in
         mkdir -p "$OUT"
         python3 tools/ci/server_login_check.py --container "$NAME" --out "$OUT"
         ;;
+    round3)
+        mkdir -p "$OUT"
+        python3 tools/ci/server_round3_check.py --out "$OUT"
+        ;;
     reports)
         mkdir -p "$OUT"
         python3 tools/ci/server_reports_check.py --container "$NAME" --out "$OUT"
         ;;
     stop) docker rm -f "$NAME" > /dev/null 2>&1 || true ;;
-    *) echo "usage: $0 start|check|reports|stop"; exit 2 ;;
+    *) echo "usage: $0 start|check|round3|reports|stop"; exit 2 ;;
 esac
