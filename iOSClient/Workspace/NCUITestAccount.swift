@@ -48,10 +48,14 @@ enum NCUITestAccount {
     private static func injectIfRequested() async {
         guard let requested = requestedAccount() else { return }
 
-        // Wait for the first screen: the intro of a launch without an account.
+        // Wait for the first screen: the intro of a launch without an account. Any navigation controller is not
+        // enough: on a busy Mac the scene can still be starting, and when it then sets the intro as the root it
+        // replaces the main screen the account creation just showed (the test then waits for a main screen that never
+        // comes). So wait for the intro itself.
         for _ in 0..<240 {
             if let window = UIApplication.shared.mainAppWindow,
-               window.rootViewController is UINavigationController {
+               let navigation = window.rootViewController as? UINavigationController,
+               navigation.viewControllers.first is NCIntroViewController {
                 break
             }
             try? await Task.sleep(for: .milliseconds(500))
