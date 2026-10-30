@@ -51,6 +51,7 @@ final class NoDriveAgendaUITests: XCTestCase {
         save("agenda-personal-question")
         let toggles = app.switches.matching(NSPredicate(format: "identifier BEGINSWITH 'agendaPersonalToggle-'"))
         XCTAssertGreaterThan(toggles.count, 0, "the question lists no calendars")
+        chooseWorkCalendar(app)
         let done = app.buttons["agendaPersonalDone"]
         XCTAssertTrue(done.waitForExistence(timeout: 10))
         done.tap()
@@ -93,10 +94,10 @@ final class NoDriveAgendaUITests: XCTestCase {
         let app = try openAgenda()
         let writer = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Writer-Bot review'")).firstMatch
         XCTAssertTrue(writer.waitForExistence(timeout: 60))
-        app.buttons["agendaChip-agents"].tap()
+        element(app, "agendaChip-agents").tap()
         Thread.sleep(forTimeInterval: 1)
         XCTAssertFalse(writer.exists, "turning off My agents still shows the Writer-Bot review")
-        app.buttons["agendaChip-agents"].tap()
+        element(app, "agendaChip-agents").tap()
         app.segmentedControls["agendaScope"].buttons["Personal"].tap()
         Thread.sleep(forTimeInterval: 1)
         XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Client call'")).firstMatch.exists, "Personal still shows Work events")
@@ -121,7 +122,7 @@ final class NoDriveAgendaUITests: XCTestCase {
         XCTAssertTrue(problem.waitForExistence(timeout: 90), "the team problem for Banner design is missing")
         XCTAssertTrue(problem.label.contains("Sara"))
         save("agenda-team")
-        let showAll = app.switches["agendaShowAllTeam"]
+        let showAll = element(app, "agendaShowAllTeam")
         if showAll.waitForExistence(timeout: 10) {
             showAll.tap()
             Thread.sleep(forTimeInterval: 1)
@@ -163,10 +164,23 @@ final class NoDriveAgendaUITests: XCTestCase {
         entry.tap()
         let question = app.descendants(matching: .any)["agendaPersonalQuestion"]
         if question.waitForExistence(timeout: 60) {
+            chooseWorkCalendar(app)
             app.buttons["agendaPersonalDone"].tap()
         }
         XCTAssertTrue(waitFor(app.descendants(matching: .any)["agendaList"], in: app, timeout: 60), "NoAgenda did not open")
         return app
+    }
+
+    /// The Work calendar is not personal: its switch goes off (the Personal calendar stays on).
+    private func chooseWorkCalendar(_ app: XCUIApplication) {
+        let work = app.switches["agendaPersonalToggle-cal:work"]
+        if work.waitForExistence(timeout: 10), (work.value as? String) == "1" {
+            work.tap()
+        }
+    }
+
+    private func element(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
+        app.descendants(matching: .any)[identifier]
     }
 
     private func openSidebar(_ app: XCUIApplication) {

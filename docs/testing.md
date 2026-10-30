@@ -235,6 +235,13 @@ Smart conflicts, from the `nodrive-ios-screenshots` artifact of run [40696152657
 Screens after sign-in (file list, settings, licence page, Files app, widgets) need an account and
 are owner tests.
 
+## NoAgenda (step 1, read only)
+
+See `docs/noagenda.md` for what is tested where. Screenshots (light and dark) are written to
+`docs/screenshots/ios/agenda/` by the shard `agenda`: `agenda-sidebar`, `agenda-personal-question`, `agenda-day`,
+`agenda-week`, `agenda-month`, `agenda-detail`, `agenda-personal-only`, `agenda-sources`, `agenda-team`,
+`agenda-team-all`, `agenda-not-linked`.
+
 ## Owner test steps (Mac)
 
 1. Install Xcode 27.1 from the Mac App Store (macOS Tahoe 26.6 or newer), open it once and let it
@@ -272,7 +279,17 @@ are owner tests.
    decides later): after a reinstall, a photo that was renamed once is uploaded again under the next number, and a
    different photo whose name is already in this install's upload history (for example `IMG_0001` after the
    counter wraps, with original file names on) is skipped by the library scan before Smart sees it.
-8. Go through the "owner" rows above, then read back the device name shown under
+8. NoAgenda (on drive.nourax.org, with your own account): side menu → Apps → **NoAgenda** (first entry). Expect:
+   1. The question "Which of your calendars are personal?" once; after Done it does not come back.
+   2. Day shows your events and to-dos; an event with a Writer-Bot tag shows "🤖 Writer-Bot"; an invitation shows
+      "👤 Self" and no declined invitation. Week and Month show the same rows.
+   3. NoGantt tasks assigned to you show with their project; "NoAgenda shows NoGantt tasks" proves the app password
+      is accepted by NoGantt on the real server. If a banner says NoGantt or NoBoard did not accept NoDrive's sign-in,
+      tell the Workspace session (the page then opens through Open in NoGantt).
+   4. If you run a project or board: My team shows problems only; "Show all team tasks" shows the rest.
+   5. Switch the phone to flight mode and open NoAgenda: the last data stays, marked with the time it was saved.
+   6. Nothing is ever changed or deleted from NoAgenda in this step.
+9. Go through the "owner" rows above, then read back the device name shown under
    Settings → Security on drive.nourax.org.
 
 Building and the iPhone steps: [build.md](build.md).

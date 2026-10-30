@@ -188,6 +188,7 @@ struct NCAgendaPersonalQuestionView: View {
                     }
                 }
             }
+            .accessibilityIdentifier("agendaPersonalQuestion")
             .navigationTitle(NCAgendaText.t("_nodrive_agenda_personal_question_"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -205,6 +206,5 @@ struct NCAgendaPersonalQuestionView: View {
             }
         }
         .interactiveDismissDisabled()
-        .accessibilityIdentifier("agendaPersonalQuestion")
     }
 }
