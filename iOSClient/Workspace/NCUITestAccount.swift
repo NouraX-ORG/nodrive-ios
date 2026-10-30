@@ -67,6 +67,25 @@ enum NCUITestAccount {
                                         user: requested.user,
                                         password: requested.password,
                                         controller: nil)
+        NSLog("NODRIVE-UITEST account created; root is \(type(of: window.rootViewController as Any)), scene state \(window.windowScene?.activationState.rawValue ?? -1)")
+
+        // createAccount shows the main screen on UIApplication.mainAppWindow, which is nil while the scene is not
+        // foreground-active (for example while a system prompt is up). Then the intro stays and the test waits
+        // in vain (run 41110301742). Give the normal path a moment, then show the main screen on the same window.
+        for _ in 0..<20 {
+            if window.rootViewController is NCMainTabBarController { return }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        guard let controller = UIStoryboard(name: "Main", bundle: nil).instantiateInitialViewController() as? NCMainTabBarController else {
+            return
+        }
+        NSLog("NODRIVE-UITEST the main screen was not shown by the account creation; showing it")
+        controller.account = "\(requested.user) \(requested.urlBase)"
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        if let scene = window.windowScene {
+            SceneManager.shared.register(scene: scene, withRootViewController: controller)
+        }
     }
 }
 

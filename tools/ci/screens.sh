@@ -433,6 +433,8 @@ conflicts() {
     > "$RESULTS/ui-$variant-summary.json" 2>/dev/null || true
   xcrun simctl spawn "$udid" log show --last 8m --style compact \
     --predicate 'process == "Nextcloud"' 2>/dev/null | tail -n 3000 > "$RESULTS/ui-$variant-app.log" || true
+  xcrun simctl spawn "$udid" log show --last 15m --style compact --predicate 'process == "Nextcloud"' 2>/dev/null \
+    | grep -F "NODRIVE-UITEST" > "$RESULTS/ui-$variant-hook.log" || true   # what the test account hook saw
   # A test that was skipped (no account in the environment) still counts as "Executed" in the log: it must fail here.
   local skipped
   skipped=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("skippedTests", 0))' "$RESULTS/ui-$variant-summary.json" 2>/dev/null || echo unreadable)
