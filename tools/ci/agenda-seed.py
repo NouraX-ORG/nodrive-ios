@@ -38,6 +38,7 @@ def mkcalendar(user, uri, name, components):
 def seed_calendars(day):
     d = lambda n: day + datetime.timedelta(days=n)  # noqa: E731
     agent = ['X-NOURAX-AGENT-ID:AG-0001', 'CATEGORIES:agent:AG-0001']
+    step('calendar personal (ali)', mkcalendar('ali', 'personal', 'Personal', ['VEVENT', 'VTODO']))
     step('calendar work (ali)', mkcalendar('ali', 'work', 'Work', ['VEVENT']))
     items = [
         ('ali', 'personal', 'dentist', c.event('ci-dentist', 'Dentist', c.utc(day, 10), c.utc(day, 11))),
@@ -61,11 +62,11 @@ def seed_calendars(day):
 
 
 def share_calendar(owner, uri, with_user):
-    body = ('<?xml version="1.0"?><cs:share xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/"><cs:set>'
-            '<d:href>principal:principals/users/%s</d:href><cs:read-write/></cs:set></cs:share>' % with_user)
-    status, _, _ = c.request_retry(owner, 'POST', '/remote.php/dav/calendars/%s/%s/' % (owner, uri), body,
+    body = ('<?xml version="1.0"?><oc:share xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns"><oc:set>'
+            '<d:href>principal:principals/users/%s</d:href><oc:read-write/></oc:set></oc:share>' % with_user)
+    status, _, _ = c.request_retry(owner, 'POST', '/remote.php/dav/calendars/%s/%s' % (owner, uri), body,
                                    {'Content-Type': 'application/xml; charset=utf-8'})
-    return status in (200, 201, 204)
+    return status in (200, 201, 204), status
 
 
 def seed_team_calendar(day):
@@ -88,7 +89,8 @@ def seed_team_calendar(day):
     for name, ics in items:
         ok, status = c.put_calendar_object('mara', 'team', name, ics)
         step('put mara/team/' + name, ok, '' if ok else 'status %s' % status)
-    step('share team calendar to ali', share_calendar('mara', 'team', 'ali'))
+    shared, status = share_calendar('mara', 'team', 'ali')
+    step('share team calendar to ali', shared, 'status %s' % status)
     # An event Ali organises in the shared calendar
     ali_org = 'ORGANIZER;CN=Ali:mailto:ali@example.org'
     ok, status = c.put_calendar_object('mara', 'team', 'ali-organises',

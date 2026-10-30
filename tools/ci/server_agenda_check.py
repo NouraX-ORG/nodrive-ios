@@ -128,8 +128,10 @@ def main():
     end = c.ics_time(c.utc(day.replace(year=day.year + 1), 0))
     events_body = bodies.get('events', '').replace('{{START}}', start).replace('{{END}}', end)
     counts = {}
+    shared = re.findall(r'/remote\.php/dav/calendars/ali/(team[^/<]*)/', home_text)
+    team_uri = shared[0] if shared else 'team'
     for cal, wanted in (('personal', ['Dentist', 'Planning meeting']), ('work', ['Client call', 'Stand-up', 'Writer-Bot review']),
-                        ('team', ['Planning meeting', 'Ali organises'])):
+                        (team_uri, ['Planning meeting', 'Ali organises'])):
         status, _, data = c.request('ali', 'REPORT', '/remote.php/dav/calendars/ali/%s/' % cal, events_body,
                                     {'Depth': '1', 'Content-Type': 'application/xml'})
         text = data.decode('utf-8', 'replace')
@@ -193,7 +195,7 @@ def main():
 
     # 4. Reading changes nothing ----------------------------------------------------
     after = {}
-    for cal in ('personal', 'work', 'team'):
+    for cal in ('personal', 'work', team_uri):
         _, _, data = c.request('ali', 'REPORT', '/remote.php/dav/calendars/ali/%s/' % cal, events_body, {'Depth': '1', 'Content-Type': 'application/xml'})
         after[cal] = data.decode('utf-8', 'replace').count('BEGIN:VEVENT')
     row('reading changed no calendar object', all(after[k] == counts[k] for k in after), json.dumps(after))
