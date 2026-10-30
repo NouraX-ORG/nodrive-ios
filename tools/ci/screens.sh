@@ -167,6 +167,8 @@ prepare_first() {   # once per job: a clean simulator that trusts the CI root
   xcrun simctl keychain "$udid" add-root-cert "$CA_CER"
   sleep 45   # the first boot after an erase keeps the simulator busy for a while
   warm_up "$udid"
+  echo "simulator state: $(xcrun simctl list devices | grep -F "$udid" | head -n 1 | tr -s ' ')"
+  boot_wait "$udid"   # a simulator that shut down by itself under load (run 41099031734, "device is not booted") comes back
   echo "prepared $udid (erased, CI root trusted, app warmed up)"
 }
 
@@ -211,6 +213,7 @@ settle_cpu() {   # after a boot the simulator is busy for a while; NextcloudKit'
 
 switch() {   # per variant, without an erase (much faster than a first boot)
   local udid=$1 lang=$2 locale=$3 appearance=$4
+  boot_wait "$udid"   # no-op when it is running; `spawn` below needs a booted device
   xcrun simctl terminate "$udid" com.apple.mobileslideshow > /dev/null 2>&1 || true
   for app in "$APP_ID" "$APP_ID.ui-tests.xctrunner"; do
     xcrun simctl uninstall "$udid" "$app" > /dev/null 2>&1 || true
