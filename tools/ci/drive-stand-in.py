@@ -193,6 +193,9 @@ contacted. The real &ldquo;Log in with Nourax&rdquo; page is checked by the owne
 _log_lock = threading.Lock()
 
 
+import agenda_stand_in  # noqa: E402  (NoAgenda replay of the real server's recorded answers; same folder)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = 'NoDriveCIStandIn/1'
     protocol_version = 'HTTP/1.1'
@@ -567,6 +570,8 @@ class Handler(BaseHTTPRequestHandler):
         elif path.startswith('/login/v2/flow/') or path.startswith('/index.php/login/v2/flow/'):
             self._record(200, {'event': 'browser-opened-login-page'})
             self._send(200, FLOW_PAGE, 'text/html; charset=utf-8')
+        elif self.server.agenda and agenda_stand_in.handle(self, 'GET', path, b''):
+            return
         elif self.server.workspace and self._workspace_get(path):
             return
         else:
@@ -575,12 +580,21 @@ class Handler(BaseHTTPRequestHandler):
 
     do_HEAD = do_GET
 
+    def do_REPORT(self):
+        body = self._body()
+        path = urlsplit(self.path).path
+        if self.server.agenda and agenda_stand_in.handle(self, 'REPORT', path, body):
+            return
+        self._record(404)
+        self._json(404, {'message': 'not served by the CI stand-in'})
+
     def do_PROPFIND(self):
         length = int(self.headers.get('Content-Length') or 0)
-        if length:
-            self.rfile.read(min(length, 1 << 16))
+        raw = self.rfile.read(min(length, 1 << 16)) if length else b''
         ws = self.server.workspace
         path = urlsplit(self.path).path
+        if self.server.agenda and agenda_stand_in.handle(self, 'PROPFIND', path, raw):
+            return
         if ws and path.startswith('/remote.php/') and self._basic_ok():
             self._record(207)
             self._send(207, PROPFIND_BODY.format(user=ws['user']), 'application/xml; charset=utf-8')
@@ -591,6 +605,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         body = self._body()
         path = urlsplit(self.path).path
+        if self.server.agenda and agenda_stand_in.handle(self, 'POST', path, body):
+            return
         if self._reports() and path == '/ocs/v2.php/apps/files_sharing/api/v1/shares':
             self._shares_post(body)
         elif self._reports() and path == '/__ci/reports-reset':
@@ -618,11 +634,12 @@ class DualStackTLSServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, addr, handler, context, log_path, workspace=None, nav_delay=0.0):
+    def __init__(self, addr, handler, context, log_path, workspace=None, nav_delay=0.0, agenda=None):
         self.context = context
         self.log_path = log_path
         self.nav_delay = nav_delay
         self.workspace = workspace   # None, or {'user', 'password', 'sessions', 'renewed', 'renew_next'}
+        self.agenda = agenda         # None, or the NoAgenda replay state (tools/ci/agenda_stand_in.py)
         super().__init__(addr, handler)
 
     def server_bind(self):
@@ -677,8 +694,11 @@ def main():
                     help='also keep the "Problem reports" folder (needs --workspace); uploaded zips are saved under DIR/<variant>/')
     ap.add_argument('--workspace', action='store_true',
                     help='also answer for a signed-in account (NODRIVE_WS_USER, NODRIVE_WS_APP_PASSWORD in the environment)')
+    ap.add_argument('--agenda', metavar='SNAPSHOT',
+                    help='also replay the NoAgenda reads from this snapshot (needs --workspace; tools/ci/agenda_stand_in.py)')
     args = ap.parse_args()
     workspace = None
+    agenda = None
     if args.workspace:
         user, password = os.environ.get('NODRIVE_WS_USER', ''), os.environ.get('NODRIVE_WS_APP_PASSWORD', '')
         if not user or not password:
@@ -690,6 +710,11 @@ def main():
                                     'shares': [], 'count': 0, 'variant': 'run'}
     elif args.reports_uploads:
         sys.exit('drive-stand-in: --reports-uploads needs --workspace')
+    if args.agenda:
+        if not workspace:
+            sys.exit('drive-stand-in: --agenda needs --workspace')
+        with open(args.agenda, encoding='utf-8') as fh:
+            agenda = agenda_stand_in.AgendaState(json.load(fh))
 
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
@@ -703,7 +728,7 @@ def main():
             pass
     ctx.sni_callback = sni
 
-    server = DualStackTLSServer(('::', args.port), Handler, ctx, args.log, workspace, args.nav_delay)
+    server = DualStackTLSServer(('::', args.port), Handler, ctx, args.log, workspace, args.nav_delay, agenda)
     server.write_log({'t': round(time.time(), 3), 'event': 'listening', 'port': args.port, 'workspace': bool(workspace),
                       'reports': bool(workspace and workspace.get('reports'))})
     print(f'drive-stand-in: listening on [::]:{args.port} (IPv4 and IPv6), log {args.log}', flush=True)

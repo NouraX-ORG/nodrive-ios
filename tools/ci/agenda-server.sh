@@ -99,6 +99,19 @@ discover() {
             grep -nE "public function |#\[|@param" "$f" | head -n 60
         done
     } > "$OUT/discover.txt" 2>&1
+    {
+        echo "== create and update signatures"
+        local pair file pat
+        for pair in "ProjectController.php|public function create" "ProjectController.php|public function update"                     "TaskController.php|public function create" "TaskController.php|public function update"                     "SubProjectController.php|public function create" "ShareController.php|public function create"; do
+            file="${pair%%|*}"; pat="${pair#*|}"
+            echo "-- $file $pat"
+            grep -n -A34 "$pat" "$dir/lib/Controller/$file" | head -n 48
+        done
+        echo "== task resource rows"
+        grep -n "resource_id\|'work'\|\"work\"" "$dir/lib/Service/TaskResourceAssignmentService.php" | head -n 30
+        echo "== project and task creation fields"
+        grep -n "'title'\|'start_date'\|'end_date'\|'owner_id'" "$dir/lib/Service/ProjectService.php" "$dir/lib/Service/TaskService.php" | head -n 40
+    } >> "$OUT/discover.txt" 2>&1
     wc -l "$OUT/discover.txt"
 }
 

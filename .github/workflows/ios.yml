@@ -181,6 +181,31 @@ jobs:
       - name: What the pinned NoGantt exposes (for the seed)
         run: bash tools/ci/agenda-server.sh discover
 
+      - name: Seed the server (people, calendars, Deck, NoGantt, agent registry files)
+        id: seed
+        run: bash tools/ci/agenda-server.sh seed
+
+      - name: Check the auth proof, the app's own request bodies and the contract (real server code)
+        id: check
+        if: ${{ !cancelled() }}
+        run: bash tools/ci/agenda-server.sh check
+
+      - name: Record the real answers the app reads (the snapshot the simulator job replays)
+        id: snapshot
+        if: ${{ !cancelled() }}
+        run: bash tools/ci/agenda-server.sh snapshot
+
+      - name: The snapshot holds no seeded password
+        if: ${{ !cancelled() }}
+        run: |
+          set -eu
+          for name in $(env | grep '^NODRIVE_AGENDA_PW_' | cut -d= -f1); do
+            if grep -qF -- "${!name}" build/agenda-server/agenda-snapshot.json build/agenda-server/*.md build/agenda-server/*.txt 2> /dev/null; then
+              echo "a seeded app password is in an artifact"; exit 1
+            fi
+          done
+          echo "no seeded password in the artifacts"
+
       - name: Stop the server
         if: ${{ always() }}
         run: |
@@ -199,6 +224,15 @@ jobs:
             build/agenda-server/seed.json
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Upload the snapshot (input of the simulator job)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: nodrive-ios-agenda-snapshot
+          path: build/agenda-server/agenda-snapshot.json
+          if-no-files-found: warn
+          retention-days: 3
 
   ios:
     name: Build and unit tests (iOS Simulator)
