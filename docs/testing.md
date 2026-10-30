@@ -137,7 +137,7 @@ on `main` (commit `b03563c3c9`), all 3 jobs green. Xcode 27.1 (build 27A9275), r
 Known CI flakes (not caused by a feature; re-run the failed job): "Failed to determine hittability of NoDrive Icon"
 (home-screen icon tap), and once in `NoDriveWorkspaceUITests.test1MenuSignedInPageAndForeignLink` the side menu read
 "Scanned images" instead of "Contacts" after the scroll back to Mail. The screens job (before the split into shards) took
-about 2 h; the longest shard (reports) takes SHARD_TIME now (limit 120 min).
+about 2 h; the longest shard (reports) takes about 40 min (limit 120 min); the runner pool may run fewer than five shards at once.
 
 ## Screenshot index (`docs/screenshots/ios/`)
 
