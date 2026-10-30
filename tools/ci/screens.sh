@@ -418,6 +418,63 @@ conflicts() {
   return $status
 }
 
+# NoAgenda: the app against the stand-in that replays the real server's recorded answers (tools/ci/agenda-snapshot.py).
+# One stand-in run per user (ali, mara, olaf); the tests of that user run against it.
+agenda_standin() {   # agenda_standin <user>: (re)start the stand-in for this user with the snapshot
+  local user=$1 si="$RUNNER_TEMP/stand-in"
+  sudo pkill -f drive-stand-in.py || true
+  sleep 1
+  export NODRIVE_WS_USER="$user"
+  sudo -E nohup "$(command -v python3)" tools/ci/drive-stand-in.py --cert "$si/chain.pem" --key "$si/leaf.key" \
+    --log "$RESULTS/stand-in.jsonl" --workspace --agenda "$AGENDA_SNAPSHOT" > "$RESULTS/stand-in-agenda-$user.out" 2>&1 &
+  local i
+  for i in $(seq 1 30); do
+    curl -fsS --cacert "$si/ca.pem" -o /dev/null https://drive.nourax.org/status.php && return 0
+    sleep 0.5
+  done
+  echo "agenda: the stand-in for $user did not start"
+  return 1
+}
+
+agenda() {   # agenda <udid> <variant>: all NoAgenda UI tests, for ali, mara and olaf
+  local udid=$1 variant=$2 status=0 user
+  mkdir -p "$SHOTS/$variant" "$RESULTS"
+  xcrun simctl install "$udid" "${AGENDA_APP:-app/NoDrive.app}"
+  for user in ali mara olaf; do
+    agenda_standin "$user" || { status=1; continue; }
+    set +e
+    TEST_RUNNER_NODRIVE_VARIANT="$variant" TEST_RUNNER_NODRIVE_SHOTS_DIR="$SHOTS" \
+    TEST_RUNNER_NODRIVE_AGENDA_USER="$user" TEST_RUNNER_NODRIVE_AGENDA_TODAY="$AGENDA_TODAY" \
+    TEST_RUNNER_NODRIVE_UITEST_ACCOUNT="https://drive.nourax.org|$user|$NODRIVE_WS_APP_PASSWORD" \
+      xcodebuild test-without-building \
+        -xctestrun "$XCTESTRUN" \
+        -destination "id=$udid" \
+        -only-testing:NextcloudUITests/NoDriveAgendaUITests \
+        -parallel-testing-enabled NO \
+        -resultBundlePath "$RESULTS/ui-$variant-$user.xcresult" \
+        > "$RESULTS/ui-$variant-$user.log" 2>&1
+    local code=$?
+    set -e
+    xcbeautify --renderer github-actions < "$RESULTS/ui-$variant-$user.log" || true
+    if ! grep -Eq "Executed [1-9][0-9]* tests?" "$RESULTS/ui-$variant-$user.log"; then
+      echo "agenda $variant $user: no test ran (check -only-testing and the .xctestrun)"
+      code=1
+    fi
+    xcrun xcresulttool get test-results summary --path "$RESULTS/ui-$variant-$user.xcresult" \
+      > "$RESULTS/ui-$variant-$user-summary.json" 2>/dev/null || true
+    xcrun simctl spawn "$udid" log show --last 8m --style compact \
+      --predicate 'process == "Nextcloud"' 2>/dev/null | tail -n 2000 > "$RESULTS/ui-$variant-$user-app.log" || true
+    # the tests of the other users are skipped by design: at least one must have passed
+    local passed
+    passed=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("passedTests", 0))' "$RESULTS/ui-$variant-$user-summary.json" 2>/dev/null || echo 0)
+    if [ "$passed" = "0" ]; then echo "agenda $variant $user: no test passed"; code=1; fi
+    [ "$code" = "0" ] || status=1
+    echo "agenda $variant $user: xcodebuild exit $code, passed tests $passed"
+  done
+  echo "agenda $variant: status $status; files: $(ls "$SHOTS/$variant" | tr '\n' ' ')"
+  return $status
+}
+
 case "$cmd" in
   check-tools) check_tools "$@" ;;
   make-certs) make_certs "$@" ;;
@@ -431,5 +488,6 @@ case "$cmd" in
   workspace) workspace "$@" ;;
   reports) reports "$@" ;;
   conflicts) conflicts "$@" ;;
+  agenda) agenda "$@" ;;
   *) echo "usage: see the header of $0" >&2; exit 2 ;;
 esac

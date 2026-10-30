@@ -108,8 +108,15 @@ def seed(day, deck, step):
     cards = (deck or {}).get('cards', {})
     if 'landing' in made and cards:
         card = next(iter(cards.values()))
-        status, _ = post('tasks/%d/deck-links' % made['landing'], {'card_id': card})
-        step('nogantt task linked to a Deck card', status in (200, 201), 'status %s' % status)
+        status, data = 0, None
+        for action in (None, 'keep', 'task', 'card', 'adopt', 'enforce', 'ignore'):
+            body = {'card_id': card}
+            if action:
+                body['date_action'] = action
+            status, data = post('tasks/%d/deck-links' % made['landing'], body)
+            if status in (200, 201):
+                break
+        step('nogantt task linked to a Deck card', status in (200, 201), 'status %s %s' % (status, str(data)[:160]))
 
     # NoGantt copies Sara's tasks into a calendar (the hidden-calendar rule) ------------
     status, data = post('task-sync', {'enabled': True, 'create_calendar': True}, user='sara', method='PUT')
