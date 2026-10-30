@@ -28,8 +28,10 @@ enum NCAgendaWebLinks {
         }
     }
 
+    private static let unreserved = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+
     static func encode(_ text: String) -> String {
-        text.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? text
+        text.addingPercentEncoding(withAllowedCharacters: unreserved) ?? text
     }
 
     /// The path of the item's own page, or the app's start page when the item can't be addressed.

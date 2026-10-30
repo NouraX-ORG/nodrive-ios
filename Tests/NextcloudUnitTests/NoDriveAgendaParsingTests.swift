@@ -30,7 +30,8 @@ final class AgendaFakeServer: @unchecked Sendable {
             lock.lock()
             log.append(request)
             lock.unlock()
-            let path = request.url?.path ?? ""
+            // URLComponents keeps a trailing slash, URL.path drops it
+            let path = request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.path } ?? ""
             let answer = handler(request.httpMethod ?? "", path, request) ?? (404, "")
             let response = HTTPURLResponse(url: request.url!, statusCode: answer.0, httpVersion: "HTTP/1.1",
                                            headerFields: ["ETag": "\"etag-1\""])!

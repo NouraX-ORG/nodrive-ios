@@ -116,7 +116,8 @@ struct NCAgendaHTTP {
             let (data, response) = try await fetch(request)
             let milliseconds = Int(Date().timeIntervalSince(started) * 1000)
             NCAgendaLog.log("request", home: home, status: response.statusCode, milliseconds: milliseconds)
-            if (300..<400).contains(response.statusCode) { throw NCAgendaHTTPError.redirected(response.statusCode) }
+            // A 304 answers If-None-Match (the registry); every other 3xx is a redirect and is never followed.
+            if (300..<400).contains(response.statusCode), response.statusCode != 304 { throw NCAgendaHTTPError.redirected(response.statusCode) }
             return NCAgendaResponse(status: response.statusCode, data: data, etag: response.value(forHTTPHeaderField: "ETag"))
         } catch let error as NCAgendaHTTPError {
             throw error

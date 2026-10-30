@@ -160,6 +160,46 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  agenda-server:
+    name: NoAgenda server (a real Nextcloud 35 with calendar, tasks, Deck and NoGantt 2.4.1)
+    needs: branding
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Start the throwaway server (Nextcloud 35.0.2 in Docker, never drive.nourax.org)
+        run: bash tools/ci/agenda-server.sh start
+
+      - name: Install the four apps from their pinned releases (SHA-256 checked)
+        run: bash tools/ci/agenda-server.sh apps
+
+      - name: What the pinned NoGantt exposes (for the seed)
+        run: bash tools/ci/agenda-server.sh discover
+
+      - name: Stop the server
+        if: ${{ always() }}
+        run: |
+          bash tools/ci/agenda-server.sh stop
+          rm -f build/agenda-server/server.env
+
+      - name: Upload the NoAgenda server report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: nodrive-ios-agenda-server
+          path: |
+            build/agenda-server/*.md
+            build/agenda-server/*.txt
+            build/agenda-server/status.json
+            build/agenda-server/seed.json
+          if-no-files-found: warn
+          retention-days: 14
+
   ios:
     name: Build and unit tests (iOS Simulator)
     needs: branding
