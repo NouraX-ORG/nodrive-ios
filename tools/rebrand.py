@@ -118,6 +118,10 @@ TEST_FILES = [
     ('NextcloudUITests', 'NextcloudUITests', 'NoDriveConflictSettingsUITests.swift'),
     ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveProblemReportsTests.swift'),
     ('NextcloudUITests', 'NextcloudUITests', 'NoDriveProblemReportsUITests.swift'),
+    ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveAgendaParsingTests.swift'),
+    ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveAgendaRulesTests.swift'),
+    ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveAgendaRuntimeTests.swift'),
+    ('NextcloudUITests', 'NextcloudUITests', 'NoDriveAgendaUITests.swift'),
 ]
 # Our own source folders of the app target, each a new group inside its parent group:
 # (target, folder, parent group name). Every .swift file of the folder is added.
@@ -125,6 +129,7 @@ APP_SOURCE_FOLDERS = [
     ('Nextcloud', 'iOSClient/Workspace', 'iOSClient'),
     ('Nextcloud', 'iOSClient/SmartConflicts', 'iOSClient'),
     ('Nextcloud', 'iOSClient/ProblemReports', 'iOSClient'),
+    ('Nextcloud', 'iOSClient/NoAgenda', 'iOSClient'),
 ]
 # Product of the UI-test target. Its runner app ("<product>-Runner") sits on the simulator's home
 # screen during the screenshot walk, so it must not carry the Nextcloud name. The target name
@@ -940,6 +945,51 @@ def problem_reports(st):
                   '            NCProblemReportsSection(controller: model.controller)\n')
 
 
+def noagenda(st):
+    """Hooks of the feature "NoAgenda" (iOSClient/NoAgenda): the first entry of the sidebar's Apps section, the
+    clean-up with the account, and the shared background refresh. Each hook is one call and one `// NoDrive:` line."""
+    side = 'iOSClient/Main/NCSidebarView.swift'
+    insert_after(st, side,
+                 '    var openWorkspaceApp: (NCWorkspaceApp) -> Void = { _ in }\n',
+                 '    // NoDrive: NoAgenda, the first entry of the Apps section (iOSClient/NoAgenda, A1)\n'
+                 '    var openAgenda: () -> Void = {}\n')
+    sub_exact(st, side,
+              '                            if !workspaceApps.apps.isEmpty {\n',
+              '                            // NoDrive: the Apps section is also there for NoAgenda alone (iOSClient/NoAgenda, A2)\n'
+              '                            if NCAgendaEntry.isShown(account: activeAccount) || !workspaceApps.apps.isEmpty {\n')
+    insert_before(st, side,
+                  '                                ForEach(workspaceApps.apps) { app in\n',
+                  '                                // NoDrive: NoAgenda above the server\'s apps (iOSClient/NoAgenda, A3)\n'
+                  '                                sidebarItem(LocalizedStringKey(NCAgendaEntry.title),\n'
+                  '                                            systemImage: NCAgendaEntry.symbolName,\n'
+                  '                                            isSelected: selectedDestination == NCAgendaEntry.sidebarIdentifier,\n'
+                  '                                            action: openAgenda)\n'
+                  '                                    .accessibilityIdentifier(NCAgendaEntry.sidebarIdentifier)\n')
+    tab = 'iOSClient/Main/NCMainTabBarController+Sidebar.swift'
+    insert_after(st, tab,
+                 '            self?.openSidebarWorkspaceApp(app)\n',
+                 '        }, openAgenda: { [weak self] in\n'
+                 '            // NoDrive: open NoAgenda (iOSClient/NoAgenda, A4)\n'
+                 '            self?.removeSidebar()\n'
+                 '            self?.openSidebarAgenda()\n')
+    insert_before(st, tab,
+                  '        if let identifier = root.restorationIdentifier,\n',
+                  '        // NoDrive: NoAgenda keeps its selection like the Workspace apps (iOSClient/NoAgenda, A5)\n')
+    sub_exact(st, tab,
+              'identifier.hasPrefix("sidebarWorkspaceApp-") { return identifier }',
+              'identifier.hasPrefix("sidebarWorkspaceApp-") || identifier == NCAgendaEntry.sidebarIdentifier { return identifier }')
+    insert_after(st, 'iOSClient/Account/NCAccount.swift',
+                 '        await NCWorkspaceWeb.shared.forget(account: account, urlBase: tblAccount?.urlBase ?? "")\n',
+                 '        // NoDrive: NoAgenda forgets its cache and settings of this account (iOSClient/NoAgenda, A6)\n'
+                 '        await NCAgendaStore.forget(account: account)\n')
+    refresh = 'iOSClient/Refresh/AppDelegate+AppRefresh.swift'
+    anchor = '            await NCAutoUpload.shared.autoUploadBackgroundSync()\n'
+    insert_before(st, refresh, anchor,
+                  '            // NoDrive: NoAgenda refreshes in the same background task (iOSClient/NoAgenda, A7)\n'
+                  '            async let noAgenda: Void = NCAgendaBackground.refresh()\n')
+    insert_after(st, refresh, anchor, '            await noAgenda\n')
+
+
 def plists(st, base):
     group = f'group.{base}'
     for rel in BRAND_PLISTS:
@@ -1263,6 +1313,7 @@ def run(st, base):
     swift_code(st)
     smart_conflicts(st)
     problem_reports(st)
+    noagenda(st)
     plists(st, base)
     project(st, base)
     storyboards(st)

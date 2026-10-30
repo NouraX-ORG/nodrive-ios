@@ -47,7 +47,10 @@ extension AppDelegate {
         scheduleAppRefresh()
 
         let refreshTask = Task { () -> Bool in
+            // NoDrive: NoAgenda refreshes in the same background task (iOSClient/NoAgenda, A7)
+            async let noAgenda: Void = NCAgendaBackground.refresh()
             await NCAutoUpload.shared.autoUploadBackgroundSync()
+            await noAgenda
             return !Task.isCancelled
         }
 

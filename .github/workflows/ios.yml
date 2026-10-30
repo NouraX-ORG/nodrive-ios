@@ -19,6 +19,10 @@ on:
       - feature/workspace-apps-fixes
       - feature/smart-conflicts
       - feature/problem-reports
+      - feature/noagenda-core
+      - feature/noagenda-edit
+      - feature/noagenda-timeline
+      - feature/device-calendar-sync
   workflow_dispatch:
     inputs:
       products_run_id:
@@ -101,6 +105,9 @@ jobs:
 
       - name: The problem-report checks can fail (each broken run must be caught)
         run: python tools/ci/report-check.py --self-test
+
+      - name: The NoAgenda test hooks exist in Debug builds only
+        run: python tools/ci/workspace-check.py --debug-only iOSClient/NoAgenda/NCAgendaUITestHooks.swift
 
   server-login:
     name: Server login (a real Nextcloud 35 in Docker; the app's web view sign-in)

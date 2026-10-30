@@ -160,6 +160,8 @@ class NCAccount: NSObject {
         }
         // Close the Workspace web screens of this account and forget their data
         await NCWorkspaceWeb.shared.forget(account: account, urlBase: tblAccount?.urlBase ?? "")
+        // NoDrive: NoAgenda forgets its cache and settings of this account (iOSClient/NoAgenda, A6)
+        await NCAgendaStore.forget(account: account)
         // Remove session in NextcloudKit
         NextcloudKit.shared.nkCommonInstance.nksessions.remove(account: account)
         // Remove session

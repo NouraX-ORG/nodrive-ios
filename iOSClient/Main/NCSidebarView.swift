@@ -28,6 +28,8 @@ struct NCSidebarView: View {
     let openScannedImages: () -> Void
     let openExternalSite: (String, String, Int) -> Void
     var openWorkspaceApp: (NCWorkspaceApp) -> Void = { _ in }
+    // NoDrive: NoAgenda, the first entry of the Apps section (iOSClient/NoAgenda, A1)
+    var openAgenda: () -> Void = {}
     let openApp: (String, String?) -> Void
     var navigationBarCenterY: () -> CGFloat? = { nil }
     var usesExpandedPhonePortrait: () -> Bool = { false }
@@ -121,13 +123,20 @@ struct NCSidebarView: View {
                                 .accessibilityIdentifier("sidebarAutoUpload")
                             sidebarItem("_scanned_images_", systemImage: "doc.text.viewfinder", isSelected: false, action: openScannedImages)
                                 .accessibilityIdentifier("sidebarScannedImages")
-                            if !workspaceApps.apps.isEmpty {
+                            // NoDrive: the Apps section is also there for NoAgenda alone (iOSClient/NoAgenda, A2)
+                            if NCAgendaEntry.isShown(account: activeAccount) || !workspaceApps.apps.isEmpty {
                                 Text("_apps_")
                                     .font(.subheadline.weight(.semibold))
                                     .foregroundStyle(.secondary)
                                     .padding(.horizontal, 32)
                                     .padding(.top, 20)
                                     .padding(.bottom, 8)
+                                // NoDrive: NoAgenda above the server's apps (iOSClient/NoAgenda, A3)
+                                sidebarItem(LocalizedStringKey(NCAgendaEntry.title),
+                                            systemImage: NCAgendaEntry.symbolName,
+                                            isSelected: selectedDestination == NCAgendaEntry.sidebarIdentifier,
+                                            action: openAgenda)
+                                    .accessibilityIdentifier(NCAgendaEntry.sidebarIdentifier)
                                 ForEach(workspaceApps.apps) { app in
                                     sidebarItem(LocalizedStringKey(app.name),
                                                 systemImage: app.symbolName,

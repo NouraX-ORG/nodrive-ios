@@ -72,6 +72,10 @@ extension NCMainTabBarController {
         }, openWorkspaceApp: { [weak self] app in
             self?.removeSidebar()
             self?.openSidebarWorkspaceApp(app)
+        }, openAgenda: { [weak self] in
+            // NoDrive: open NoAgenda (iOSClient/NoAgenda, A4)
+            self?.removeSidebar()
+            self?.openSidebarAgenda()
         }, openApp: { [weak self] url, fallbackUrl in
             self?.removeSidebar()
             self?.openSidebarApp(url: url, fallbackUrl: fallbackUrl)
@@ -90,8 +94,9 @@ extension NCMainTabBarController {
     private func sidebarSelectionIdentifier() -> String? {
         guard selectedIndex == 0,
               let root = currentNavigationController()?.viewControllers.first else { return nil }
+        // NoDrive: NoAgenda keeps its selection like the Workspace apps (iOSClient/NoAgenda, A5)
         if let identifier = root.restorationIdentifier,
-           identifier.hasPrefix("sidebarExternalSite-") || identifier.hasPrefix("sidebarWorkspaceApp-") { return identifier }
+           identifier.hasPrefix("sidebarExternalSite-") || identifier.hasPrefix("sidebarWorkspaceApp-") || identifier == NCAgendaEntry.sidebarIdentifier { return identifier }
         switch root {
         case let files as NCFiles:
             return files.personalFilesOnly ? "sidebarPersonalFiles" : "sidebarFiles"
