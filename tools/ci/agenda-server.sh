@@ -111,6 +111,7 @@ discover() {
         grep -n "resource_id\|'work'\|\"work\"" "$dir/lib/Service/TaskResourceAssignmentService.php" | head -n 30
         echo "== deck link date_action"
         grep -rn "date_action" "$dir/lib" | head -n 12
+        sed -n 70,110p "$dir/lib/Service/DeckLinkService.php"
         echo "== project and task creation fields"
         grep -n "'title'\|'start_date'\|'end_date'\|'owner_id'" "$dir/lib/Service/ProjectService.php" "$dir/lib/Service/TaskService.php" | head -n 40
     } >> "$OUT/discover.txt" 2>&1
