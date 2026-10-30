@@ -135,7 +135,13 @@ final class NoDriveAgendaUITests: XCTestCase {
         guard user == "olaf" else { throw XCTSkip("this check runs for olaf") }
         let app = try openAgenda()
         let banner = app.descendants(matching: .any)["agendaBanner-notLinked"]
-        XCTAssertTrue(banner.waitForExistence(timeout: 90), "the not-linked state is not shown")
+        var shown = false
+        for _ in 0..<45 where !shown {
+            ensureAgenda(app)
+            shown = banner.exists
+            if !shown { Thread.sleep(forTimeInterval: 2) }
+        }
+        XCTAssertTrue(shown, "the not-linked state is not shown")
         save("agenda-not-linked")
     }
 
@@ -157,26 +163,33 @@ final class NoDriveAgendaUITests: XCTestCase {
     }
 
     /// Opens NoAgenda from the sidebar and answers the one-time question if it comes. After a change of account
-    /// the app may rebuild its main screen a little later and drop the screen: open it again until it stays.
+    /// the app rebuilds its main screen a little later and drops the screen: `ensureAgenda` opens it again.
     private func openAgenda() throws -> XCUIApplication {
         let app = try launchApp()
-        let list = app.descendants(matching: .any)["agendaList"]
-        for attempt in 1...4 {
-            Thread.sleep(forTimeInterval: attempt == 1 ? 6 : 2)
-            openSidebar(app)
-            let entry = app.descendants(matching: .any)["sidebarNoAgenda"]
-            XCTAssertTrue(waitFor(entry, in: app, timeout: 60, hittable: true), "the sidebar has no NoAgenda entry")
-            entry.tap()
-            let question = app.descendants(matching: .any)["agendaPersonalQuestion"]
-            if question.waitForExistence(timeout: 40) {
-                chooseWorkCalendar(app)
-                app.buttons["agendaPersonalDone"].tap()
-            }
-            XCTAssertTrue(waitFor(list, in: app, timeout: 60), "NoAgenda did not open")
-            Thread.sleep(forTimeInterval: 8)
-            if list.exists { break }
-        }
+        Thread.sleep(forTimeInterval: 8)
+        showAgenda(app)
         return app
+    }
+
+    private func showAgenda(_ app: XCUIApplication) {
+        let list = app.descendants(matching: .any)["agendaList"]
+        openSidebar(app)
+        let entry = app.descendants(matching: .any)["sidebarNoAgenda"]
+        XCTAssertTrue(waitFor(entry, in: app, timeout: 60, hittable: true), "the sidebar has no NoAgenda entry")
+        entry.tap()
+        let question = app.descendants(matching: .any)["agendaPersonalQuestion"]
+        if question.waitForExistence(timeout: 40) {
+            chooseWorkCalendar(app)
+            app.buttons["agendaPersonalDone"].tap()
+        }
+        XCTAssertTrue(waitFor(list, in: app, timeout: 60), "NoAgenda did not open")
+    }
+
+    private func ensureAgenda(_ app: XCUIApplication) {
+        for _ in 0..<3 where !app.descendants(matching: .any)["agendaList"].exists {
+            showAgenda(app)
+            Thread.sleep(forTimeInterval: 3)
+        }
     }
 
     /// A row (or problem) whose label holds `text`; the list is scrolled to find it.
@@ -185,6 +198,7 @@ final class NoDriveAgendaUITests: XCTestCase {
         let list = app.descendants(matching: .any)["agendaList"]
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
+            ensureAgenda(app)
             if element.exists { return element }
             for _ in 0..<8 {
                 list.swipeUp()
@@ -198,9 +212,11 @@ final class NoDriveAgendaUITests: XCTestCase {
 
     /// The Work calendar is not personal: its switch goes off (the Personal calendar stays on).
     private func chooseWorkCalendar(_ app: XCUIApplication) {
-        let work = app.switches["agendaPersonalToggle-cal:work"]
-        if work.waitForExistence(timeout: 10), (work.value as? String) == "1" {
-            work.tap()
+        var work = app.switches["agendaPersonalToggle-cal:work"]
+        if !work.waitForExistence(timeout: 10) { work = app.switches["Work"] }
+        for _ in 0..<3 where (work.value as? String) != "0" {
+            work.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+            Thread.sleep(forTimeInterval: 1)
         }
     }
 

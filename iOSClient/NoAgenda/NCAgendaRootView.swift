@@ -16,16 +16,6 @@ struct NCAgendaRootView: View {
         .background(Color(UIColor.systemBackground))
         .navigationTitle(NCAgendaEntry.title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    model.showSources = true
-                } label: {
-                    Label(NCAgendaText.t("_nodrive_agenda_sources_"), systemImage: "slider.horizontal.3")
-                }
-                .accessibilityIdentifier("agendaSources")
-            }
-        }
         .task { await model.start() }
         .sheet(item: $model.selectedItem) { item in
             NCAgendaDetailSheet(model: model, item: item)
@@ -87,12 +77,21 @@ struct NCAgendaRootView: View {
             .pickerStyle(.segmented)
             .accessibilityIdentifier("agendaScope")
 
-            if let updated = model.updatedText {
-                Text(updated)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityIdentifier("agendaUpdated")
+            HStack {
+                if let updated = model.updatedText {
+                    Text(updated)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("agendaUpdated")
+                }
+                Spacer()
+                Button {
+                    model.showSources = true
+                } label: {
+                    Label(NCAgendaText.t("_nodrive_agenda_sources_"), systemImage: "slider.horizontal.3")
+                        .font(.subheadline)
+                }
+                .accessibilityIdentifier("agendaSources")
             }
         }
         .padding(.horizontal, 16)

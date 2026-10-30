@@ -12,6 +12,10 @@ struct NCAgendaDetailSheet: View {
         NavigationStack {
             List {
                 Section {
+                    Button(item.home.openTitle) { model.open(item.link, title: item.home.openTitle) }
+                        .accessibilityIdentifier("agendaDetailOpen")
+                }
+                Section {
                     Label(item.title.isEmpty ? " " : item.title, systemImage: item.kind.symbolName)
                         .font(.headline)
                         .accessibilityIdentifier("agendaDetailTitle")
@@ -62,10 +66,6 @@ struct NCAgendaDetailSheet: View {
                     Section {
                         Label(lockText(lock), systemImage: "lock.fill").font(.footnote)
                     }
-                }
-                Section {
-                    Button(item.home.openTitle) { model.open(item.link, title: item.home.openTitle) }
-                        .accessibilityIdentifier("agendaDetailOpen")
                 }
             }
             .navigationTitle(NCAgendaText.t("_nodrive_agenda_detail_title_"))
