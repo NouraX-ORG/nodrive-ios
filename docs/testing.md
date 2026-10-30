@@ -117,7 +117,12 @@ on `main` (commit `b03563c3c9`), all 3 jobs green. Xcode 27.1 (build 27A9275), r
 - `drive.nourax.org` points to `127.0.0.1`/`::1` on the runner, where `tools/ci/drive-stand-in.py`
   answers `status.php` and the Login Flow v2 start with a plain page marked "CI stand-in". The
   simulator trusts a throw-away CI root only for this.
-- `tools/ci/network-gate.py` reads a DNS capture of the whole run and fails on any Nextcloud,
+- The screens job runs as five parallel shards (matrix in `.github/workflows/ios.yml`: smoke, walks, dark,
+  workspace, reports), each on its own runner and simulator. The job "Simulator screens report" merges their
+  artifacts, runs the network gate, the screenshot report and the docs copies over all of them, and uploads
+  `nodrive-ios-screenshots` and `nodrive-ios-screens-results` as before. A new UI test group is a new matrix
+  entry plus its steps (how-to at the top of the job in the workflow file).
+- `tools/ci/network-gate.py` reads the DNS captures (all shards, joined) and fails on any Nextcloud,
   ownCloud, Firebase or Crashlytics name. `tools/ci/screens-report.py` checks every screenshot and
   makes the 1200 px copies below.
 
@@ -131,8 +136,8 @@ on `main` (commit `b03563c3c9`), all 3 jobs green. Xcode 27.1 (build 27A9275), r
 
 Known CI flakes (not caused by a feature; re-run the failed job): "Failed to determine hittability of NoDrive Icon"
 (home-screen icon tap), and once in `NoDriveWorkspaceUITests.test1MenuSignedInPageAndForeignLink` the side menu read
-"Scanned images" instead of "Contacts" after the scroll back to Mail. The screens job now takes about 2 h 20 min
-(its limit is 180 min).
+"Scanned images" instead of "Contacts" after the scroll back to Mail. The screens job (before the split into shards) took
+about 2 h; the longest shard (reports) takes SHARD_TIME now (limit 120 min).
 
 ## Screenshot index (`docs/screenshots/ios/`)
 
