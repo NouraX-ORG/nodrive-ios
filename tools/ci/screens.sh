@@ -10,7 +10,8 @@
 #   screens.sh capture-start <results-dir>  DNS capture on all interfaces (tcpdump -i pktap,all)
 #   screens.sh capture-stop <results-dir>   stop it, write dns.txt (and dns-processes.txt)
 #   screens.sh device                       UDID of "iPhone 17" with iOS $IOS_VERSION (default 27.0)
-#   screens.sh prepare-first <udid>         erase and boot once, trust $CA_CER (the CI root), let it settle
+#   screens.sh prepare-first <udid>         erase and boot once, trust $CA_CER (the CI root), let it settle,
+#                                           launch the app once (warm-up, app/NoDrive.app) and terminate it
 #   screens.sh switch <udid> <lang> <locale> <light|dark>
 #        remove NoDrive and the test runner (fresh permissions), set the system language
 #        (reboot), appearance and a fixed status bar
@@ -165,7 +166,27 @@ prepare_first() {   # once per job: a clean simulator that trusts the CI root
   boot_wait "$udid"
   xcrun simctl keychain "$udid" add-root-cert "$CA_CER"
   sleep 45   # the first boot after an erase keeps the simulator busy for a while
-  echo "prepared $udid (erased, CI root trusted)"
+  warm_up "$udid"
+  echo "prepared $udid (erased, CI root trusted, app warmed up)"
+}
+
+warm_up() {   # install and launch the app once on the fresh simulator, so its first start (cold caches) does not
+  # happen inside the first UI walk, then terminate it. switch() removes the app again, so the walk starts from a
+  # clean install exactly as before. Only waits: nothing here is checked.
+  local udid=$1 app=${WARMUP_APP:-app/NoDrive.app} out pid waited=0
+  if [ ! -d "$app" ]; then echo "warm-up skipped: no $app"; return 0; fi
+  xcrun simctl install "$udid" "$app"
+  out=$(xcrun simctl launch "$udid" "$APP_ID" -AppleLanguages "(en)" -AppleLocale en_US) || true
+  echo "warm-up launch: $out"
+  pid=${out##*: }
+  while [ "$waited" -lt 60 ]; do
+    sleep 5
+    waited=$((waited + 5))
+    if ! ps -p "$pid" > /dev/null 2>&1; then echo "warm-up: the app is not running after ${waited} s"; break; fi
+    if [ "$waited" -ge 20 ] && [ "$(mac_cpu)" -lt 45 ]; then break; fi
+  done
+  echo "warm-up: app up for ${waited} s (Mac CPU $(mac_cpu) %)"
+  xcrun simctl terminate "$udid" "$APP_ID" > /dev/null 2>&1 || true
 }
 
 mac_cpu() {   # busy share of all CPUs (user + sys, %), from the second of two top samples

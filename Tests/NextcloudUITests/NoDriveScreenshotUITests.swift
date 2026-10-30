@@ -325,15 +325,24 @@ final class NoDriveScreenshotUITests: XCTestCase {
     }
 
     /// Waits until intro slide `number` sits in the middle of the window (the intro scrolls by itself every 4 s).
+    /// The cell comes and goes while the intro scrolls: asking `exists` and then `frame` in two steps fails the test
+    /// ("Failed to get matching snapshot") when the cell is gone in between, which happens on a busy Mac. So the
+    /// position is read from one snapshot that may fail quietly; the timeout still decides.
     private func waitForSlide(_ number: Int, in app: XCUIApplication, timeout: TimeInterval = 20) -> Bool {
         let cell = app.cells["nodriveIntroSlide\(number)"]
         let window = app.windows.firstMatch
         let deadline = Date().addingTimeInterval(timeout)
+        func centred() -> Bool {
+            guard let cellFrame = try? cell.snapshot().frame, let windowFrame = try? window.snapshot().frame else {
+                return false
+            }
+            return abs(cellFrame.midX - windowFrame.midX) < 2
+        }
         while Date() < deadline {
             answerPrompts(in: app)
-            if cell.exists, abs(cell.frame.midX - window.frame.midX) < 2 {
+            if centred() {
                 Thread.sleep(forTimeInterval: 0.6)
-                if cell.exists, abs(cell.frame.midX - window.frame.midX) < 2 {
+                if centred() {
                     return true
                 }
             }
