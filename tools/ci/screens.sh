@@ -170,9 +170,11 @@ mac_cpu() {   # busy share of all CPUs (user + sys, %), from the second of two t
 }
 
 settle_cpu() {   # after a boot the simulator is busy for a while; NextcloudKit's background-QoS
-  # reply queue starves under that load. Wait (up to about 180 s) for 3 calm readings in a row.
+  # reply queue starves under that load. Wait (up to about 420 s) for 3 calm readings in a row.
+  # 420 s, not 180 s: since the screens job is split into parallel shards, every shard starts from a
+  # fresh erase, and on the 3-core CI runners the first boot can keep the Mac busy for 3-6 minutes.
   local calm=0 reading=0 waited=0
-  while [ "$waited" -lt 180 ]; do
+  while [ "$waited" -lt 420 ]; do
     reading=$(mac_cpu)
     if [ "$reading" -lt 45 ]; then calm=$((calm + 1)); else calm=0; fi
     if [ "$calm" -ge 3 ]; then echo "simulator settled after ${waited} s (Mac CPU ${reading} %)"; return 0; fi
