@@ -221,6 +221,8 @@ final class NoDriveAgendaUITests: XCTestCase {
     private func chooseWorkCalendar(_ app: XCUIApplication) {
         var work = app.switches["agendaPersonalToggle-cal:work"]
         if !work.waitForExistence(timeout: 10) { work = app.switches["Work"] }
+        // Mara has no Work calendar: nothing to switch off
+        guard work.exists else { return }
         for _ in 0..<3 where (work.value as? String) != "0" {
             work.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
             Thread.sleep(forTimeInterval: 1)
