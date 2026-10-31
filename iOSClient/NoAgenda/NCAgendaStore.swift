@@ -242,6 +242,18 @@ actor NCAgendaStore {
             return assemble(meta: meta, calendars: calendars, gantt: gantt, deck: deck, registry: registry, status: status)
         }
 
+        // NoGantt's copy calendar first, so it is known (and hidden) before the calendars are read, also on the first refresh.
+        var taskSync: GanttTaskSync?
+        do { taskSync = try await NCAgendaGanttReader(http: http).readTaskSync() } catch { /* NoGantt is read below */ }
+        if Task.isCancelled { return cached() }
+        var known = gantt
+        if let taskSync {
+            var probe = known ?? RawGantt()
+            probe.copyEnabled = taskSync.enabled
+            probe.copyCalendarUri = taskSync.calendarUri
+            known = probe
+        }
+
         // NoCalendar and NoTasks.
         let reader = NCAgendaCalendarReader(http: http, deviceZone: calendar.timeZone)
         do {
@@ -250,7 +262,7 @@ actor NCAgendaStore {
             meta.me = me
             let listed = try await reader.readCalendars()
             let (windowStart, windowEnd) = window(now: now)
-            let classifier = NCAgendaAssembler(AgendaInputs(me: me, gantt: gantt, registry: registry, settings: current, now: now, calendar: calendar))
+            let classifier = NCAgendaAssembler(AgendaInputs(me: me, gantt: known, registry: registry, settings: current, now: now, calendar: calendar))
             var merged: [RawCalendar] = []
             for var item in listed {
                 // Cancelled (the background time is over): stop here; the saved calendars stay as they were.
@@ -303,7 +315,7 @@ actor NCAgendaStore {
 
         // NoGantt.
         do {
-            let raw = try await NCAgendaGanttReader(http: http).read(settings: current, userId: me.userId, groups: me.groups, previous: gantt)
+            let raw = try await NCAgendaGanttReader(http: http).read(settings: current, userId: me.userId, groups: me.groups, previous: gantt, taskSync: taskSync, now: now)
             gantt = raw
             meta.ganttSavedAt = now
             meta.ganttContractOK = raw.contractOK

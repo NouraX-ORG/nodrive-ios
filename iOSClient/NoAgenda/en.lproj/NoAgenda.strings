@@ -1,5 +1,8 @@
 /* NoDrive: texts of NoAgenda, the first entry of the sidebar's Apps section (iOSClient/NoAgenda). English only; translations are a to-do. */
 "_nodrive_agenda_agent_of_" = "Agent of %@";
+"_nodrive_agenda_agent_status_active_" = "Active";
+"_nodrive_agenda_agent_status_paused_" = "Paused";
+"_nodrive_agenda_agent_status_retired_" = "Retired";
 "_nodrive_agenda_agents_" = "Agents";
 "_nodrive_agenda_all_" = "All";
 "_nodrive_agenda_all_day_" = "All day";
@@ -95,6 +98,14 @@
 "_nodrive_agenda_show_all_team_" = "Show all team tasks";
 "_nodrive_agenda_signed_out_" = "Sign in to NoDrive to see new changes.";
 "_nodrive_agenda_someone_" = "someone";
+"_nodrive_agenda_status_blocked_" = "Blocked";
+"_nodrive_agenda_status_cancelled_" = "Cancelled";
+"_nodrive_agenda_status_done_" = "Done";
+"_nodrive_agenda_status_in_progress_" = "In progress";
+"_nodrive_agenda_status_not_started_" = "Not started";
+"_nodrive_agenda_status_on_hold_" = "On hold";
+"_nodrive_agenda_status_open_" = "Open";
+"_nodrive_agenda_status_planned_" = "Planned";
 "_nodrive_agenda_sources_" = "Sources";
 "_nodrive_agenda_spoken_by_agent_" = "done by %@";
 "_nodrive_agenda_spoken_by_you_" = "done by you";

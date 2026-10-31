@@ -105,6 +105,8 @@ struct RawGantt: Codable, Equatable, Sendable {
     var copyEnabled = false
     var copyCalendarUri: String?
     var shares: [String: [GanttShare]] = [:]
+    /// When the shares were read; they are read again after a day (plan 2.5), not on every refresh.
+    var sharesReadAt: Date?
     /// False when an answer did not have the shape of NoGantt 2.4.1 (the version guard): read only.
     var contractOK = true
 }
@@ -184,6 +186,13 @@ enum NCAgendaGanttError: Error, Equatable {
     case unreachable
 }
 
+/// NoGantt's own copy of the tasks in a calendar (`task-sync`).
+struct GanttTaskSync: Equatable, Sendable {
+    var enabled: Bool
+    var calendarUri: String?
+    var conforms: Bool
+}
+
 /// NoGantt reads (OCS routes of nc_gantt, `ocs/v2.php/apps/nc_gantt/api/v1/...`). Read only.
 struct NCAgendaGanttReader {
     let http: NCAgendaHTTP
@@ -200,9 +209,21 @@ struct NCAgendaGanttReader {
         }
     }
 
+    /// How long read shares are kept before they are read again.
+    static let sharesLifetime: TimeInterval = 24 * 60 * 60
+
+    /// NoGantt's copy calendar. Read before the calendars, so the copy calendar is known (and hidden) before it is read.
+    func readTaskSync() async throws -> GanttTaskSync? {
+        guard let sync = try await get("task-sync") as? [String: Any] else { return nil }
+        let uri = NCAgendaJSON.string(sync["calendar_uri"])
+        return GanttTaskSync(enabled: NCAgendaJSON.bool(sync["enabled"]) ?? false, calendarUri: (uri?.isEmpty ?? true) ? nil : uri,
+                             conforms: NCAgendaGanttContract.conforms(sync, to: NCAgendaGanttContract.taskSync))
+    }
+
     /// Reads what the person needs. `isDoProject` / `isOverseeProject` decide which projects' tasks are read:
     /// the answer of `my-tasks` and `projects` comes first, then the tasks of the projects that count.
-    func read(settings: AgendaSettings, userId: String, groups: [String], previous: RawGantt?) async throws -> RawGantt {
+    func read(settings: AgendaSettings, userId: String, groups: [String], previous: RawGantt?,
+              taskSync prefetched: GanttTaskSync? = nil, now: Date = Date()) async throws -> RawGantt {
         var raw = RawGantt()
         let mine = try await get("my-tasks")
         guard let wrapper = mine as? [String: Any] else { throw NCAgendaGanttError.notInstalled }
@@ -227,24 +248,49 @@ struct NCAgendaGanttReader {
             raw.contractOK = false
         }
 
-        if let sync = try? await get("task-sync") as? [String: Any] {
-            if !NCAgendaGanttContract.conforms(sync, to: NCAgendaGanttContract.taskSync) { raw.contractOK = false }
-            raw.copyEnabled = NCAgendaJSON.bool(sync["enabled"]) ?? false
-            let uri = NCAgendaJSON.string(sync["calendar_uri"])
-            raw.copyCalendarUri = (uri?.isEmpty ?? true) ? nil : uri
+        var sync = prefetched
+        if sync == nil {
+            do { sync = try await readTaskSync() } catch { try Task.checkCancellation() }
+        }
+        if let sync {
+            if !sync.conforms { raw.contractOK = false }
+            raw.copyEnabled = sync.enabled
+            raw.copyCalendarUri = sync.calendarUri
+        } else if let previous {
+            // A failed read keeps what was known: the copy calendar must not appear for one refresh.
+            raw.copyEnabled = previous.copyEnabled
+            raw.copyCalendarUri = previous.copyCalendarUri
         }
 
         let mineByProject = Set(raw.myTasks.map { $0.projectId })
         var capacityRead = false
+        let adminKeys = raw.projects.filter { $0.permission == "admin" }.map { String($0.id) }
+        // Shares are read at most once a day: reused while every admin project still has its saved shares.
+        let sharesFresh: Bool = {
+            guard let previous, let readAt = previous.sharesReadAt else { return false }
+            let age = now.timeIntervalSince(readAt)
+            return age >= 0 && age < Self.sharesLifetime && adminKeys.allSatisfy { previous.shares[$0] != nil }
+        }()
+        raw.sharesReadAt = sharesFresh ? previous?.sharesReadAt : now
         for project in raw.projects {
             try Task.checkCancellation()
             // Shares only to decide the "server admin only" relation, and only for a project that needs it.
             if project.permission == "admin" {
-                if let shares = try? await get("projects/\(project.id)/shares") {
-                    if !(shares is [Any]) || !NCAgendaGanttContract.allConform(NCAgendaJSON.dictionaries(shares), to: NCAgendaGanttContract.share) {
-                        raw.contractOK = false
+                if sharesFresh, let saved = previous?.shares[String(project.id)] {
+                    raw.shares[String(project.id)] = saved
+                } else {
+                    do {
+                        let shares = try await get("projects/\(project.id)/shares")
+                        if !(shares is [Any]) || !NCAgendaGanttContract.allConform(NCAgendaJSON.dictionaries(shares), to: NCAgendaGanttContract.share) {
+                            raw.contractOK = false
+                        }
+                        raw.shares[String(project.id)] = Self.decodeShares(shares)
+                    } catch {
+                        try Task.checkCancellation()
+                        // A failed read keeps the saved shares; the read is tried again at the next refresh.
+                        raw.shares[String(project.id)] = previous?.shares[String(project.id)]
+                        raw.sharesReadAt = previous?.sharesReadAt
                     }
-                    raw.shares[String(project.id)] = Self.decodeShares(shares)
                 }
             }
             let finalSetting = NCAgendaSources.projectSetting(project, hasMyTasks: mineByProject.contains(project.id),
@@ -252,22 +298,37 @@ struct NCAgendaGanttReader {
                                                               shares: raw.shares[String(project.id)] ?? previous?.shares[String(project.id)])
             guard finalSetting != .hidden else { continue }
             let key = String(project.id)
-            let taskRows = NCAgendaJSON.dictionaries(try await get("projects/\(project.id)/tasks"))
-            if !NCAgendaGanttContract.allConform(taskRows, to: NCAgendaGanttContract.task) { raw.contractOK = false }
-            for row in taskRows where !NCAgendaGanttContract.allConform(NCAgendaJSON.dictionaries(row["resources"]), to: NCAgendaGanttContract.taskResource) {
-                raw.contractOK = false
+            do {
+                let taskRows = NCAgendaJSON.dictionaries(try await get("projects/\(project.id)/tasks"))
+                if !NCAgendaGanttContract.allConform(taskRows, to: NCAgendaGanttContract.task) { raw.contractOK = false }
+                for row in taskRows where !NCAgendaGanttContract.allConform(NCAgendaJSON.dictionaries(row["resources"]), to: NCAgendaGanttContract.taskResource) {
+                    raw.contractOK = false
+                }
+                raw.tasks[key] = taskRows.compactMap(Self.decodeTask)
+                let milestoneRows = NCAgendaJSON.dictionaries(try await get("projects/\(project.id)/milestones"))
+                if !NCAgendaGanttContract.allConform(milestoneRows, to: NCAgendaGanttContract.milestone) { raw.contractOK = false }
+                raw.milestones[key] = milestoneRows.compactMap { Self.decodeMilestone($0, projectId: project.id) }
+                raw.subprojects[key] = NCAgendaJSON.dictionaries(try await get("projects/\(project.id)/subprojects")).compactMap(Self.decodeSubproject)
+            } catch NCAgendaGanttError.refused {
+                // The server said no for this project only (its permission may have changed): keep what was saved for it.
+                raw.tasks[key] = previous?.tasks[key]
+                raw.milestones[key] = previous?.milestones[key]
+                raw.subprojects[key] = previous?.subprojects[key]
+                NCAgendaLog.log("gantt-project-refused", home: "gantt")
+                continue
             }
-            raw.tasks[key] = taskRows.compactMap(Self.decodeTask)
-            let milestoneRows = NCAgendaJSON.dictionaries(try await get("projects/\(project.id)/milestones"))
-            if !NCAgendaGanttContract.allConform(milestoneRows, to: NCAgendaGanttContract.milestone) { raw.contractOK = false }
-            raw.milestones[key] = milestoneRows.compactMap { Self.decodeMilestone($0, projectId: project.id) }
-            raw.subprojects[key] = NCAgendaJSON.dictionaries(try await get("projects/\(project.id)/subprojects")).compactMap(Self.decodeSubproject)
             if finalSetting == .doOversee, !capacityRead {
                 // NoGantt's capacity check is one answer for the whole account: read it once per refresh.
                 capacityRead = true
-                if let capacity = try? await get("capacity-check") as? [String: Any] {
-                    if !NCAgendaGanttContract.conforms(capacity, to: NCAgendaGanttContract.capacity) { raw.contractOK = false }
-                    raw.findings["all"] = NCAgendaJSON.dictionaries(capacity["findings"]).compactMap(Self.decodeFinding)
+                do {
+                    if let capacity = try await get("capacity-check") as? [String: Any] {
+                        if !NCAgendaGanttContract.conforms(capacity, to: NCAgendaGanttContract.capacity) { raw.contractOK = false }
+                        raw.findings["all"] = NCAgendaJSON.dictionaries(capacity["findings"]).compactMap(Self.decodeFinding)
+                    }
+                } catch {
+                    try Task.checkCancellation()
+                    // A failed read keeps the saved findings.
+                    raw.findings["all"] = previous?.findings["all"]
                 }
             }
         }

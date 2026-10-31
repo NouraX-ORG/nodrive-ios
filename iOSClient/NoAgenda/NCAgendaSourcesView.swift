@@ -147,7 +147,7 @@ struct NCAgendaSourcesView: View {
             ForEach(model.result.snapshot.agents) { agent in
                 VStack(alignment: .leading, spacing: 2) {
                     Text("🤖 " + agent.name)
-                    Text(agent.status.rawValue.capitalized + (agent.organisation.isEmpty ? "" : " · " + agent.organisation))
+                    Text(NCAgendaText.agentStatus(agent.status) + (agent.organisation.isEmpty ? "" : " · " + agent.organisation))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

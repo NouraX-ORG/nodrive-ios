@@ -54,7 +54,7 @@ enum AgendaRulesSupport {
         var value = RawCalendar(href: "/remote.php/dav/calendars/ali/\(uri)/", uri: uri, name: name ?? uri.capitalized, components: components)
         value.ownerPrincipal = owner.map { "/remote.php/dav/principals/users/\($0)/" }
         value.isSubscription = subscription
-        value.isAppGenerated = uri.hasPrefix("app-generated--")
+        value.isAppGenerated = uri.hasPrefix(NCAgendaCalendarReader.appGeneratedPrefix)
         value.isBirthday = uri == "contact_birthdays"
         value.writable = writable
         value.objects = items.map { CalObject(href: value.href + $0.uid + ".ics", etag: "\"e\"", components: [$0]) }
@@ -146,6 +146,17 @@ struct NoDriveAgendaCalendarRulesTests {
         let snapshot = S.assemble(calendars: [S.calendarSource("tasks", components: ["VTODO"]), S.calendarSource("both")])
         #expect(snapshot.sources.first { $0.key == "cal:tasks" }?.kind == .list)
         #expect(snapshot.sources.first { $0.key == "cal:both" }?.kind == .calendar)
+    }
+
+    @Test("Only Deck's board calendars are hidden, and they are listed under Calendars, not Lists")
+    func boardCalendarsOnly() {
+        #expect(NCAgendaCalendarReader.appGeneratedPrefix == "app-generated--deck--board-")
+        let snapshot = S.assemble(calendars: [
+            S.calendarSource("app-generated--deck--board-3", components: ["VTODO"]), S.calendarSource("app-generated--other--thing", owner: "ali"),
+        ])
+        #expect(snapshot.sources.first { $0.key == "cal:app-generated--deck--board-3" }?.kind == .calendar)
+        #expect(snapshot.sources.first { $0.key == "cal:app-generated--deck--board-3" }?.setting == .hidden)
+        #expect(snapshot.sources.first { $0.key == "cal:app-generated--other--thing" }?.setting == .personal)
     }
 
     @Test("The one-time question: chosen calendars are Personal, the others Work; a later calendar is new")
@@ -459,6 +470,52 @@ struct NoDriveAgendaGanttRulesTests {
         #expect(ownTexts.contains { $0.contains("Out-Bot") })
     }
 
+    @Test("A manager who is on the task still gets its integrity flags: an unlinked person next to her")
+    func managerOnTaskNotLinked() throws {
+        var gantt = S.gantt
+        gantt.tasks["1"] = [S.task(40, "Shared with temp", resources: [3, 6])]
+        let snapshot = S.assemble(me: S.mara, gantt: gantt)
+        let problem = try #require(snapshot.problems.first { $0.key.hasPrefix("team:flag:notLinked:gantt:40") })
+        #expect(problem.relation == .team)
+        #expect(problem.text.contains(NCAgendaText.t("_nodrive_agenda_flag_not_linked_")))
+        // her own row shows once, and no second team row is made
+        #expect(snapshot.items.filter { $0.title == "Shared with temp" }.map(\.relation) == [.mine])
+        // a person who is not the manager sees no manager flag
+        #expect(!S.assemble(me: S.ali, gantt: gantt).problems.contains { $0.key.hasPrefix("team:flag:") })
+    }
+
+    @Test("A manager who is on the task gets \"belongs to Ali, not Mara\" for Ali's agent next to her")
+    func managerOnTaskAgentOfOther() throws {
+        var gantt = S.gantt
+        gantt.tasks["1"] = [S.task(40, "Mara with Writer-Bot", resources: [3, 40])]
+        let snapshot = S.assemble(me: S.mara, gantt: gantt)
+        let problem = try #require(snapshot.problems.first { $0.key.hasPrefix("team:flag:agentOfOtherPerson:gantt:40") })
+        #expect(problem.text == "⚠ Mara with Writer-Bot: " + NCAgendaText.f("_nodrive_agenda_flag_agent_belongs_", "Writer-Bot", "Ali", "Mara"))
+    }
+
+    @Test("\"belongs to X, not Y\" names the people the agent is paired with")
+    func belongsNamesAllPaired() throws {
+        var gantt = S.gantt
+        gantt.tasks["1"] = [S.task(40, "Pair", resources: [2, 3, 40])]
+        let snapshot = S.assemble(me: S.mara, gantt: gantt)
+        let flag = try #require(snapshot.items.first { $0.title == "Pair" && $0.relation == .team }?.flags.first { $0.kind == .agentOfOtherPerson })
+        #expect(flag.names == ["Writer-Bot", "Ali", "Sara, Mara"])
+    }
+
+    @Test("A robot name that no registry agent explains is an unknown agent for the manager, not \"not linked\"")
+    func unknownRobotResource() throws {
+        var gantt = S.gantt
+        gantt.resources.append(S.person(70, "🤖 Ghost-Bot (Sara)", uid: nil))
+        gantt.tasks["1"] = [S.task(40, "Ghost task", resources: [2, 70])]
+        let snapshot = S.assemble(me: S.mara, gantt: gantt)
+        let row = try #require(snapshot.items.first { $0.title == "Ghost task" })
+        let kinds = row.flags.map(\.kind)
+        #expect(kinds.contains(.unknownAgent))
+        #expect(!kinds.contains(.notLinked))
+        let flag = try #require(row.flags.first { $0.kind == .unknownAgent })
+        #expect(flag.text == NCAgendaText.f("_nodrive_agenda_unknown_agent_", "Ghost-Bot (Sara)"))
+    }
+
     @Test("The not-shared sentence is singular for one task")
     func notSharedOne() {
         let one = IntegrityFlag(kind: .notShared, audience: .manager, names: ["Sara"], count: 1)
@@ -544,6 +601,64 @@ struct NoDriveAgendaBoardRulesTests {
         #expect(snapshot.problems.contains { $0.key.hasPrefix("team:late:") && $0.text.contains("Late card") })
         #expect(snapshot.items.first { $0.title == "Nobody" }?.flags.map(\.kind) == [.notAssigned])
         #expect(snapshot.items.first { $0.title == "Mara's own" }?.relation == .mine)
+    }
+
+    @Test("A card for me and Sara with Sara's agent label: my row is Self, with no flag (not under My agents)")
+    func otherPersonsLabelLeavesMeSelf() throws {
+        let snapshot = S.assemble(deck: deck(cards: [card(1, "Shared", assigned: ["ali", "sara"], labels: ["🤖 Design-Bot"])]))
+        let row = try #require(snapshot.items.first { $0.title == "Shared" })
+        #expect(row.agent == .selfAgent)
+        #expect(row.flags.isEmpty)
+        // both agents on a shared card: mine is mine
+        let both = S.assemble(deck: deck(cards: [card(2, "Both", assigned: ["ali", "sara"], labels: ["🤖 Design-Bot", "🤖 Writer-Bot"])]))
+        #expect(both.items.first { $0.title == "Both" }?.agent == .mine(id: "AG-0001", name: "Writer-Bot", status: .active))
+        #expect(both.items.first { $0.title == "Both" }?.flags.isEmpty == true)
+        // a label that is in no registry is still an unknown agent
+        let ghost = S.assemble(deck: deck(cards: [card(3, "Ghost", assigned: ["ali", "sara"], labels: ["🤖 Ghost-Bot"])]))
+        #expect(ghost.items.first { $0.title == "Ghost" }?.agent == .unknown(label: "Ghost-Bot"))
+        #expect(ghost.items.first { $0.title == "Ghost" }?.flags.map(\.kind) == [.unknownAgent])
+    }
+
+    @Test("A stray agent label on a board I run: \"belongs to Ali, not Sara\" for the manager, never \"unknown agent\"")
+    func strayLabelForManager() throws {
+        let snapshot = S.assemble(me: S.mara, deck: deck(cards: [
+            card(1, "Stray", assigned: ["sara"], labels: ["🤖 Writer-Bot"]), card(2, "Ali's", assigned: ["ali"]),
+        ]))
+        let row = try #require(snapshot.items.first { $0.title == "Stray" })
+        #expect(row.agent == .selfAgent)
+        let flag = try #require(row.flags.first { $0.kind == .agentOfOtherPerson })
+        #expect(flag.names == ["Writer-Bot", "Ali", "Sara"])
+        #expect(!row.flags.contains { $0.kind == .unknownAgent })
+        let problem = try #require(snapshot.problems.first { $0.key.hasPrefix("team:flag:agentOfOtherPerson:board:1:1") })
+        #expect(problem.text == "⚠ Stray: " + NCAgendaText.f("_nodrive_agenda_flag_agent_belongs_", "Writer-Bot", "Ali", "Sara"))
+    }
+
+    @Test("A registry agent on a card nobody is assigned to: \"agent with no person\" for the manager")
+    func strayLabelNoPerson() throws {
+        let snapshot = S.assemble(me: S.mara, deck: deck(cards: [card(1, "Nobody", assigned: [], labels: ["🤖 Design-Bot"])]))
+        let row = try #require(snapshot.items.first { $0.title == "Nobody" })
+        #expect(Set(row.flags.map(\.kind)) == [.notAssigned, .agentWithoutPerson])
+        #expect(snapshot.problems.contains { $0.text.contains(NCAgendaText.f("_nodrive_agenda_flag_agent_no_person_team_", "Design-Bot", "Nobody")) })
+    }
+
+    @Test("My agent on a card I'm not on is a problem for me (agent with no person); the card is not my row")
+    func myAgentWithoutMe() throws {
+        let snapshot = S.assemble(deck: deck(cards: [card(1, "Sara's card", assigned: ["sara"], labels: ["🤖 Writer-Bot"])]))
+        let problem = try #require(snapshot.problems.first { $0.key.hasPrefix("mine:orphan:board:1:1") })
+        #expect(problem.relation == .mine)
+        #expect(problem.text == NCAgendaText.f("_nodrive_agenda_flag_agent_no_person_", "Writer-Bot", "Sara's card"))
+        #expect(snapshot.items.isEmpty)
+    }
+
+    @Test("A manager who is on the card too still gets the flags, and no second row appears")
+    func managerOnCardGetsFlags() throws {
+        let snapshot = S.assemble(me: S.mara, deck: deck(cards: [
+            card(1, "Mixed", assigned: ["mara", "sara"], labels: ["🤖 Writer-Bot"]), card(2, "Ali's", assigned: ["ali"]),
+        ]))
+        #expect(snapshot.items.filter { $0.title == "Mixed" }.map(\.relation) == [.mine])
+        #expect(snapshot.items.first { $0.title == "Mixed" }?.agent == .selfAgent)
+        let problem = try #require(snapshot.problems.first { $0.key.hasPrefix("team:flag:agentOfOtherPerson:board:1:1") })
+        #expect(problem.text == "⚠ Mixed: " + NCAgendaText.f("_nodrive_agenda_flag_agent_belongs_", "Writer-Bot", "Ali", "Sara"))
     }
 
     @Test("Cards under the Deck version guard carry the lock")

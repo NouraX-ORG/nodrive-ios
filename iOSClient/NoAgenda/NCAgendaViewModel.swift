@@ -246,12 +246,15 @@ final class NCAgendaViewModel {
     /// Done on the question: the chosen calendars are Personal, the others Work.
     func answerPersonalQuestion(personalKeys: Set<String>) async {
         let own = ownCalendars.map { $0.key }
-        result.settings = await store.updateSettings { settings in
+        let updated = await store.updateSettings { settings in
             for key in own { settings.chosen[key] = personalKeys.contains(key) ? .personal : .work }
             settings.personalQuestionAnswered = true
         }
         showPersonalQuestion = false
-        result = await store.cached()
+        // Only the rows and the settings change: the banners (offline, refused, read only) stay until the next refresh.
+        let fresh = await store.cached()
+        result.snapshot = fresh.snapshot
+        result.settings = updated
     }
 
     func choose(_ setting: SourceSetting, for key: String) async {

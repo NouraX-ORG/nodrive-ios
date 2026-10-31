@@ -12,6 +12,20 @@ enum NCAgendaText {
     static func f(_ key: String, _ args: CVarArg...) -> String {
         String(format: t(key), arguments: args)
     }
+
+    /// NoGantt's task status ("in_progress") in plain words. A status that has no text of its own is shown with its
+    /// underscores as spaces, never raw.
+    static func ganttStatus(_ raw: String) -> String {
+        let key = "_nodrive_agenda_status_" + raw.lowercased() + "_"
+        let text = t(key)
+        if text != key { return text }
+        let words = raw.replacingOccurrences(of: "_", with: " ")
+        return words.prefix(1).uppercased() + words.dropFirst()
+    }
+
+    static func agentStatus(_ status: AgentStatus) -> String {
+        t("_nodrive_agenda_agent_status_" + status.rawValue + "_")
+    }
 }
 
 /// The app an item lives in (design section 3: "home").

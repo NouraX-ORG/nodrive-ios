@@ -190,7 +190,9 @@ extension NCAgendaAssembler {
                         teamFlags.append(IntegrityFlag(kind: .agentWithoutPerson, audience: .manager, names: [otherLabel(agent), task.title]))
                     } else {
                         let owner = displayName(of: agent.person) ?? NCAgendaText.t("_nodrive_agenda_someone_")
-                        let paired = persons.first.flatMap { $0.uidDisplayName ?? displayName(of: $0.uid ?? "") } ?? NCAgendaText.t("_nodrive_agenda_someone_")
+                        // The people the agent is actually paired with on this task.
+                        let paired = persons.map { $0.uidDisplayName ?? displayName(of: $0.uid ?? "") ?? NCAgendaText.t("_nodrive_agenda_someone_") }
+                            .joined(separator: ", ")
                         teamFlags.append(IntegrityFlag(kind: .agentOfOtherPerson, audience: .manager, names: [otherLabel(agent), owner, paired]))
                     }
                     _ = resource
@@ -199,7 +201,13 @@ extension NCAgendaAssembler {
                 for row in task.resources {
                     guard let resource = resources[row.resourceId] else { continue }
                     if resource.type == "person", resource.uid == nil, !recognisedIds.contains(resource.id) {
-                        teamFlags.append(IntegrityFlag(kind: .notLinked, audience: .manager, names: [resource.name]))
+                        if resource.name.hasPrefix("🤖") {
+                            // Design 4.5: a robot name that is not recognised is an unknown agent, never guessed.
+                            let label = resource.name.dropFirst(1).trimmingCharacters(in: .whitespaces)
+                            teamFlags.append(IntegrityFlag(kind: .unknownAgent, audience: .manager, names: [label]))
+                        } else {
+                            teamFlags.append(IntegrityFlag(kind: .notLinked, audience: .manager, names: [resource.name]))
+                        }
                     }
                 }
                 let resourceTypes = task.resources.compactMap { resources[$0.resourceId]?.type }
@@ -219,8 +227,14 @@ extension NCAgendaAssembler {
                     if theirs.count > 1 { flags.append(IntegrityFlag(kind: .twoAgents, audience: .both, names: [personName])) }
                     teamRows.append(base(key: "gantt:\(task.id):team:\(uid)", relation: .team, personName: personName, agent: agent, flags: flags))
                 }
-                if others.isEmpty, !iAmOnTask, !teamFlags.isEmpty {
-                    teamRows.append(base(key: "gantt:\(task.id):team", relation: .team, personName: nil, agent: .selfAgent, flags: teamFlags))
+                if others.isEmpty, !teamFlags.isEmpty {
+                    // No other person's row carries the flags: a row of their own, or, when I'm on the task, only the problems.
+                    let flagRow = base(key: "gantt:\(task.id):team", relation: .team, personName: nil, agent: .selfAgent, flags: teamFlags)
+                    if iAmOnTask {
+                        problems += flagProblems(for: flagRow)
+                    } else {
+                        teamRows.append(flagRow)
+                    }
                 }
                 for row in teamRows {
                     items.append(row)
@@ -312,11 +326,19 @@ extension NCAgendaAssembler {
         if row.blocked {
             result.append(make(.blocked, "⛔", NCAgendaText.t("_nodrive_agenda_blocked_by_late_")))
         }
-        for flag in row.flags where flag.audience != .person {
-            let text = "⚠ \(row.title): \(flag.text)"
-            result.append(AgendaProblem(key: "team:flag:\(flag.kind.rawValue):\(row.key)", kind: .flag, relation: .team, title: row.title,
-                                        personName: row.personName, text: text, link: row.link, home: row.home))
-        }
+        result += flagProblems(for: row)
         return result
+    }
+
+    /// The flags of a row that are for the manager (design 4.4), as problems.
+    func flagProblems(for row: AgendaItem) -> [AgendaProblem] {
+        flagProblems(row.flags, title: row.title, personName: row.personName, link: row.link, home: row.home, rowKey: row.key)
+    }
+
+    func flagProblems(_ flags: [IntegrityFlag], title: String, personName: String?, link: AgendaLink?, home: AgendaHome, rowKey: String) -> [AgendaProblem] {
+        flags.filter { $0.audience != .person }.map { flag in
+            AgendaProblem(key: "team:flag:\(flag.kind.rawValue):\(rowKey)", kind: .flag, relation: .team, title: title,
+                          personName: personName, text: "⚠ \(title): \(flag.text)", link: link, home: home)
+        }
     }
 }

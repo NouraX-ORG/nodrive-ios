@@ -151,7 +151,7 @@ struct NCAgendaAssembler {
         for calendar in input.calendars {
             let cls = classify(calendar)
             let color = NCAgendaColors.mapped(calendar.color)
-            var source = AgendaSource(key: NCAgendaSources.calendarKey(calendar.uri), kind: calendar.onlyTodos ? .list : .calendar,
+            var source = AgendaSource(key: NCAgendaSources.calendarKey(calendar.uri), kind: calendar.onlyTodos && !calendar.isAppGenerated ? .list : .calendar,
                                       name: calendar.name, color: color, setting: cls.setting)
             if calendar.isAppGenerated { source.name = NCAgendaText.t("_nodrive_agenda_board_calendar_") }
             source.lockedReason = cls.locked
@@ -264,11 +264,28 @@ struct NCAgendaAssembler {
             for card in deck.cards[String(board.id)] ?? [] where !card.done && !card.archived {
                 if cardIdsOfGanttTasks.contains(card.id) { continue }
                 let assigned = Set(card.assigned.map { $0.uid.lowercased() })
+                let labels = cardAgentLabels(card, assigned: assigned)
+                let others = card.assigned.filter { $0.uid.lowercased() != myUid }
+                // Design 4.4: an agent of mine on a card that I'm not on is a problem for me.
+                if !assigned.contains(myUid) {
+                    for agent in labels.strays where agent.person == myUid {
+                        let flag = IntegrityFlag(kind: .agentWithoutPerson, audience: .person, names: [agent.name, card.title])
+                        problems.append(AgendaProblem(key: "mine:orphan:board:\(board.id):\(card.id):\(agent.id)", kind: .flag, relation: .mine,
+                                                      title: card.title, text: flag.text,
+                                                      link: AgendaLink(home: .board, boardId: board.id, stackId: card.stackId, cardId: card.id, lastModified: card.lastModified),
+                                                      home: .board))
+                    }
+                }
                 if assigned.contains(myUid) {
-                    items.append(cardItem(card, board: board, color: color, team: false, people: []))
+                    let row = cardItem(card, board: board, color: color, team: false, people: [], labels: labels)
+                    items.append(row)
+                    if setting == .doOversee {
+                        // The manager's flags about the others on a card that I'm on too. No second row: it shows once, as mine.
+                        let flags = managerCardFlags(labels, title: card.title, assigned: others)
+                        problems += flagProblems(flags, title: card.title, personName: nil, link: row.link, home: .board, rowKey: "board:\(board.id):\(card.id):team")
+                    }
                 } else if setting == .doOversee {
-                    let others = card.assigned.filter { $0.uid.lowercased() != myUid }
-                    var row = cardItem(card, board: board, color: color, team: true, people: others)
+                    var row = cardItem(card, board: board, color: color, team: true, people: others, labels: labels)
                     if others.isEmpty {
                         row.flags.append(IntegrityFlag(kind: .notAssigned, audience: .manager))
                     }
@@ -279,7 +296,56 @@ struct NCAgendaAssembler {
         }
     }
 
-    func cardItem(_ card: DeckCard, board: DeckBoard, color: String, team: Bool, people: [DeckPerson]) -> AgendaItem {
+    /// What the 🤖 labels of one card mean (design 4.2). Every label is matched to the whole registry, not only to the
+    /// agents of the people that one row looks at.
+    struct CardAgentLabels {
+        /// Agents of the people on the card, in label order.
+        var ofAssigned: [RegistryAgent] = []
+        /// Registry agents whose person is not on the card.
+        var strays: [RegistryAgent] = []
+        /// Labels that are not in the registry (the text after the robot).
+        var unknown: [String] = []
+    }
+
+    func cardAgentLabels(_ card: DeckCard, assigned: Set<String>) -> CardAgentLabels {
+        var result = CardAgentLabels()
+        let agents = input.registry?.agents ?? []
+        for label in card.labels {
+            let matches = agents.filter { $0.boardLabel == label }
+            if matches.isEmpty {
+                if label.hasPrefix("🤖") { result.unknown.append(label.dropFirst(1).trimmingCharacters(in: .whitespaces)) }
+            } else if let agent = matches.first(where: { assigned.contains($0.person) }) {
+                if !result.ofAssigned.contains(where: { $0.id == agent.id }) { result.ofAssigned.append(agent) }
+            } else if let stray = matches.first, !result.strays.contains(where: { $0.id == stray.id }) {
+                result.strays.append(stray)
+            }
+        }
+        return result
+    }
+
+    /// Flags for the board manager (design 4.4): two agents for one person, an agent with no person on the card, an
+    /// agent that belongs to someone who is not on the card. `others` are the people on the card besides me.
+    func managerCardFlags(_ labels: CardAgentLabels, title: String, assigned others: [DeckPerson]) -> [IntegrityFlag] {
+        var flags: [IntegrityFlag] = []
+        for person in others {
+            let uid = person.uid.lowercased()
+            if labels.ofAssigned.filter({ $0.person == uid }).count > 1 {
+                flags.append(IntegrityFlag(kind: .twoAgents, audience: .both, names: [displayName(of: uid) ?? person.name]))
+            }
+        }
+        for agent in labels.strays {
+            if others.isEmpty {
+                flags.append(IntegrityFlag(kind: .agentWithoutPerson, audience: .manager, names: [otherLabel(agent), title]))
+            } else {
+                let owner = displayName(of: agent.person) ?? NCAgendaText.t("_nodrive_agenda_someone_")
+                flags.append(IntegrityFlag(kind: .agentOfOtherPerson, audience: .manager,
+                                           names: [otherLabel(agent), owner, others.map { $0.name }.joined(separator: ", ")]))
+            }
+        }
+        return flags
+    }
+
+    func cardItem(_ card: DeckCard, board: DeckBoard, color: String, team: Bool, people: [DeckPerson], labels: CardAgentLabels) -> AgendaItem {
         var item = AgendaItem(
             key: "board:\(board.id):\(card.id)" + (team ? ":team" : ""),
             home: .board, kind: .card, title: card.title,
@@ -290,20 +356,30 @@ struct NCAgendaAssembler {
         item.relation = team ? .team : .mine
         item.personName = people.isEmpty ? nil : people.map { $0.name }.joined(separator: ", ")
         item.late = isLate(end: card.due, done: false)
-        let assignedUids = team ? people.map { $0.uid.lowercased() } : [myUid]
-        let candidates: [RegistryAgent] = (input.registry?.agents ?? []).filter { assignedUids.contains($0.person) }
-        let matching = candidates.filter { agent in agent.boardLabel.map { card.labels.contains($0) } ?? false }
-        if let first = matching.first {
-            item.agent = first.person == myUid ? ref(first) : .other(label: otherLabel(first))
-            if matching.filter({ $0.person == first.person }).count > 1 {
-                item.flags.append(IntegrityFlag(kind: .twoAgents, audience: .both,
-                                                names: [displayName(of: first.person) ?? NCAgendaText.t("_nodrive_agenda_someone_")]))
+        if team {
+            // The agents of the people on the card; the first one is shown.
+            if let first = labels.ofAssigned.first {
+                item.agent = .other(label: otherLabel(first))
+            } else if let unknown = labels.unknown.first {
+                item.agent = .unknown(label: unknown)
             }
-            if first.person == myUid { item.flags += agentFlags(first) }
-        } else if let unknown = card.labels.first(where: { $0.hasPrefix("🤖") }) {
-            let label = unknown.dropFirst(1).trimmingCharacters(in: .whitespaces)
-            item.agent = .unknown(label: label)
-            if !team { item.flags.append(IntegrityFlag(kind: .unknownAgent, audience: .person, names: [label])) }
+            item.flags += managerCardFlags(labels, title: card.title, assigned: people)
+        } else {
+            // My row: my own agent is mine; another person's label leaves my row as Self (design 4.2).
+            let mine = labels.ofAssigned.filter { $0.person == myUid }
+            if let first = mine.first {
+                item.agent = ref(first)
+                item.flags += agentFlags(first)
+            } else if let unknown = labels.unknown.first {
+                item.agent = .unknown(label: unknown)
+            }
+            for unknown in labels.unknown {
+                item.flags.append(IntegrityFlag(kind: .unknownAgent, audience: .person, names: [unknown]))
+            }
+            if mine.count > 1 {
+                item.flags.append(IntegrityFlag(kind: .twoAgents, audience: .both,
+                                                names: [displayName(of: myUid) ?? NCAgendaText.t("_nodrive_agenda_someone_")]))
+            }
         }
         return item
     }
@@ -333,7 +409,7 @@ struct NCAgendaAssembler {
         let mineCards = Set(items.filter { $0.home == .board && $0.relation == .mine }.compactMap { $0.link.cardId })
         items.removeAll { $0.home == .board && $0.relation == .team && mineCards.contains($0.link.cardId ?? -1) }
         problems.removeAll { problem in
-            guard problem.relation == .team, problem.home == .board, let cardId = problem.link?.cardId else { return false }
+            guard problem.relation == .team, problem.home == .board, problem.kind != .flag, let cardId = problem.link?.cardId else { return false }
             return mineCards.contains(cardId)
         }
     }

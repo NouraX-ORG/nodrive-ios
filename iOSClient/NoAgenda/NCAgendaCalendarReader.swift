@@ -49,7 +49,8 @@ struct NCAgendaCalendarReader {
     var deviceZone: TimeZone = .current
 
     static let birthdayUri = "contact_birthdays"
-    static let appGeneratedPrefix = "app-generated--"
+    /// The calendars that Deck makes for its boards (VTODO only for a board). Other app-generated calendars are not hidden.
+    static let appGeneratedPrefix = "app-generated--deck--board-"
 
     /// "remote.php/dav/principals/users/<uid>/"
     var principalPath: String { "remote.php/dav/principals/users/" + http.encodedUser + "/" }

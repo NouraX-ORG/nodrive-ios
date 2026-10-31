@@ -623,3 +623,146 @@ struct NoDriveAgendaEntryTests {
         #expect(NCAgendaFormat.whenText(item, calendar: calendar) == NCAgendaText.t("_nodrive_agenda_all_day_"))
     }
 }
+
+// MARK: - Reads: shares once a day, failed reads keep what was known, the copy calendar is known first
+
+@Suite("NoDrive NoAgenda NoGantt reads")
+struct NoDriveAgendaGanttReadTests {
+    typealias R = AgendaRuntimeSupport
+    static let root = "/ocs/v2.php/apps/nc_gantt/api/v1/"
+
+    static func project(_ id: Int, owner: String = "mara", permission: String = "admin") -> String {
+        "{\"id\":\(id),\"title\":\"Project \(id)\",\"owner_id\":\"\(owner)\",\"owner_display_name\":\"Owner\",\"permission\":\"\(permission)\",\"color\":\"#0082c9\",\"roles_only_assignment\":false}"
+    }
+
+    func read(_ server: AgendaFakeServer, previous: RawGantt? = nil, now: Date = R.now) async throws -> RawGantt {
+        try await NCAgendaGanttReader(http: server.http()).read(settings: AgendaSettings(), userId: "ali", groups: [], previous: previous, now: now)
+    }
+
+    @Test("Shares are read at most once a day; a failed read keeps the saved ones")
+    func sharesDaily() async throws {
+        let server = R.server { _, path in
+            if path == Self.root + "projects" { return (200, AgendaFixtures.ocs("[" + Self.project(1) + "]")) }
+            if path == Self.root + "projects/1/shares" { return (200, AgendaFixtures.shares) }
+            return nil
+        }
+        func shareReads() -> Int { server.requests.filter { $0.url?.path.hasSuffix("/projects/1/shares") == true }.count }
+        let first = try await read(server)
+        #expect(first.shares["1"]?.count == 2)
+        #expect(shareReads() == 1)
+        let second = try await read(server, previous: first, now: R.now.addingTimeInterval(3600))
+        #expect(shareReads() == 1)
+        #expect(second.shares == first.shares)
+        #expect(second.sharesReadAt == R.now)
+        let later = R.now.addingTimeInterval(25 * 3600)
+        let third = try await read(server, previous: second, now: later)
+        #expect(shareReads() == 2)
+        #expect(third.sharesReadAt == later)
+        let failing = R.server { _, path in
+            if path == Self.root + "projects" { return (200, AgendaFixtures.ocs("[" + Self.project(1) + "]")) }
+            if path == Self.root + "projects/1/shares" { return (500, "") }
+            return nil
+        }
+        let fourth = try await read(failing, previous: third, now: later.addingTimeInterval(30 * 3600))
+        #expect(fourth.shares["1"] == third.shares["1"])
+    }
+
+    @Test("A failed task-sync or capacity-check read keeps the saved answer")
+    func failedReadsKeepSaved() async throws {
+        let capacity = AgendaFixtures.ocs("{\"window_days\":30,\"findings\":[{\"level\":\"error\",\"start\":\"2026-10-30\",\"end\":\"2026-10-31\",\"person_ids\":[5],\"deficit_hours\":3,\"task_ids\":[]}]}")
+        let sync = AgendaFixtures.ocs("{\"enabled\":true,\"calendar_uri\":\"ganttcopy\",\"calendars\":[],\"last_run\":null,\"error\":null,\"synced_count\":0}")
+        let good = R.server { _, path in
+            if path == Self.root + "projects" { return (200, AgendaFixtures.ocs("[" + Self.project(1, owner: "ali") + "]")) }
+            if path == Self.root + "task-sync" { return (200, sync) }
+            if path == Self.root + "capacity-check" { return (200, capacity) }
+            return nil
+        }
+        let first = try await read(good)
+        #expect(first.copyEnabled && first.copyCalendarUri == "ganttcopy")
+        #expect(first.findings["all"]?.count == 1)
+        let failing = R.server { _, path in
+            if path == Self.root + "projects" { return (200, AgendaFixtures.ocs("[" + Self.project(1, owner: "ali") + "]")) }
+            if path == Self.root + "task-sync" || path == Self.root + "capacity-check" { return (500, "") }
+            return nil
+        }
+        let second = try await read(failing, previous: first)
+        #expect(second.copyEnabled && second.copyCalendarUri == "ganttcopy")
+        #expect(second.findings["all"]?.count == 1)
+    }
+
+    @Test("A 403 on one project's tasks is that project's error: the other project is read, the saved rows of the first stay")
+    func oneProjectRefused() async throws {
+        func server(refuse: Bool) -> AgendaFakeServer {
+            R.server { _, path in
+                switch path {
+                case Self.root + "projects":
+                    return (200, AgendaFixtures.ocs("[" + Self.project(1, owner: "ali") + "," + Self.project(2, owner: "ali") + "]"))
+                case Self.root + "projects/2/tasks": return refuse ? (403, "") : (200, AgendaFixtures.tasks)
+                case Self.root + "projects/2/milestones": return (200, AgendaFixtures.milestones)
+                case Self.root + "projects/2/subprojects": return (200, AgendaFixtures.subprojects)
+                default: return nil
+                }
+            }
+        }
+        let first = try await read(server(refuse: false))
+        #expect(first.tasks["2"]?.isEmpty == false)
+        let second = try await read(server(refuse: true), previous: first)
+        #expect(second.contractOK)
+        #expect(second.tasks["1"]?.isEmpty == false)
+        #expect(second.tasks["2"] == first.tasks["2"])
+        // with nothing saved, that project simply has no rows, and NoGantt is not refused as a whole
+        let fresh = try await read(server(refuse: true))
+        #expect(fresh.tasks["1"]?.isEmpty == false)
+        #expect(fresh.tasks["2"] == nil)
+    }
+
+    @Test("Refused on the first call (my-tasks) is still NoGantt refused as a whole")
+    func wholeRefused() async {
+        let server = R.server { _, path in path.hasSuffix("/my-tasks") ? (403, "") : nil }
+        await #expect(throws: NCAgendaGanttError.refused(403)) {
+            _ = try await self.read(server)
+        }
+    }
+
+    @Test("NoGantt's copy calendar is known before the calendars are read: it is never fetched, also on the very first refresh")
+    func copyCalendarOnFirstRefresh() async {
+        let root = R.tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let home = AgendaFixtures.home.replacingOccurrences(of: "calendars/ali/work/", with: "calendars/ali/ganttcopy/")
+        let sync = AgendaFixtures.ocs("{\"enabled\":true,\"calendar_uri\":\"ganttcopy\",\"calendars\":[],\"last_run\":null,\"error\":null,\"synced_count\":0}")
+        let server = R.server { method, path in
+            if method == "PROPFIND", path == "/remote.php/dav/calendars/ali/" { return (207, home) }
+            if path == Self.root + "task-sync" { return (200, sync) }
+            return nil
+        }
+        let result = await R.store(server, root: root).refresh()
+        #expect(result.snapshot.sources.first { $0.key == "cal:ganttcopy" }?.setting == .hidden)
+        #expect(!server.requests.contains { $0.url?.path.contains("ganttcopy") == true })
+        #expect(result.snapshot.items.contains { $0.title == "Dentist" })
+    }
+
+    @MainActor
+    @Test("Answering the one-time question keeps the banners of the last refresh")
+    func questionKeepsBanners() async {
+        let root = R.tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let server = R.server { _, path in path.contains("apps/deck") ? (403, "") : nil }
+        let model = NCAgendaViewModel(account: R.account, store: R.store(server, root: root), now: { R.now })
+        await model.refresh()
+        #expect(model.banners.contains { $0.id == "boardRefused" })
+        await model.answerPersonalQuestion(personalKeys: ["cal:personal"])
+        #expect(model.result.status.board == .refused(403))
+        #expect(model.banners.contains { $0.id == "boardRefused" })
+        #expect(model.result.snapshot.sources.first { $0.key == "cal:personal" }?.setting == .personal)
+    }
+
+    @Test("Statuses are plain words from NoAgenda.strings, never the raw value")
+    func plainStatuses() {
+        #expect(NCAgendaText.ganttStatus("in_progress") == "In progress")
+        #expect(NCAgendaText.ganttStatus("not_started") == "Not started")
+        #expect(NCAgendaText.ganttStatus("some_new_state") == "Some new state")
+        #expect(NCAgendaText.agentStatus(.paused) == "Paused")
+        #expect(NCAgendaText.agentStatus(.retired) == "Retired")
+        #expect(NCAgendaText.agentStatus(.active) == "Active")
+    }
+}

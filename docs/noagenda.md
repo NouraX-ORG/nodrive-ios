@@ -94,18 +94,25 @@ the credential never goes anywhere else.
 - Background refresh runs when iOS decides; refresh on open, on pull and on returning to the app never depends on it.
   A refresh that only joins one already running waits for that one (the run belongs to the screen); a cancelled
   background task cancels only the run it started.
-- The `agenda-server` job has no parity check of the stand-in against the real server on the same requests: the
-  stand-in replays the recorded answers byte for byte, so the only difference would be a request the stand-in does
-  not know, which `agenda-check.py` and the simulator tests already show. A real check needs the stand-in and the
-  real server side by side, which the macOS runner cannot do (no Docker there).
+- The `agenda-server` job has no parity check of the stand-in against the real server on the same requests (plan
+  1.6 and 2.10 put it in that ubuntu job, where Docker and the Python stand-in both run, so it is possible and not
+  built yet). The stand-in replays the recorded answers byte for byte, so the only difference would be a request the
+  stand-in does not know, which `agenda-check.py` and the simulator tests already show.
+- No fixture drift check: the unit-test fixtures (`AgendaFixtures`) are not compared with the answers of the real
+  server. Only the share answer is, through the recorded snapshot. If nc_gantt, Deck or Calendar change an answer, the
+  contract check in `agenda-server` fails first, but a fixture can still go stale unnoticed.
 - The four "Open in" links are checked by their address (unit tests) and by the signed-in page opening in the
   simulator. There is no Playwright check against the real NoCalendar, NoTasks, NoGantt and NoBoard pages in CI: the
   routes of those web apps are the apps' own and change with their versions; it is an owner test row.
 - The seed's Deck link of a NoGantt task ("Landing page build" with a board badge) is not accepted by NoGantt 2.4.1
   (a project needs a Deck sync level first), so the UI test checks "once" for that task, and the badge itself is
   covered by the unit test `linkedCard`.
-- `projects/{id}/shares` is read on every refresh for the projects the person administers (plan: at most daily), and
-  a 401 or 403 on one project's tasks marks NoGantt as refused. Both are small and left for the editing step.
+- Reads that fail keep what was known: `projects/{id}/shares` is read at most once a day (kept in the saved NoGantt
+  read, `sharesReadAt`), a failed `task-sync` or `capacity-check` keeps the saved answer, and a 401 or 403 on one
+  project's tasks is that project's error (its saved rows stay) and does not mark NoGantt as refused. Only a refusal
+  of `my-tasks`, `projects`, `resources` or `settings` marks NoGantt refused as a whole.
+- NoGantt's `task-sync` is read before the calendars, so its copy calendar is never fetched, also on the first
+  refresh.
 - A `sync-collection` delta read for a changed busy calendar is a later optimisation (a changed calendar is read in
   full; unchanged ones are skipped by their sync token).
 - The Sources screen shows the working hours from the device settings; reading the person's schedule from NoGantt

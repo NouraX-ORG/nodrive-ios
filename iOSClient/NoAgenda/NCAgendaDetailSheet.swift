@@ -41,7 +41,7 @@ struct NCAgendaDetailSheet: View {
                             row(NCAgendaText.t("_nodrive_agenda_detail_done_"), "\(percent) %")
                                 .accessibilityIdentifier("agendaDetailPercent")
                         }
-                        if let status = item.status, item.home == .gantt { row(NCAgendaText.t("_nodrive_agenda_detail_status_"), status) }
+                        if let status = item.status, item.home == .gantt { row(NCAgendaText.t("_nodrive_agenda_detail_status_"), NCAgendaText.ganttStatus(status)) }
                         if let hours = item.workShare { row(NCAgendaText.t("_nodrive_agenda_detail_work_"), String(format: "%.1f", hours)) }
                     }
                 }
