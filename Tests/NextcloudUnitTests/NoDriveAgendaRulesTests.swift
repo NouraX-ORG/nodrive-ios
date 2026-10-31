@@ -729,7 +729,9 @@ struct NoDriveAgendaBoardRulesTests {
 
     @Test("A card where I'm the only person, with Ali's agent: \"belongs to Ali, not Mara\", as for a Gantt task (not \"no person\")")
     func cardAloneWithStrayAgent() throws {
-        let snapshot = S.assemble(me: S.mara, deck: deck(cards: [card(1, "Mara alone", assigned: ["mara"], labels: ["🤖 Writer-Bot"])]))
+        let snapshot = S.assemble(me: S.mara, deck: deck(cards: [
+            card(1, "Mara alone", assigned: ["mara"], labels: ["🤖 Writer-Bot"]), card(2, "Ali's", assigned: ["ali"]),
+        ]))
         let problems = snapshot.problems.filter { $0.key.hasPrefix("team:flag:") }
         #expect(problems.map(\.text) == ["⚠ Mara alone: " + NCAgendaText.f("_nodrive_agenda_flag_agent_belongs_", "Writer-Bot", "Ali", "Mara")])
         #expect(!snapshot.problems.contains { $0.text.contains(NCAgendaText.f("_nodrive_agenda_flag_agent_no_person_team_", "Writer-Bot", "Mara alone")) })
