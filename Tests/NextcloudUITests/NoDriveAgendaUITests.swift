@@ -83,8 +83,8 @@ final class NoDriveAgendaUITests: XCTestCase {
         XCTAssertNotNil(orphan, "the problem about an agent on a task without its person is missing")
         XCTAssertTrue(orphan?.label.contains("without you") == true, "the problem does not say it is without you")
         // Other people's tasks are not mine: Sara's tasks are absent
-        XCTAssertNil(findRow(app, "Sara's internal task", timeout: 3), "Sara's task is shown")
-        XCTAssertNil(findRow(app, "Banner design", timeout: 3), "Sara's task is shown")
+        XCTAssertNil(findRow(app, "Sara's internal task", timeout: 3, absent: true), "Sara's task is shown")
+        XCTAssertNil(findRow(app, "Banner design", timeout: 3, absent: true), "Sara's task is shown")
 
         app.segmentedControls["agendaViewPicker"].buttons["Week"].tap()
         Thread.sleep(forTimeInterval: 2)
@@ -113,11 +113,11 @@ final class NoDriveAgendaUITests: XCTestCase {
         XCTAssertNotNil(findRow(app, "Writer-Bot review"))
         element(app, "agendaChip-agents").tap()
         Thread.sleep(forTimeInterval: 1)
-        XCTAssertNil(findRow(app, "Writer-Bot review", timeout: 3), "turning off My agents still shows the Writer-Bot review")
+        XCTAssertNil(findRow(app, "Writer-Bot review", timeout: 3, absent: true), "turning off My agents still shows the Writer-Bot review")
         element(app, "agendaChip-agents").tap()
         app.segmentedControls["agendaScope"].buttons["Personal"].tap()
         Thread.sleep(forTimeInterval: 1)
-        XCTAssertNil(findRow(app, "Client call", timeout: 3), "Personal still shows Work events")
+        XCTAssertNil(findRow(app, "Client call", timeout: 3, absent: true), "Personal still shows Work events")
         save("agenda-personal-only")
         app.segmentedControls["agendaScope"].buttons["All"].tap()
     }
@@ -276,7 +276,8 @@ final class NoDriveAgendaUITests: XCTestCase {
     }
 
     /// A row (or problem) whose label holds `text`; the list is scrolled to find it.
-    private func findRow(_ app: XCUIApplication, _ text: String, timeout: TimeInterval = 60) -> XCUIElement? {
+    /// `absent`: the caller expects no such row, so a miss is no reason to keep a screenshot.
+    private func findRow(_ app: XCUIApplication, _ text: String, timeout: TimeInterval = 60, absent: Bool = false) -> XCUIElement? {
         let element = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
         let list = app.descendants(matching: .any)["agendaList"]
         let deadline = Date().addingTimeInterval(timeout)
@@ -284,14 +285,14 @@ final class NoDriveAgendaUITests: XCTestCase {
             ensureAgenda(app)
             if element.exists { return element }
             for _ in 0..<14 {
-                if list.exists { list.swipeUp(velocity: .slow) }
+                if list.exists { scrollList(app, up: true, slow: true) }
                 if element.exists { return element }
             }
-            for _ in 0..<14 where list.exists { list.swipeDown() }
+            for _ in 0..<14 where list.exists { scrollList(app, up: false) }
             if element.exists { return element }
             Thread.sleep(forTimeInterval: 2)
         } while Date() < deadline
-        saveFailure(app, looking: text)
+        if !absent { saveFailure(app, looking: text) }
         return nil
     }
 
@@ -304,10 +305,10 @@ final class NoDriveAgendaUITests: XCTestCase {
             ensureAgenda(app)
             if element.exists { return element }
             for _ in 0..<14 {
-                if list.exists { list.swipeUp(velocity: .slow) }
+                if list.exists { scrollList(app, up: true, slow: true) }
                 if element.exists { return element }
             }
-            for _ in 0..<14 where list.exists { list.swipeDown() }
+            for _ in 0..<14 where list.exists { scrollList(app, up: false) }
             if element.exists { return element }
             Thread.sleep(forTimeInterval: 2)
         } while Date() < deadline
@@ -320,13 +321,22 @@ final class NoDriveAgendaUITests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'agendaRow-' AND label CONTAINS %@", text)).count
     }
 
+    /// Scrolls the list by a drag on the screen itself (up = the list moves up, to show what is below). Unlike
+    /// `list.swipeUp()` it does not fail the test when the list is gone for a moment: the app can rebuild its main
+    /// screen a little late, and `ensureAgenda` then brings the list back.
+    private func scrollList(_ app: XCUIApplication, up: Bool, slow: Bool = false) {
+        let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: up ? 0.8 : 0.35))
+        let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: up ? 0.35 : 0.8))
+        from.press(forDuration: 0.05, thenDragTo: to, withVelocity: slow ? .slow : .default, thenHoldForDuration: 0)
+    }
+
     /// Scrolls the list up until the element is there and can be tapped.
     private func scrollTo(_ app: XCUIApplication, _ target: XCUIElement) -> Bool {
         let list = app.descendants(matching: .any)["agendaList"]
         for _ in 0..<14 {
             if target.exists, target.isHittable { return true }
             guard list.exists else { break }
-            list.swipeUp()
+            scrollList(app, up: true)
         }
         return target.exists && target.isHittable
     }
