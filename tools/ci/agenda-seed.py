@@ -127,7 +127,7 @@ def put_registry(user, text, name):
 
 def seed_registries(resource_ids):
     full = [('AG-0001', 'Writer-Bot', 'ali', 'active', 'demo-org', resource_ids.get('writer', [])),
-            ('AG-0002', 'Design-Bot', 'sara', 'active', 'demo-org', []),
+            ('AG-0002', 'Design-Bot', 'sara', 'active', 'demo-org', resource_ids.get('design', [])),
             ('AG-0003', 'Research-Bot', 'ali', 'paused', 'demo-org', []),
             ('AG-0004', 'Ghost-Bot-Retired', 'ali', 'retired', 'demo-org', []),
             ('AG-0007', 'Mara-Bot', 'mara', 'active', 'demo-org', []),
@@ -165,7 +165,9 @@ def seed_deck(day):
     due = lambda n: (c.utc(day + datetime.timedelta(days=n), 12)).strftime('%Y-%m-%dT%H:%M:%S+00:00')  # noqa: E731
     cards = [('Review sitemap', due(0), ['ali'], ['\U0001F916 Writer-Bot']), ('Plain card', due(2), ['ali'], []),
              ('No date card', None, ['ali'], []), ('Unknown agent card', due(1), ['ali'], ['ghost']),
-             ('Sara card', due(-2), ['sara'], ['\U0001F916 Design-Bot']), ('Unassigned card', due(3), [], [])]
+             ('Sara card', due(-2), ['sara'], ['\U0001F916 Design-Bot']), ('Unassigned card', due(3), [], []),
+             # Ali's agent on a card of Sara: "belongs to Ali, not Sara" for Mara, "without you" for Ali
+             ('Stray label card', due(2), ['sara'], ['\U0001F916 Writer-Bot'])]
     made = {}
     for title, duedate, users, label_titles in cards:
         body = {'title': title, 'type': 'plain', 'order': 1}

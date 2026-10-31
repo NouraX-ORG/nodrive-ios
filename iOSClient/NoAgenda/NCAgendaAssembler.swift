@@ -280,8 +280,8 @@ struct NCAgendaAssembler {
                     let row = cardItem(card, board: board, color: color, team: false, people: [], labels: labels)
                     items.append(row)
                     if setting == .doOversee {
-                        // The manager's flags about the others on a card that I'm on too. No second row: it shows once, as mine.
-                        let flags = managerCardFlags(labels, title: card.title, assigned: others)
+                        // The manager's flags about the card that I'm on too. No second row: it shows once, as mine.
+                        let flags = managerCardFlags(labels, title: card.title, assigned: card.assigned)
                         problems += flagProblems(flags, title: card.title, personName: nil, link: row.link, home: .board, rowKey: "board:\(board.id):\(card.id):team")
                     }
                 } else if setting == .doOversee {
@@ -324,22 +324,26 @@ struct NCAgendaAssembler {
     }
 
     /// Flags for the board manager (design 4.4): two agents for one person, an agent with no person on the card, an
-    /// agent that belongs to someone who is not on the card. `others` are the people on the card besides me.
-    func managerCardFlags(_ labels: CardAgentLabels, title: String, assigned others: [DeckPerson]) -> [IntegrityFlag] {
+    /// agent that belongs to someone who is not on the card. `assigned` is everyone on the card, me included, so a card
+    /// reads like a Gantt task: "Writer-Bot belongs to Ali, not Mara".
+    func managerCardFlags(_ labels: CardAgentLabels, title: String, assigned: [DeckPerson]) -> [IntegrityFlag] {
         var flags: [IntegrityFlag] = []
-        for person in others {
+        for person in assigned {
             let uid = person.uid.lowercased()
-            if labels.ofAssigned.filter({ $0.person == uid }).count > 1 {
+            // Two agents of mine are flagged on my own row already.
+            if uid != myUid, labels.ofAssigned.filter({ $0.person == uid }).count > 1 {
                 flags.append(IntegrityFlag(kind: .twoAgents, audience: .both, names: [displayName(of: uid) ?? person.name]))
             }
         }
         for agent in labels.strays {
-            if others.isEmpty {
+            // An agent of mine on a card I'm not on is already my own problem ("mine:orphan"): said once.
+            if agent.person == myUid { continue }
+            if assigned.isEmpty {
                 flags.append(IntegrityFlag(kind: .agentWithoutPerson, audience: .manager, names: [otherLabel(agent), title]))
             } else {
                 let owner = displayName(of: agent.person) ?? NCAgendaText.t("_nodrive_agenda_someone_")
                 flags.append(IntegrityFlag(kind: .agentOfOtherPerson, audience: .manager,
-                                           names: [otherLabel(agent), owner, others.map { $0.name }.joined(separator: ", ")]))
+                                           names: [otherLabel(agent), owner, assigned.map { $0.name }.joined(separator: ", ")]))
             }
         }
         return flags

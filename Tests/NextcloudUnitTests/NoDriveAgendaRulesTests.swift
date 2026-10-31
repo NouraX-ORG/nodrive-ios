@@ -516,6 +516,71 @@ struct NoDriveAgendaGanttRulesTests {
         #expect(flag.text == NCAgendaText.f("_nodrive_agenda_unknown_agent_", "Ghost-Bot (Sara)"))
     }
 
+    @Test("Team problems of one task: keys are unique, a task-wide flag is one problem, not one per person")
+    func teamProblemsAreUnique() throws {
+        var gantt = S.gantt
+        gantt.resources += [S.person(8, "Contractor B", uid: nil), S.person(60, "Out planning", uid: nil), S.person(61, "Odd planning", uid: nil)]
+        var registry = S.registry
+        registry.agents.append(RegistryAgent(id: "AG-0008", name: "Out-Bot", person: "olaf", status: .active, organisation: "demo-org", ganttResourceIds: [60]))
+        registry.agents.append(RegistryAgent(id: "AG-0009", name: "Odd-Bot", person: "olaf", status: .active, organisation: "demo-org", ganttResourceIds: [61]))
+        // Sara and Ali, two unlinked people, two strays: Mara runs the project and is not on the task
+        gantt.tasks["1"] = [S.task(50, "Crowded", resources: [2, 1, 6, 8, 60, 61])]
+        let snapshot = S.assemble(me: S.mara, gantt: gantt, registry: registry)
+        let keys = snapshot.problems.map(\.key)
+        #expect(Set(keys).count == keys.count)
+        let flags = snapshot.problems.filter { $0.key.hasPrefix("team:flag:") && $0.key.contains("gantt:50") }
+        let notLinked = NCAgendaText.t("_nodrive_agenda_flag_not_linked_")
+        // two unlinked people read the same: once; two strays read differently: both; nothing repeated per person
+        #expect(flags.filter { $0.text.hasSuffix(notLinked) }.count == 1)
+        #expect(flags.filter { $0.text.contains("Out-Bot") }.count == 1)
+        #expect(flags.filter { $0.text.contains("Odd-Bot") }.count == 1)
+        #expect(flags.count == 3)
+        #expect(snapshot.items.filter { $0.title == "Crowded" && $0.relation == .team }.count == 2)
+        // the rows still carry the flags
+        #expect(snapshot.items.first { $0.title == "Crowded" && $0.personName == "Sara" }?.flags.contains { $0.kind == .notLinked } == true)
+    }
+
+    @Test("Two flags of one kind on a task of a manager who is on it: both show, with different keys")
+    func twoFlagsOneKindManagerOnTask() {
+        var gantt = S.gantt
+        gantt.resources += [S.person(60, "Out planning", uid: nil), S.person(61, "Odd planning", uid: nil)]
+        var registry = S.registry
+        registry.agents.append(RegistryAgent(id: "AG-0008", name: "Out-Bot", person: "olaf", status: .active, organisation: "demo-org", ganttResourceIds: [60]))
+        registry.agents.append(RegistryAgent(id: "AG-0009", name: "Odd-Bot", person: "olaf", status: .active, organisation: "demo-org", ganttResourceIds: [61]))
+        gantt.tasks["1"] = [S.task(51, "Two strays", resources: [3, 60, 61])]
+        let snapshot = S.assemble(me: S.mara, gantt: gantt, registry: registry)
+        let flags = snapshot.problems.filter { $0.key.hasPrefix("team:flag:agentOfOtherPerson") }
+        #expect(flags.count == 2)
+        #expect(Set(snapshot.problems.map(\.key)).count == snapshot.problems.count)
+    }
+
+    @Test("My own agent on a task I'm not on, in a project I run, is said once: my problem, not also the manager's")
+    func myStrayAgentOnceOnTaskIRun() {
+        var gantt = S.gantt
+        gantt.resources.append(S.person(62, "Mara-Bot planning", uid: nil))
+        var registry = S.registry
+        registry.agents[5].ganttResourceIds = [62]
+        gantt.tasks["1"] = [S.task(52, "Sara with my bot", resources: [2, 62])]
+        let snapshot = S.assemble(me: S.mara, gantt: gantt, registry: registry)
+        #expect(snapshot.problems.filter { $0.key.hasPrefix("mine:orphan:52") }.count == 1)
+        #expect(!snapshot.problems.contains { $0.key.hasPrefix("team:flag:agentOfOtherPerson:gantt:52") })
+    }
+
+    @Test("A project whose tasks the server refused is marked in Sources with the time; other projects are not")
+    func refusedProjectIsMarked() throws {
+        var gantt = S.gantt
+        gantt.projects.append(GanttProject(id: 2, title: "Other", color: nil, ownerId: "mara", ownerName: "Mara", permission: "editor"))
+        gantt.myTasks.append(GanttMyTask(id: 99, title: "x", projectId: 2, projectTitle: "Other", start: nil, end: nil, status: "in_progress"))
+        gantt.refusedAt = ["2": S.date("2026-10-30T10:42:00Z")]
+        let sources = S.assemble(gantt: gantt).sources
+        let note = try #require(sources.first { $0.key == "project:2" }?.note)
+        #expect(note.contains(NCAgendaFormat.time(S.date("2026-10-30T10:42:00Z"))))
+        #expect(sources.first { $0.key == "project:1" }?.note == nil)
+        // a saved read from before the field existed still loads
+        let old = try JSONEncoder().encode(S.gantt)
+        #expect((try JSONDecoder().decode(RawGantt.self, from: old)).refusedAt == nil)
+    }
+
     @Test("The not-shared sentence is singular for one task")
     func notSharedOne() {
         let one = IntegrityFlag(kind: .notShared, audience: .manager, names: ["Sara"], count: 1)
@@ -658,7 +723,36 @@ struct NoDriveAgendaBoardRulesTests {
         #expect(snapshot.items.filter { $0.title == "Mixed" }.map(\.relation) == [.mine])
         #expect(snapshot.items.first { $0.title == "Mixed" }?.agent == .selfAgent)
         let problem = try #require(snapshot.problems.first { $0.key.hasPrefix("team:flag:agentOfOtherPerson:board:1:1") })
-        #expect(problem.text == "⚠ Mixed: " + NCAgendaText.f("_nodrive_agenda_flag_agent_belongs_", "Writer-Bot", "Ali", "Sara"))
+        // everyone on the card is named, me included, as a Gantt task does
+        #expect(problem.text == "⚠ Mixed: " + NCAgendaText.f("_nodrive_agenda_flag_agent_belongs_", "Writer-Bot", "Ali", "Mara, Sara"))
+    }
+
+    @Test("A card where I'm the only person, with Ali's agent: \"belongs to Ali, not Mara\", as for a Gantt task (not \"no person\")")
+    func cardAloneWithStrayAgent() throws {
+        let snapshot = S.assemble(me: S.mara, deck: deck(cards: [card(1, "Mara alone", assigned: ["mara"], labels: ["🤖 Writer-Bot"])]))
+        let problems = snapshot.problems.filter { $0.key.hasPrefix("team:flag:") }
+        #expect(problems.map(\.text) == ["⚠ Mara alone: " + NCAgendaText.f("_nodrive_agenda_flag_agent_belongs_", "Writer-Bot", "Ali", "Mara")])
+        #expect(!snapshot.problems.contains { $0.text.contains(NCAgendaText.f("_nodrive_agenda_flag_agent_no_person_team_", "Writer-Bot", "Mara alone")) })
+    }
+
+    @Test("Two strays and no person on one card: both sentences show, with different keys")
+    func cardTwoStrays() {
+        var registry = S.registry
+        registry.agents.append(RegistryAgent(id: "AG-0009", name: "Odd-Bot", person: "olaf", status: .active, organisation: "demo-org", boardLabel: "🤖 Odd-Bot"))
+        let snapshot = S.assemble(me: S.mara, deck: deck(cards: [card(1, "Nobody", assigned: [], labels: ["🤖 Design-Bot", "🤖 Odd-Bot"])]), registry: registry)
+        let flags = snapshot.problems.filter { $0.key.hasPrefix("team:flag:agentWithoutPerson") }
+        #expect(flags.count == 2)
+        #expect(Set(snapshot.problems.map(\.key)).count == snapshot.problems.count)
+        #expect(flags.contains { $0.text.contains("Design-Bot") } && flags.contains { $0.text.contains("Odd-Bot") })
+    }
+
+    @Test("My own agent on a card I'm not on is said once: my problem, not also the manager's")
+    func myStrayAgentOnceOnBoardIRun() {
+        var registry = S.registry
+        registry.agents[5].boardLabel = "🤖 Mara-Bot"
+        let snapshot = S.assemble(me: S.mara, deck: deck(cards: [card(1, "Sara's card", assigned: ["sara"], labels: ["🤖 Mara-Bot"])]), registry: registry)
+        #expect(snapshot.problems.filter { $0.key.hasPrefix("mine:orphan:board:1:1") }.count == 1)
+        #expect(!snapshot.problems.contains { $0.key.hasPrefix("team:flag:agentOfOtherPerson:board:1:1") || $0.key.hasPrefix("team:flag:agentWithoutPerson:board:1:1") })
     }
 
     @Test("Cards under the Deck version guard carry the lock")
@@ -745,10 +839,22 @@ struct NoDriveAgendaPlannerTests {
         let personal = plan(filter: filter)
         #expect(personal.timed.map(\.title) == ["Day off", "Dentist"])
         #expect(personal.inProgress.isEmpty)
+        // problems come from NoGantt and NoBoard, which are Work: none under Personal
+        #expect(personal.ownProblems.isEmpty && personal.teamProblems.isEmpty)
         filter.scope = .work
         let work = plan(filter: filter)
         #expect(work.timed.map(\.title) == ["Writer-Bot review"])
         #expect(work.inProgress.map(\.title).contains("Write copy"))
+        #expect(!work.ownProblems.isEmpty)
+        #expect(!plan(filter: AgendaFilter()).ownProblems.isEmpty)
+        // the manager's team problems follow the switch too
+        let managed = S.assemble(me: S.mara, gantt: S.gantt)
+        func teamProblems(_ scope: AgendaFilter.Scope) -> Int {
+            var value = AgendaFilter()
+            value.scope = scope
+            return NCAgendaPlanner.plan(day: S.now, snapshot: managed, filter: value, showAllTeam: false, now: S.now, calendar: S.calendar).teamProblems.count
+        }
+        #expect(teamProblems(.all) > 0 && teamProblems(.work) == teamProblems(.all) && teamProblems(.personal) == 0)
     }
 
     @Test("Team rows only with \"Show all team tasks\"; problems always (today)")

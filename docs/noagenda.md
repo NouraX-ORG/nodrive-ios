@@ -21,6 +21,9 @@ writes to any server: no write request exists in the code (`NCAgendaMethod` has 
   and a folded "No date" list.
 - **My team** (projects and boards the person runs): problems only (late, due today, blocked, someone overbooked,
   not assigned to a person, the integrity flags of design 4.4), and the switch **Show all team tasks**.
+  Each sentence is one problem: a flag about the whole task shows once (not once per person), flags that read the
+  same show once, and an agent of the person's own that is on a card or task without them is said once (as theirs).
+  Problems count as Work, so they are hidden under **Personal**.
 - **Sources**: every calendar, list, project and board with its setting (design 6.1), the working hours, and the
   agents of the registry. The first time, **"Which of your calendars are personal?"** is asked once.
 - A row opens a detail sheet (read only here) with **Open in NoCalendar / NoTasks / NoGantt / NoBoard**, which
@@ -90,6 +93,11 @@ the credential never goes anywhere else.
 
 ## Open points
 
+- A project whose tasks the server refuses (401 or 403) keeps its saved rows and is marked in Sources with the time
+  it could not be read. Calendars that fail to read are only reported by the banner (not marked one by one).
+- The agenda UI shard is sometimes slow to come up. Every finder that gives up now keeps a screenshot
+  (`finder-failed-<text>.png`) and prints what was on screen, so the next flaky run can be read; the cause is not
+  found yet. Watch this shard before main moves.
 - Translations of `NoAgenda.strings` (English only). Listed in `plans/pending-owner-changes.md`.
 - Background refresh runs when iOS decides; refresh on open, on pull and on returning to the app never depends on it.
   A refresh that only joins one already running waits for that one (the run belongs to the screen); a cancelled

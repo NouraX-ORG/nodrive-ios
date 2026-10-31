@@ -89,6 +89,11 @@ extension NCAgendaAssembler {
             var source = AgendaSource(key: NCAgendaSources.projectKey(project.id), kind: .project, name: project.title,
                                       color: NCAgendaColors.mapped(project.color), setting: setting)
             if project.permission == "viewer" { source.note = NCAgendaText.t("_nodrive_agenda_project_viewer_note_") }
+            if let refused = gantt.refusedAt?[String(project.id)] {
+                // The server said no for this project at the last read: the rows are old ones, and the person is told.
+                let text = NCAgendaText.f("_nodrive_agenda_project_refused_", NCAgendaFormat.time(refused))
+                source.note = source.note.map { $0 + " " + text } ?? text
+            }
             sources.append(source)
             guard setting != .hidden else { continue }
 
@@ -185,6 +190,8 @@ extension NCAgendaAssembler {
                 for (resource, agent) in recognised {
                     let personOnTask = persons.contains { $0.uid?.lowercased() == agent.person }
                     if personOnTask { continue }
+                    // An agent of mine on a task I'm not on is already my own problem ("mine:orphan"): said once.
+                    if agent.person == myUid { continue }
                     // Design 4.1: the sentence names the agent only when its organisation is one of mine.
                     if persons.isEmpty {
                         teamFlags.append(IntegrityFlag(kind: .agentWithoutPerson, audience: .manager, names: [otherLabel(agent), task.title]))
@@ -216,29 +223,28 @@ extension NCAgendaAssembler {
                 }
 
                 let others = persons.filter { $0.uid?.lowercased() != myUid }
-                var teamRows: [AgendaItem] = []
+                let taskLink = AgendaLink(home: .gantt, projectId: project.id, taskId: task.id, updatedAt: task.updatedAt, deckCardId: task.deckCardId)
+                // Flags about the whole task are problems once per task, not once per person on it (design 4.4).
+                problems += flagProblems(teamFlags, title: task.title, personName: nil, link: taskLink, home: .gantt, rowKey: "gantt:\(task.id):team")
+                var teamRows: [(row: AgendaItem, flags: [IntegrityFlag])] = []
                 for person in others {
                     guard let uid = person.uid?.lowercased() else { continue }
                     let personName = person.uidDisplayName ?? displayName(of: uid) ?? person.name
                     let theirs = agentsOnTask(task, of: uid, resources: resources, persons: persons)
-                    var flags = teamFlags
+                    var personal: [IntegrityFlag] = []
                     var agent: AgentRef = .selfAgent
                     if let first = theirs.first { agent = .other(label: otherLabel(first)) }
-                    if theirs.count > 1 { flags.append(IntegrityFlag(kind: .twoAgents, audience: .both, names: [personName])) }
-                    teamRows.append(base(key: "gantt:\(task.id):team:\(uid)", relation: .team, personName: personName, agent: agent, flags: flags))
+                    if theirs.count > 1 { personal.append(IntegrityFlag(kind: .twoAgents, audience: .both, names: [personName])) }
+                    teamRows.append((base(key: "gantt:\(task.id):team:\(uid)", relation: .team, personName: personName, agent: agent,
+                                          flags: teamFlags + personal), personal))
                 }
-                if others.isEmpty, !teamFlags.isEmpty {
-                    // No other person's row carries the flags: a row of their own, or, when I'm on the task, only the problems.
-                    let flagRow = base(key: "gantt:\(task.id):team", relation: .team, personName: nil, agent: .selfAgent, flags: teamFlags)
-                    if iAmOnTask {
-                        problems += flagProblems(for: flagRow)
-                    } else {
-                        teamRows.append(flagRow)
-                    }
+                if others.isEmpty, !teamFlags.isEmpty, !iAmOnTask {
+                    // No other person's row carries the flags: a row of their own. When I'm on the task, only the problems.
+                    teamRows.append((base(key: "gantt:\(task.id):team", relation: .team, personName: nil, agent: .selfAgent, flags: teamFlags), []))
                 }
-                for row in teamRows {
+                for (row, personal) in teamRows {
                     items.append(row)
-                    problems += teamProblems(for: row)
+                    problems += teamProblems(for: row, flags: personal)
                     if let card = task.deckCardId { cardIdsOfGanttTasks.insert(card) }
                 }
             }
@@ -302,7 +308,9 @@ extension NCAgendaAssembler {
     // MARK: Team problems (design 6.3)
 
     /// "⏰ Banner design: Sara · 🤖 Design-Bot, 2 days late"
-    func teamProblems(for row: AgendaItem) -> [AgendaProblem] {
+    /// `flags` are the flags of the row that become problems; the default is all of them. A caller that makes the
+    /// task-wide flags a problem once per task passes only the row's own.
+    func teamProblems(for row: AgendaItem, flags: [IntegrityFlag]? = nil) -> [AgendaProblem] {
         var result: [AgendaProblem] = []
         let who: String = {
             var text = row.personName ?? ""
@@ -326,19 +334,28 @@ extension NCAgendaAssembler {
         if row.blocked {
             result.append(make(.blocked, "⛔", NCAgendaText.t("_nodrive_agenda_blocked_by_late_")))
         }
-        result += flagProblems(for: row)
+        result += flagProblems(flags ?? row.flags, title: row.title, personName: row.personName, link: row.link, home: row.home, rowKey: row.key)
         return result
     }
 
-    /// The flags of a row that are for the manager (design 4.4), as problems.
-    func flagProblems(for row: AgendaItem) -> [AgendaProblem] {
-        flagProblems(row.flags, title: row.title, personName: row.personName, link: row.link, home: row.home, rowKey: row.key)
-    }
-
+    /// One problem per distinct sentence: flags that read the same are shown once, and every key is unique (it is the
+    /// SwiftUI id of the row), also for two flags of one kind on one row.
     func flagProblems(_ flags: [IntegrityFlag], title: String, personName: String?, link: AgendaLink?, home: AgendaHome, rowKey: String) -> [AgendaProblem] {
-        flags.filter { $0.audience != .person }.map { flag in
-            AgendaProblem(key: "team:flag:\(flag.kind.rawValue):\(rowKey)", kind: .flag, relation: .team, title: title,
-                          personName: personName, text: "⚠ \(title): \(flag.text)", link: link, home: home)
+        var texts = Set<String>()
+        var keys = Set<String>()
+        var result: [AgendaProblem] = []
+        for flag in flags where flag.audience != .person {
+            guard texts.insert(flag.text).inserted else { continue }
+            let base = "team:flag:\(flag.kind.rawValue):\(rowKey):" + flag.names.joined(separator: "|")
+            var key = base
+            var number = 2
+            while !keys.insert(key).inserted {
+                key = base + "#\(number)"
+                number += 1
+            }
+            result.append(AgendaProblem(key: key, kind: .flag, relation: .team, title: title, personName: personName,
+                                        text: "⚠ \(title): \(flag.text)", link: link, home: home))
         }
+        return result
     }
 }

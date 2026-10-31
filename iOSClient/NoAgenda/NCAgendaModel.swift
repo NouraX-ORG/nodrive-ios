@@ -338,8 +338,10 @@ struct AgendaFilter: Codable, Equatable, Sendable {
     }
 
     /// Problems follow the chips of their kind (own-agent problems the agent chip, team problems the team chip).
+    /// They all come from NoGantt and NoBoard, which count as Work (plan 2.7.5): under "Personal" there are none.
     func allows(_ problem: AgendaProblem) -> Bool {
-        problem.relation == .team ? team : agents
+        if scope == .personal { return false }
+        return problem.relation == .team ? team : agents
     }
 }
 

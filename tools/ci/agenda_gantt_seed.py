@@ -122,4 +122,5 @@ def seed(day, deck, step):
     # NoGantt copies Sara's tasks into a calendar (the hidden-calendar rule) ------------
     status, data = post('task-sync', {'enabled': True, 'create_calendar': True}, user='sara', method='PUT')
     step('nogantt copy calendar for sara', status in (200, 201), 'status %s' % status)
-    return {'resource_ids': {'writer': [ids['writer']]}, 'projects': projects, 'tasks': made, 'resources': ids}
+    # design: the registry names Design-Bot's planning resource by id, so a cross pairing is "belongs to X, not Y"
+    return {'resource_ids': {'writer': [ids['writer']], 'design': [ids['design']]}, 'projects': projects, 'tasks': made, 'resources': ids}

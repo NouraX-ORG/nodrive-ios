@@ -107,6 +107,9 @@ struct RawGantt: Codable, Equatable, Sendable {
     var shares: [String: [GanttShare]] = [:]
     /// When the shares were read; they are read again after a day (plan 2.5), not on every refresh.
     var sharesReadAt: Date?
+    /// Projects (by id) whose tasks the server refused at the last read, with the time. Their rows are the saved ones.
+    /// Optional so that a saved read from before this field still loads.
+    var refusedAt: [String: Date]?
     /// False when an answer did not have the shape of NoGantt 2.4.1 (the version guard): read only.
     var contractOK = true
 }
@@ -314,6 +317,7 @@ struct NCAgendaGanttReader {
                 raw.tasks[key] = previous?.tasks[key]
                 raw.milestones[key] = previous?.milestones[key]
                 raw.subprojects[key] = previous?.subprojects[key]
+                raw.refusedAt = (raw.refusedAt ?? [:]).merging([key: now]) { _, new in new }
                 NCAgendaLog.log("gantt-project-refused", home: "gantt")
                 continue
             }

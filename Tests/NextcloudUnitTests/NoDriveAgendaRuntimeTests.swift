@@ -706,14 +706,19 @@ struct NoDriveAgendaGanttReadTests {
         }
         let first = try await read(server(refuse: false))
         #expect(first.tasks["2"]?.isEmpty == false)
+        #expect(first.refusedAt == nil)
         let second = try await read(server(refuse: true), previous: first)
         #expect(second.contractOK)
+        // the refused project is marked with the time, the other one is not
+        #expect(second.refusedAt?["2"] != nil)
+        #expect(second.refusedAt?["1"] == nil)
         #expect(second.tasks["1"]?.isEmpty == false)
         #expect(second.tasks["2"] == first.tasks["2"])
         // with nothing saved, that project simply has no rows, and NoGantt is not refused as a whole
         let fresh = try await read(server(refuse: true))
         #expect(fresh.tasks["1"]?.isEmpty == false)
         #expect(fresh.tasks["2"] == nil)
+        #expect(fresh.refusedAt?["2"] != nil)
     }
 
     @Test("Refused on the first call (my-tasks) is still NoGantt refused as a whole")

@@ -154,6 +154,9 @@ final class NoDriveAgendaUITests: XCTestCase {
         XCTAssertNotNil(findRow(app, "Not assigned to a person"), "the problem 'Not assigned to a person' is missing")
         XCTAssertNotNil(findRow(app, "Not linked to an account"), "the problem 'Not linked to an account' is missing")
         XCTAssertNotNil(findRow(app, "not shared with"), "the problem 'not shared with' is missing")
+        // An agent that the registry names by resource id, next to someone who is not its person, and a stray card label
+        XCTAssertNotNil(findRow(app, "Design-Bot belongs to"), "the problem 'Design-Bot belongs to ...' (Cross pairing) is missing")
+        XCTAssertNotNil(findRow(app, "Writer-Bot belongs to"), "the problem 'Writer-Bot belongs to ...' (stray card label) is missing")
         // "Show all team tasks": the switch is at the end of the list; the team rows come after it
         let showAll = element(app, "agendaShowAllTeam")
         XCTAssertTrue(scrollTo(app, showAll), "the switch 'Show all team tasks' is not in the list")
@@ -288,6 +291,7 @@ final class NoDriveAgendaUITests: XCTestCase {
             if element.exists { return element }
             Thread.sleep(forTimeInterval: 2)
         } while Date() < deadline
+        saveFailure(app, looking: text)
         return nil
     }
 
@@ -307,6 +311,7 @@ final class NoDriveAgendaUITests: XCTestCase {
             if element.exists { return element }
             Thread.sleep(forTimeInterval: 2)
         } while Date() < deadline
+        saveFailure(app, looking: text)
         return nil
     }
 
@@ -409,6 +414,15 @@ final class NoDriveAgendaUITests: XCTestCase {
     }
 
     // MARK: - Output
+
+    /// A finder gave up: the screen at that moment is kept (and the first things on it are named), so a flaky run can be
+    /// read afterwards. It is the screenshot "finder-failed-<text>.png" of the run.
+    private func saveFailure(_ app: XCUIApplication, looking text: String) {
+        let safe = String(text.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) ? Character($0) : "-" }.prefix(40))
+        let visible = app.staticTexts.allElementsBoundByIndex.prefix(8).map(\.label).joined(separator: " | ")
+        print("NoAgenda UI: did not find \"\(text)\"; agendaList exists: \(app.descendants(matching: .any)["agendaList"].exists); on screen: \(visible)")
+        save("finder-failed-" + safe)
+    }
 
     private var outputDir: URL? {
         guard let dir = env["NODRIVE_SHOTS_DIR"], !dir.isEmpty else { return nil }

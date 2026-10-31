@@ -84,6 +84,7 @@
 "_nodrive_agenda_personal_question_" = "Which of your calendars are personal?";
 "_nodrive_agenda_previous_" = "Previous";
 "_nodrive_agenda_problems_" = "Problems with your agents";
+"_nodrive_agenda_project_refused_" = "Couldn't be read at %@. Showing the rows that were saved.";
 "_nodrive_agenda_project_viewer_note_" = "You can only view this project.";
 "_nodrive_agenda_reading_" = "Reading your calendars, projects and boards…";
 "_nodrive_agenda_registry_invalid_" = "The agent list in your NoDrive can't be read.";
