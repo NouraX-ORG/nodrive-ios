@@ -64,6 +64,11 @@ struct NCAgendaCache {
         try? FileManager.default.removeItem(at: folder.appendingPathComponent(name + ".json"))
     }
 
+    /// Removes this account's whole folder.
+    func removeAll() {
+        try? FileManager.default.removeItem(at: folder)
+    }
+
     /// Removes the cache of one account and nothing else.
     static func forget(account: String, root: URL = NCAgendaCache.defaultRoot()) {
         let folder = root.appendingPathComponent(folderName(for: account), isDirectory: true)

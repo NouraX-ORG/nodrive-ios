@@ -56,10 +56,11 @@ actor NCAgendaStore {
             return created
         }
 
-        func remove(_ account: String) {
+        /// Takes the store of the account out of the registry and gives it back.
+        func take(_ account: String) -> NCAgendaStore? {
             lock.lock()
-            stores[account] = nil
-            lock.unlock()
+            defer { lock.unlock() }
+            return stores.removeValue(forKey: account)
         }
     }
 
@@ -71,7 +72,8 @@ actor NCAgendaStore {
 
     /// Account removal: the cache and settings of that account go (design 2.3, hook A6).
     static func forget(account: String) async {
-        registry.remove(account)
+        // The store stops and deletes its own folder, so a refresh that is running cannot write it back.
+        await registry.take(account)?.forget()
         NCAgendaCache.forget(account: account)
     }
 
@@ -81,6 +83,8 @@ actor NCAgendaStore {
     private let clock: @Sendable () -> Date
     private var inFlight: Task<AgendaRefreshResult, Never>?
     private var calendar: Calendar
+    /// Set by `forget()`: nothing is saved or read after the account's data was removed.
+    private var forgotten = false
 
     init(account: String,
          cacheRoot: URL = NCAgendaCache.defaultRoot(),
@@ -103,8 +107,30 @@ actor NCAgendaStore {
     func updateSettings(_ change: (inout AgendaSettings) -> Void) -> AgendaSettings {
         var value = settings()
         change(&value)
-        cache.save(value, name: "settings")
+        save(value, name: "settings")
         return value
+    }
+
+    /// Every write of the store goes through here, so none happens after `forget()`.
+    private func save<T: Encodable>(_ value: T, name: String) {
+        guard !forgotten else { return }
+        cache.save(value, name: name)
+    }
+
+    private func removeSaved(name: String) {
+        guard !forgotten else { return }
+        cache.remove(name: name)
+    }
+
+    /// Account removal: stops a running refresh, waits until it ended, then deletes this account's folder. After
+    /// that the store saves nothing and answers with empty rows.
+    func forget() async {
+        forgotten = true
+        if let running = inFlight {
+            running.cancel()
+            _ = await running.value
+        }
+        cache.removeAll()
     }
 
     // MARK: Reading
@@ -133,11 +159,19 @@ actor NCAgendaStore {
     }
 
     /// One refresh at a time: a caller that comes while one runs waits for that one.
+    /// A cancelled caller cancels the run it started (for the shared background task: iOS ended the time), and the
+    /// run then stops at its next check and gives the saved rows. A caller that only joined a running refresh
+    /// waits for that run, which belongs to the screen.
     func refresh() async -> AgendaRefreshResult {
+        if forgotten { return AgendaRefreshResult() }
         if let running = inFlight { return await running.value }
         let task = Task { await self.performRefresh() }
         inFlight = task
-        let result = await task.value
+        let result = await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
         inFlight = nil
         return result
     }
@@ -197,6 +231,7 @@ actor NCAgendaStore {
         } catch {
             status.offline = true
         }
+        if Task.isCancelled { return cached() }
         guard !status.offline, !status.signedOut, var me = meta.me else {
             return assemble(meta: meta, calendars: calendars, gantt: gantt, deck: deck, registry: registry, status: status)
         }
@@ -212,12 +247,17 @@ actor NCAgendaStore {
             let classifier = NCAgendaAssembler(AgendaInputs(me: me, gantt: gantt, registry: registry, settings: current, now: now, calendar: calendar))
             var merged: [RawCalendar] = []
             for var item in listed {
+                // Cancelled (the background time is over): stop here; the saved calendars stay as they were.
+                if Task.isCancelled { return cached() }
                 let known = calendars.first { $0.uri == item.uri }
                 item.objects = known?.objects ?? []
                 item.readAt = known?.readAt
                 item.windowStart = known?.windowStart
                 if classifier.classify(item).setting == .hidden {
+                    // Nothing is kept of a hidden calendar. Without readAt it is read again when it is shown again.
                     item.objects = []
+                    item.readAt = nil
+                    item.windowStart = nil
                     merged.append(item)
                     continue
                 }
@@ -240,7 +280,7 @@ actor NCAgendaStore {
             calendars = merged
             meta.calendarsSavedAt = now
             status.updatedAt = now
-            cache.save(calendars, name: "calendars")
+            save(calendars, name: "calendars")
         } catch let error as NCAgendaHTTPError {
             switch error {
             case .network: status.offline = true
@@ -250,6 +290,7 @@ actor NCAgendaStore {
         } catch {
             status.calendarsFailed = true
         }
+        if Task.isCancelled { return cached() }
         if status.offline || status.signedOut {
             return assemble(meta: meta, calendars: calendars, gantt: gantt, deck: deck, registry: registry, status: status)
         }
@@ -261,17 +302,19 @@ actor NCAgendaStore {
             meta.ganttSavedAt = now
             meta.ganttContractOK = raw.contractOK
             status.gantt = raw.contractOK ? .fresh : .readOnly
-            cache.save(raw, name: "gantt")
+            save(raw, name: "gantt")
         } catch NCAgendaGanttError.notInstalled {
             gantt = nil
             status.gantt = .notInstalled
-            cache.remove(name: "gantt")
+            removeSaved(name: "gantt")
         } catch NCAgendaGanttError.refused(let code) {
             status.gantt = .refused(code)
             NCAgendaLog.log("gantt-refused", home: "gantt", status: code)
         } catch {
             status.gantt = .unreachable(savedAt: meta.ganttSavedAt)
         }
+
+        if Task.isCancelled { return cached() }
 
         // NoBoard.
         do {
@@ -280,17 +323,19 @@ actor NCAgendaStore {
             meta.deckSavedAt = now
             meta.deckReadWrite = raw.isReadWrite
             status.board = raw.isReadWrite ? .fresh : .readOnly
-            cache.save(raw, name: "deck")
+            save(raw, name: "deck")
         } catch NCAgendaDeckError.notInstalled {
             deck = nil
             status.board = .notInstalled
-            cache.remove(name: "deck")
+            removeSaved(name: "deck")
         } catch NCAgendaDeckError.refused(let code) {
             status.board = .refused(code)
             NCAgendaLog.log("deck-refused", home: "board", status: code)
         } catch {
             status.board = .unreachable(savedAt: meta.deckSavedAt)
         }
+
+        if Task.isCancelled { return cached() }
 
         // The registry, last. Without it Self still works (design 4.1).
         do {
@@ -302,12 +347,12 @@ actor NCAgendaStore {
                     registry = parsed
                     meta.registryEtag = etag
                     meta.registrySavedAt = now
-                    cache.save(parsed, name: "registry")
+                    save(parsed, name: "registry")
                     status.registry = .loaded(parsed.agents.count)
                 case .invalid:
                     registry = nil
                     meta.registryEtag = nil
-                    cache.remove(name: "registry")
+                    removeSaved(name: "registry")
                     status.registry = .invalid
                 }
             case .notModified:
@@ -315,14 +360,14 @@ actor NCAgendaStore {
             case .missing:
                 registry = nil
                 meta.registryEtag = nil
-                cache.remove(name: "registry")
+                removeSaved(name: "registry")
                 status.registry = .missing
             }
         } catch {
             status.registry = registry.map { .loaded($0.agents.count) } ?? .unknown
         }
 
-        cache.save(meta, name: "meta")
+        save(meta, name: "meta")
         return assemble(meta: meta, calendars: calendars, gantt: gantt, deck: deck, registry: registry, status: status)
     }
 }

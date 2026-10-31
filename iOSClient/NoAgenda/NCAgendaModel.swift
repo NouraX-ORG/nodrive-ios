@@ -136,7 +136,9 @@ struct IntegrityFlag: Codable, Equatable, Sendable {
         case .notAssigned:
             return NCAgendaText.t("_nodrive_agenda_flag_not_assigned_")
         case .notShared:
-            return NCAgendaText.f("_nodrive_agenda_flag_not_shared_", first, count)
+            return count == 1
+                ? NCAgendaText.f("_nodrive_agenda_flag_not_shared_one_", first)
+                : NCAgendaText.f("_nodrive_agenda_flag_not_shared_", first, count)
         }
     }
 }

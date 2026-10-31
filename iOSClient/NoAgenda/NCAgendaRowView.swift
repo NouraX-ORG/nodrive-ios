@@ -104,7 +104,7 @@ struct NCAgendaProblemRowView: View {
                 if problem.link != nil {
                     Text(problem.home.openTitle)
                         .font(.caption)
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(.tint)
                 }
             }
             .contentShape(Rectangle())

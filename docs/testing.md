@@ -241,7 +241,11 @@ are owner tests.
 See `docs/noagenda.md` for what is tested where. Screenshots (light and dark) are written to
 `docs/screenshots/ios/agenda/` by the shard `agenda`: `agenda-sidebar`, `agenda-personal-question`, `agenda-day`,
 `agenda-week`, `agenda-month`, `agenda-detail`, `agenda-personal-only`, `agenda-sources`, `agenda-team`,
-`agenda-team-all`, `agenda-not-linked`.
+`agenda-team-all`, `agenda-not-linked`, and (light only) `agenda-state-offline-gantt`, `agenda-state-refuse-deck`,
+`agenda-state-deck-version-1-20-0`. The tests check: Day (the meeting in two calendars once, the task once, the
+agent-without-person problem, no tasks of other people), Sources (the hidden board calendar with its reason, the
+project and board defaults), the team problems as manager (not assigned, not linked, not shared) and the switch
+"Show all team tasks" (scrolled to), and the three states of the homes.
 
 ## Owner test steps (Mac)
 
@@ -290,6 +294,10 @@ See `docs/noagenda.md` for what is tested where. Screenshots (light and dark) ar
    4. If you run a project or board: My team shows problems only; "Show all team tasks" shows the rest.
    5. Switch the phone to flight mode and open NoAgenda: the last data stays, marked with the time it was saved.
    6. Nothing is ever changed or deleted from NoAgenda in this step.
+   7. Sources: set one of your calendars to Hidden, then back to Personal: its events are back in Day. Leave the app,
+      change an event in NoCalendar on the web, come back to the app with NoAgenda open: the row follows.
+   8. Open a row and tap "Open in NoCalendar" / "NoTasks" / "NoGantt" / "NoBoard": the signed-in page of that item
+      opens (the real pages are not tested in CI, see `docs/noagenda.md`, open points).
 9. Go through the "owner" rows above, then read back the device name shown under
    Settings → Security on drive.nourax.org.
 

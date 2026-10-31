@@ -204,7 +204,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           set -eu
-          for name in $(env | grep '^NODRIVE_AGENDA_PW_' | cut -d= -f1); do
+          for name in $(env | grep -E '^NODRIVE_AGENDA_(PW_|ADMIN_PW)' | cut -d= -f1); do
             if grep -qF -- "${!name}" build/agenda-server/agenda-snapshot.json build/agenda-server/*.md build/agenda-server/*.txt 2> /dev/null; then
               echo "a seeded app password is in an artifact"; exit 1
             fi
@@ -661,11 +661,19 @@ jobs:
 
       # ----- shard agenda -----
       - name: Download the NoAgenda snapshot (the real server's recorded answers; agenda-server job)
+        id: agenda_snapshot
         if: ${{ matrix.shard == 'agenda' }}
+        continue-on-error: true
         uses: actions/download-artifact@v8
         with:
           name: nodrive-ios-agenda-snapshot
           path: artifacts/agenda
+
+      - name: The NoAgenda snapshot is there (else the agenda-server job failed first)
+        if: ${{ matrix.shard == 'agenda' && steps.agenda_snapshot.outcome == 'failure' }}
+        run: |
+          echo "::error::The agenda-server job left no snapshot (its report is the artifact nodrive-ios-agenda-server). The NoAgenda UI tests cannot run without it."
+          exit 1
 
       - name: NoAgenda, signed in as ali, mara and olaf (light)
         if: ${{ !cancelled() && steps.sim.outcome == 'success' && matrix.shard == 'agenda' }}

@@ -84,6 +84,7 @@ struct NCAgendaDeckReader {
         let boardRows = (try? JSONSerialization.jsonObject(with: response.data)) as? [Any] ?? []
         raw.boards = boardRows.compactMap { ($0 as? [String: Any]).flatMap(Self.decodeBoard) }
         for board in raw.boards where !board.archived {
+            try Task.checkCancellation()
             let setting = NCAgendaSources.boardSetting(board, userId: userId, settings: settings)
             guard setting != .hidden else { continue }
             let stacks = try await http.send(.get, path: Self.root + "boards/\(board.id)/stacks",

@@ -70,6 +70,7 @@ enum NCAgendaFormat {
         if let person = item.personName { parts.append(person) }
         if item.late { parts.append(NCAgendaText.t("_nodrive_agenda_late_")) }
         if item.blocked { parts.append(NCAgendaText.t("_nodrive_agenda_blocked_")) }
+        if item.boardBadge { parts.append(NCAgendaText.t("_nodrive_agenda_spoken_board_")) }
         if item.lock != nil { parts.append(NCAgendaText.t("_nodrive_agenda_spoken_locked_")) }
         return parts.joined(separator: ", ")
     }
@@ -105,6 +106,9 @@ final class NCAgendaViewModel {
     var today: Date { now() }
     var filter: AgendaFilter { result.settings.filter }
 
+    /// The accent of the screen: the brand colour of the account's theme (the same as the other NoDrive screens).
+    var accentColor: Color { Color(NCBrandColor.shared.getElement(account: account)) }
+
     // MARK: Loading
 
     func start() async {
@@ -124,6 +128,13 @@ final class NCAgendaViewModel {
         if !result.settings.personalQuestionAnswered, ownCalendars.isEmpty == false, !result.status.offline, !result.status.signedOut {
             showPersonalQuestion = true
         }
+    }
+
+    /// The app came back to the foreground while NoAgenda is shown (plan 2.9): read again, unless a read is running
+    /// or the first one has not finished.
+    func appCameToForeground() async {
+        guard hasLoaded, !isLoading else { return }
+        await refresh()
     }
 
     private func applyStoredView() {

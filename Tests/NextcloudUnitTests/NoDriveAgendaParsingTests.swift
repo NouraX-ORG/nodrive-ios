@@ -134,6 +134,11 @@ enum AgendaFixtures {
     static let taskSync = ocs("""
     {"enabled":false,"calendar_uri":null,"calendars":[],"last_run":null,"error":null,"synced_count":0}
     """)
+    /// `projects/{id}/shares` as nc_gantt 2.4.1 answered it in the agenda-server CI job (the recorded snapshot).
+    static let shares = ocs("""
+    [{"id":1,"project_id":1,"principal_id":"ali","principal_type":"user","attachments_shared":false,"permission":"editor","created_at":"2026-10-31 02:41:44","display_name":"Ali","attachment_count":0},
+     {"id":2,"project_id":1,"principal_id":"sara","principal_type":"user","attachments_shared":false,"permission":"viewer","created_at":"2026-10-31 02:41:44","display_name":"Sara","attachment_count":0}]
+    """)
 
     // MARK: NoBoard (Deck 1.19.1)
 
@@ -490,6 +495,52 @@ struct NoDriveAgendaGanttTests {
         var nullDate = tasks[0]
         nullDate["start_date"] = NSNull()
         #expect(NCAgendaGanttContract.conforms(nullDate, to: NCAgendaGanttContract.task))
+        // A nullable key may be null, but it may not be absent: a NoGantt without updated_at is not the checked one
+        for key in ["start_date", "end_date", "work", "updated_at"] {
+            var gone = tasks[0]
+            gone[key] = nil
+            #expect(!NCAgendaGanttContract.conforms(gone, to: NCAgendaGanttContract.task), "\(key)")
+        }
+    }
+
+    @Test("The recorded 2.4.1 share answer decodes (principal_type, principal_id, permission) and passes the contract")
+    func shareDecoding() {
+        let value = NCAgendaHTTP.ocsData(Data(AgendaFixtures.shares.utf8))
+        #expect(NCAgendaGanttContract.allConform(NCAgendaJSON.dictionaries(value), to: NCAgendaGanttContract.share))
+        let decoded = NCAgendaGanttReader.decodeShares(value)
+        #expect(decoded == [GanttShare(type: "user", with: "ali", permission: "editor"),
+                            GanttShare(type: "user", with: "sara", permission: "viewer")])
+        // Names that were only guessed are not read
+        let guessed: [[String: Any]] = [["share_type": "user", "share_with": "ali", "permission": "admin"]]
+        #expect(NCAgendaGanttReader.decodeShares(guessed).isEmpty)
+        // An admin share to me is Do + Oversee; an editor share to me is not
+        let adminText = AgendaFixtures.shares.replacingOccurrences(of: "\"editor\"", with: "\"admin\"")
+        let admin = NCAgendaGanttReader.decodeShares(NCAgendaHTTP.ocsData(Data(adminText.utf8)))
+        let project = GanttProject(id: 1, title: "Website", ownerId: "mara", permission: "admin")
+        #expect(NCAgendaSources.projectSetting(project, hasMyTasks: false, settings: AgendaSettings(), userId: "ali", groups: [], shares: admin) == .doOversee)
+        #expect(NCAgendaSources.projectSetting(project, hasMyTasks: false, settings: AgendaSettings(), userId: "ali", groups: [], shares: decoded) == .hidden)
+    }
+
+    @Test("A project I run: its shares are read and kept, and a share in another shape turns NoGantt read only")
+    func shareRead() async throws {
+        func server(shares: String) -> AgendaFakeServer {
+            AgendaRuntimeSupport.server { _, path in
+                if path.hasSuffix("/api/v1/projects") {
+                    return (200, AgendaFixtures.ocs("[{\"id\":1,\"title\":\"Website\",\"owner_id\":\"mara\",\"owner_display_name\":\"Mara\",\"permission\":\"admin\",\"color\":\"#0082c9\"}]"))
+                }
+                if path.hasSuffix("/projects/1/shares") { return (200, shares) }
+                return nil
+            }
+        }
+        let good = try await NCAgendaGanttReader(http: server(shares: AgendaFixtures.shares).http())
+            .read(settings: AgendaSettings(), userId: "mara", groups: [], previous: nil)
+        #expect(good.shares["1"]?.map(\.with) == ["ali", "sara"])
+        #expect(good.contractOK)
+        let other = AgendaFixtures.ocs("[{\"id\":1,\"share_type\":\"user\",\"share_with\":\"ali\"}]")
+        let changed = try await NCAgendaGanttReader(http: server(shares: other).http())
+            .read(settings: AgendaSettings(), userId: "mara", groups: [], previous: nil)
+        #expect(!changed.contractOK)
+        #expect(changed.shares["1"]?.isEmpty == true)
     }
 
     @Test("A full read over the canned server gives rows and passes the guard")

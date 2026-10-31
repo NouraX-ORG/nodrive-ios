@@ -24,7 +24,6 @@ struct RawCalendar: Codable, Equatable, Sendable {
     var name: String
     var color: String?
     var ownerPrincipal: String?
-    var ownerName: String?
     var components: [String] = []
     var isSubscription = false
     var isBirthday = false
@@ -99,8 +98,6 @@ struct NCAgendaCalendarReader {
             let color = item.properties[NCAgendaDAVXML.key(NCAgendaDAVXML.appleNS, "calendar-color")]?.text
             calendar.color = (color?.isEmpty ?? true) ? nil : color
             calendar.ownerPrincipal = item.properties[NCAgendaDAVXML.key(NCAgendaDAVXML.ocNS, "owner-principal")]?.text
-            let ownerName = item.properties[NCAgendaDAVXML.key(NCAgendaDAVXML.ncNS, "owner-displayname")]?.text
-            calendar.ownerName = (ownerName?.isEmpty ?? true) ? nil : ownerName
             calendar.components = item.properties[NCAgendaDAVXML.key(caldavNS, "supported-calendar-component-set")]?.names.map { $0.uppercased() } ?? []
             calendar.isSubscription = isSubscribed || item.properties[NCAgendaDAVXML.key(csNS, "source")] != nil
             calendar.isBirthday = uri == Self.birthdayUri

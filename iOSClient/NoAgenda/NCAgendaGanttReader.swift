@@ -130,6 +130,7 @@ enum NCAgendaGanttContract {
     static let settings: [String: Kind] = ["timezone": .string]
     static let capacity: [String: Kind] = ["findings": .array]
     static let taskSync: [String: Kind] = ["enabled": .bool]
+    static let share: [String: Kind] = ["principal_id": .string, "principal_type": .string, "permission": .string]
 
     /// A JSON true or false (an NSNumber that is a CFBoolean). A number such as 1 is not a boolean here.
     static func isBool(_ value: Any?) -> Bool {
@@ -160,15 +161,11 @@ enum NCAgendaGanttContract {
         }
     }
 
-    /// True when `object` has every key of `shape` with the right type.
+    /// True when `object` has every key of `shape` with the right type. A nullable key may hold null, but it must be
+    /// there: a NoGantt that drops `updated_at` (the edit-conflict marker) is not the one that was checked.
     static func conforms(_ object: [String: Any], to shape: [String: Kind]) -> Bool {
         for (key, kind) in shape {
-            let nullable: Bool
-            switch kind {
-            case .stringOrNull, .numberOrNull, .intOrNull: nullable = true
-            default: nullable = false
-            }
-            if object[key] == nil && !nullable { return false }
+            guard object.keys.contains(key) else { return false }
             if !matches(object[key], kind) { return false }
         }
         return true
@@ -238,10 +235,15 @@ struct NCAgendaGanttReader {
         }
 
         let mineByProject = Set(raw.myTasks.map { $0.projectId })
+        var capacityRead = false
         for project in raw.projects {
+            try Task.checkCancellation()
             // Shares only to decide the "server admin only" relation, and only for a project that needs it.
             if project.permission == "admin" {
                 if let shares = try? await get("projects/\(project.id)/shares") {
+                    if !(shares is [Any]) || !NCAgendaGanttContract.allConform(NCAgendaJSON.dictionaries(shares), to: NCAgendaGanttContract.share) {
+                        raw.contractOK = false
+                    }
                     raw.shares[String(project.id)] = Self.decodeShares(shares)
                 }
             }
@@ -260,7 +262,9 @@ struct NCAgendaGanttReader {
             if !NCAgendaGanttContract.allConform(milestoneRows, to: NCAgendaGanttContract.milestone) { raw.contractOK = false }
             raw.milestones[key] = milestoneRows.compactMap { Self.decodeMilestone($0, projectId: project.id) }
             raw.subprojects[key] = NCAgendaJSON.dictionaries(try await get("projects/\(project.id)/subprojects")).compactMap(Self.decodeSubproject)
-            if finalSetting == .doOversee {
+            if finalSetting == .doOversee, !capacityRead {
+                // NoGantt's capacity check is one answer for the whole account: read it once per refresh.
+                capacityRead = true
                 if let capacity = try? await get("capacity-check") as? [String: Any] {
                     if !NCAgendaGanttContract.conforms(capacity, to: NCAgendaGanttContract.capacity) { raw.contractOK = false }
                     raw.findings["all"] = NCAgendaJSON.dictionaries(capacity["findings"]).compactMap(Self.decodeFinding)
@@ -339,17 +343,14 @@ struct NCAgendaGanttReader {
                      taskIds: (row["task_ids"] as? [Any])?.compactMap { NCAgendaJSON.int($0) } ?? [])
     }
 
-    /// Project shares. The server's field names are read tolerantly; an unknown shape gives no shares, and an
-    /// unknown share is never taken as "admin for me".
+    /// Project shares, as NoGantt 2.4.1 answers them: `principal_type` ("user", "group" or another kind of
+    /// principal), `principal_id` and `permission`. An unknown shape gives no shares, and an unknown share is never
+    /// taken as "admin for me".
     static func decodeShares(_ value: Any?) -> [GanttShare] {
-        var rows = NCAgendaJSON.dictionaries(value)
-        if rows.isEmpty, let object = value as? [String: Any] {
-            rows = NCAgendaJSON.dictionaries(object["shares"])
-        }
-        return rows.compactMap { row in
-            let type = NCAgendaJSON.string(row["share_type"] ?? row["type"] ?? row["shareType"]) ?? ""
-            let with = NCAgendaJSON.string(row["share_with"] ?? row["shareWith"] ?? row["uid"] ?? row["user_id"] ?? row["group_id"]) ?? ""
-            let permission = NCAgendaJSON.string(row["permission"] ?? row["role"]) ?? ""
+        NCAgendaJSON.dictionaries(value).compactMap { row in
+            let type = NCAgendaJSON.string(row["principal_type"]) ?? ""
+            let with = NCAgendaJSON.string(row["principal_id"]) ?? ""
+            let permission = NCAgendaJSON.string(row["permission"]) ?? ""
             guard !with.isEmpty else { return nil }
             return GanttShare(type: type, with: with, permission: permission)
         }

@@ -140,7 +140,11 @@ extension NCAgendaAssembler {
                     item.dependencies = task.dependencies.map {
                         AgendaDependency(predecessorKey: $0.predecessorId, predecessorTitle: predecessorTitle($0.predecessorId), type: $0.type, lagDays: $0.lagDays)
                     }
-                    if project.permission == "viewer" { item.lock = .viewerProject }
+                    if project.permission == "viewer" {
+                        item.lock = .viewerProject
+                    } else if !gantt.contractOK {
+                        item.lock = .guardReadOnly
+                    }
                     return item
                 }
 
@@ -181,12 +185,13 @@ extension NCAgendaAssembler {
                 for (resource, agent) in recognised {
                     let personOnTask = persons.contains { $0.uid?.lowercased() == agent.person }
                     if personOnTask { continue }
+                    // Design 4.1: the sentence names the agent only when its organisation is one of mine.
                     if persons.isEmpty {
-                        teamFlags.append(IntegrityFlag(kind: .agentWithoutPerson, audience: .manager, names: [agent.name, task.title]))
+                        teamFlags.append(IntegrityFlag(kind: .agentWithoutPerson, audience: .manager, names: [otherLabel(agent), task.title]))
                     } else {
                         let owner = displayName(of: agent.person) ?? NCAgendaText.t("_nodrive_agenda_someone_")
                         let paired = persons.first.flatMap { $0.uidDisplayName ?? displayName(of: $0.uid ?? "") } ?? NCAgendaText.t("_nodrive_agenda_someone_")
-                        teamFlags.append(IntegrityFlag(kind: .agentOfOtherPerson, audience: .manager, names: [agent.name, owner, paired]))
+                        teamFlags.append(IntegrityFlag(kind: .agentOfOtherPerson, audience: .manager, names: [otherLabel(agent), owner, paired]))
                     }
                     _ = resource
                 }

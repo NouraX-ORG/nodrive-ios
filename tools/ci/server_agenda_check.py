@@ -67,8 +67,8 @@ def check_shape(name, rows, shape):
     bad = []
     for r in rows:
         for key, kind in shape.items():
-            nullable = kind.endswith('OrNull')
-            if key not in r and not nullable:
+            # a nullable key may hold null, but it may not be absent (the app's contract guard says the same)
+            if key not in r:
                 bad.append('%s missing' % key)
             elif key in r and not conforms(r[key], kind):
                 bad.append('%s is not %s' % (key, kind))
@@ -156,15 +156,21 @@ def main():
     _, projects = c.ocs_json('mara', GANTT + 'projects')
     projects = projects if isinstance(projects, list) else []
     check_shape('projects', projects, contract.get('project', {}))
-    tasks, milestones = [], []
+    tasks, milestones, shares = [], [], []
     for p in projects:
         _, t = c.ocs_json('mara', GANTT + 'projects/%d/tasks' % p['id'])
         _, m = c.ocs_json('mara', GANTT + 'projects/%d/milestones' % p['id'])
+        _, sh = c.ocs_json('mara', GANTT + 'projects/%d/shares' % p['id'])
         tasks += t if isinstance(t, list) else []
         milestones += m if isinstance(m, list) else []
+        shares += sh if isinstance(sh, list) else []
     check_shape('tasks', tasks, contract.get('task', {}))
     check_shape('task resource rows', [r for t in tasks for r in t.get('resources', [])], contract.get('taskResource', {}))
     check_shape('milestones', milestones, contract.get('milestone', {}))
+    check_shape('project shares', shares, contract.get('share', {}))
+    row('shares name the principal by principal_type and principal_id', bool(shares) and all(
+        s.get('principal_type') == 'user' and s.get('principal_id') for s in shares),
+        ','.join(sorted({'%s:%s' % (s.get('principal_type'), s.get('permission')) for s in shares})))
     _, resources = c.ocs_json('mara', GANTT + 'resources')
     check_shape('resources', resources if isinstance(resources, list) else [], contract.get('resource', {}))
     _, settings = c.ocs_json('ali', GANTT + 'settings')

@@ -294,6 +294,84 @@ struct NoDriveAgendaStoreTests {
         #expect(!server.requests.isEmpty)
     }
 
+    @Test("A cancelled refresh stops at once: the saved rows come back, nothing is marked offline, no further request is sent")
+    func cancelledRefresh() async throws {
+        let root = R.tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = AgendaFixtures.server()
+        _ = await R.store(first, root: root).refresh()
+        let fullCount = first.requests.count
+        let slow = AgendaFixtures.server()
+        let store = R.store(slow, root: root, delay: true)
+        let task = Task { await store.refresh() }
+        try await Task.sleep(nanoseconds: 80_000_000)
+        task.cancel()
+        let result = await task.value
+        let atReturn = slow.requests.count
+        try await Task.sleep(nanoseconds: 150_000_000)
+        #expect(slow.requests.count == atReturn)
+        #expect(atReturn < fullCount)
+        #expect(!result.status.offline)
+        #expect(result.snapshot.items.contains { $0.title == "Dentist" })
+    }
+
+    @Test("The shared background task: a cancelled NoAgenda refresh returns at once")
+    func cancelledBackground() async throws {
+        let root = R.tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let probeRoot = R.tempRoot()
+        defer { try? FileManager.default.removeItem(at: probeRoot) }
+        let probe = AgendaFixtures.server()
+        _ = await R.store(probe, root: probeRoot).refresh()
+        let server = AgendaFixtures.server()
+        let store = R.store(server, root: root, delay: true)
+        _ = await store.updateSettings { $0.openedOnce = true }
+        let task = Task { await NCAgendaBackground.refresh(store: store) }
+        try await Task.sleep(nanoseconds: 80_000_000)
+        task.cancel()
+        _ = await task.value
+        let atReturn = server.requests.count
+        try await Task.sleep(nanoseconds: 150_000_000)
+        #expect(server.requests.count == atReturn)
+        #expect(atReturn < probe.requests.count)
+    }
+
+    @Test("A calendar that was hidden and is shown again is read again: its events come back")
+    func hiddenThenShown() async {
+        let root = R.tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let server = AgendaFixtures.server()
+        let store = R.store(server, root: root)
+        let first = await store.refresh()
+        #expect(first.snapshot.items.contains { $0.title == "Dentist" })
+        _ = await store.updateSettings { $0.chosen["cal:personal"] = .hidden }
+        let hidden = await store.refresh()
+        #expect(!hidden.snapshot.items.contains { $0.title == "Dentist" })
+        let reportsBefore = server.requests.filter { $0.httpMethod == "REPORT" }.count
+        _ = await store.updateSettings { $0.chosen["cal:personal"] = .personal }
+        let shown = await store.refresh()
+        #expect(shown.snapshot.items.contains { $0.title == "Dentist" })
+        #expect(server.requests.filter { $0.httpMethod == "REPORT" }.count > reportsBefore)
+    }
+
+    @Test("Forget during a slow refresh: the folder is gone afterwards and nothing is written back")
+    func forgetDuringRefresh() async throws {
+        let root = R.tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = R.store(AgendaFixtures.server(), root: root, delay: true)
+        let folder = NCAgendaCache(account: R.account, root: root).folder
+        let task = Task { await store.refresh() }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        await store.forget()
+        _ = await task.value
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(!FileManager.default.fileExists(atPath: folder.path))
+        let after = await store.refresh()
+        #expect(after.snapshot.items.isEmpty)
+        _ = await store.updateSettings { $0.openedOnce = true }
+        #expect(!FileManager.default.fileExists(atPath: folder.path))
+    }
+
     @Test("Settings and the one-time question survive; the cache of another account is not touched by forget")
     func settingsAndForget() async {
         let root = R.tempRoot()
@@ -305,6 +383,21 @@ struct NoDriveAgendaStoreTests {
         NCAgendaCache.forget(account: R.account, root: root)
         #expect(await store.settings().personalQuestionAnswered == false)
         #expect(other.load(AgendaSettings.self, name: "settings") != nil)
+    }
+
+    @MainActor
+    @Test("The app coming back to the foreground reads again, but not before the first read")
+    func foreground() async {
+        let root = R.tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let server = AgendaFixtures.server()
+        let model = NCAgendaViewModel(account: R.account, store: R.store(server, root: root), now: { R.now })
+        await model.appCameToForeground()
+        #expect(server.requests.isEmpty)
+        await model.refresh()
+        let before = server.requests.count
+        await model.appCameToForeground()
+        #expect(server.requests.count > before)
     }
 
     @MainActor

@@ -286,6 +286,7 @@ struct NCAgendaAssembler {
             sourceKey: NCAgendaSources.boardKey(board.id), sourceName: board.title, sourceColor: color,
             link: AgendaLink(home: .board, boardId: board.id, stackId: card.stackId, cardId: card.id, lastModified: card.lastModified))
         item.due = card.due
+        if let deck = input.deck, !deck.isReadWrite { item.lock = .guardReadOnly }
         item.relation = team ? .team : .mine
         item.personName = people.isEmpty ? nil : people.map { $0.name }.joined(separator: ", ")
         item.late = isLate(end: card.due, done: false)
@@ -295,7 +296,8 @@ struct NCAgendaAssembler {
         if let first = matching.first {
             item.agent = first.person == myUid ? ref(first) : .other(label: otherLabel(first))
             if matching.filter({ $0.person == first.person }).count > 1 {
-                item.flags.append(IntegrityFlag(kind: .twoAgents, audience: .both, names: [displayName(of: first.person) ?? first.name]))
+                item.flags.append(IntegrityFlag(kind: .twoAgents, audience: .both,
+                                                names: [displayName(of: first.person) ?? NCAgendaText.t("_nodrive_agenda_someone_")]))
             }
             if first.person == myUid { item.flags += agentFlags(first) }
         } else if let unknown = card.labels.first(where: { $0.hasPrefix("🤖") }) {
@@ -310,11 +312,13 @@ struct NCAgendaAssembler {
 
     mutating func dedupe() {
         // The same event (UID and instance) in my own calendar and in a team calendar: mine wins.
+        // The key is "cal:<calendar uri>:<uid>:<instance>"; the calendar uri may hold a colon, so it is cut off by its
+        // length, not by splitting.
         func signature(_ item: AgendaItem) -> String? {
-            guard item.home == .calendar || item.home == .tasks else { return nil }
-            let parts = item.key.split(separator: ":", omittingEmptySubsequences: false)
-            guard parts.count >= 4 else { return nil }
-            return parts[2...].joined(separator: ":")
+            guard item.home == .calendar || item.home == .tasks, let uri = item.link.calendarUri else { return nil }
+            let prefix = "cal:\(uri):"
+            guard item.key.hasPrefix(prefix) else { return nil }
+            return String(item.key.dropFirst(prefix.count))
         }
         let teamSources = Set(sources.filter { $0.setting == .team }.map { $0.key })
         var ownSignatures = Set<String>()

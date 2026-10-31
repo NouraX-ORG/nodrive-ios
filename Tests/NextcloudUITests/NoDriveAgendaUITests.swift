@@ -11,6 +11,8 @@ import XCTest
 ///   NODRIVE_UITEST_ACCOUNT  "server URL|login name|app password"
 ///   NODRIVE_AGENDA_TODAY    the day the CI server was seeded for, "yyyy-MM-dd"
 ///   NODRIVE_AGENDA_USER     "ali", "mara" or "olaf": who the shard signed in as (decides the checks)
+///   NODRIVE_AGENDA_STATE    only for test7State: the mode the stand-in was switched to (tools/ci/screens.sh):
+///                           "offline-gantt", "refuse-deck" or "deck-version=1.20.0"
 ///   NODRIVE_VARIANT         name of this run, e.g. agenda-light
 ///   NODRIVE_SHOTS_DIR       host folder; files go to <dir>/<variant>/
 @MainActor
@@ -18,6 +20,7 @@ final class NoDriveAgendaUITests: XCTestCase {
     private let env = ProcessInfo.processInfo.environment
     private var variant: String { env["NODRIVE_VARIANT"] ?? "agenda" }
     private var user: String { env["NODRIVE_AGENDA_USER"] ?? "ali" }
+    private var state: String { env["NODRIVE_AGENDA_STATE"] ?? "" }
     private var springboard: XCUIApplication { XCUIApplication(bundleIdentifier: "com.apple.springboard") }
 
     override func setUp() async throws {
@@ -70,6 +73,19 @@ final class NoDriveAgendaUITests: XCTestCase {
         XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Budget talk'")).firstMatch.exists, "a declined invitation is shown")
         save("agenda-day")
 
+        // One row for the meeting that is in my calendar and in the team calendar, and one for the task
+        for title in ["Planning meeting", "Landing page build"] {
+            XCTAssertNotNil(findRowButton(app, title), "\(title) is missing")
+            XCTAssertEqual(rowCount(app, title), 1, "\(title) is shown more than once")
+        }
+        // My agent is on a task without me: a problem with the sentence for the person
+        let orphan = findRow(app, "Orphan writing")
+        XCTAssertNotNil(orphan, "the problem about an agent on a task without its person is missing")
+        XCTAssertTrue(orphan?.label.contains("without you") == true, "the problem does not say it is without you")
+        // Other people's tasks are not mine: Sara's tasks are absent
+        XCTAssertNil(findRow(app, "Sara's internal task", timeout: 3), "Sara's task is shown")
+        XCTAssertNil(findRow(app, "Banner design", timeout: 3), "Sara's task is shown")
+
         app.segmentedControls["agendaViewPicker"].buttons["Week"].tap()
         Thread.sleep(forTimeInterval: 2)
         save("agenda-week")
@@ -113,6 +129,16 @@ final class NoDriveAgendaUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["agendaSourcesList"].waitForExistence(timeout: 30))
         Thread.sleep(forTimeInterval: 1)
         save("agenda-sources")
+        // The board calendar that Deck makes is hidden, with its reason
+        XCTAssertNotNil(findInSources(app, "NoBoard calendar"), "the board calendar is not listed")
+        XCTAssertNotNil(findInSources(app, "NoBoard's calendar for a board"), "the board calendar has no reason")
+        XCTAssertTrue(settingShown(app, next: "NoBoard calendar", is: "Hidden"), "the board calendar is not Hidden")
+        // Defaults: a project with my tasks is Do, a board I am a member of is Do
+        XCTAssertNotNil(findInSources(app, "Website"), "the project Website is not listed")
+        XCTAssertTrue(settingShown(app, next: "Website", is: "Do"), "Website is not Do")
+        XCTAssertTrue(settingShown(app, next: "Internal", is: "Do"), "Internal is not Do")
+        XCTAssertNotNil(findInSources(app, "Team board"), "the board Team board is not listed")
+        XCTAssertTrue(settingShown(app, next: "Team board", is: "Do"), "Team board is not Do")
         app.buttons["agendaSourcesDone"].tap()
     }
 
@@ -123,12 +149,58 @@ final class NoDriveAgendaUITests: XCTestCase {
         XCTAssertNotNil(problem, "the team problem for Banner design is missing")
         XCTAssertTrue(problem?.label.contains("Sara") == true)
         save("agenda-team")
+        // The integrity problems of design 4.4
+        XCTAssertNotNil(findRow(app, "Not assigned to a person"), "the problem 'Not assigned to a person' is missing")
+        XCTAssertNotNil(findRow(app, "Not linked to an account"), "the problem 'Not linked to an account' is missing")
+        XCTAssertNotNil(findRow(app, "not shared with"), "the problem 'not shared with' is missing")
+        // "Show all team tasks": the switch is at the end of the list; the team rows come after it
         let showAll = element(app, "agendaShowAllTeam")
-        if showAll.waitForExistence(timeout: 10) {
-            showAll.tap()
-            Thread.sleep(forTimeInterval: 1)
-            save("agenda-team-all")
+        XCTAssertTrue(scrollTo(app, showAll), "the switch 'Show all team tasks' is not in the list")
+        showAll.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        Thread.sleep(forTimeInterval: 2)
+        XCTAssertNotNil(findRowButton(app, "Publish banners"), "after 'Show all team tasks' the team task is not listed as a row")
+        save("agenda-team-all")
+    }
+
+    // MARK: States of the homes (light run only; tools/ci/screens.sh switches the stand-in first)
+
+    func test7State() throws {
+        guard user == "ali", !state.isEmpty else { throw XCTSkip("this check runs for ali, in a state run") }
+        let app = try openAgenda()
+        let banner: String
+        var openButton: String?
+        var gantt = true
+        switch state {
+        case "offline-gantt":
+            banner = "agendaBanner-ganttUnreachable"
+            gantt = false
+        case "refuse-deck":
+            banner = "agendaBanner-boardRefused"
+            openButton = "agendaBannerOpen-boardRefused"
+        case "deck-version=1.20.0":
+            banner = "agendaBanner-boardReadOnly"
+            openButton = "agendaBannerOpen-boardReadOnly"
+        default:
+            XCTFail("unknown state \(state)")
+            return
         }
+        let bannerElement = app.descendants(matching: .any)[banner]
+        var shown = false
+        for _ in 0..<45 where !shown {
+            ensureAgenda(app)
+            shown = bannerElement.exists
+            if !shown { Thread.sleep(forTimeInterval: 2) }
+        }
+        XCTAssertTrue(shown, "the state \(state) shows no banner \(banner)")
+        if let openButton {
+            XCTAssertTrue(app.descendants(matching: .any)[openButton].exists, "the banner has no Open in button")
+        }
+        // The other homes still show their rows
+        XCTAssertNotNil(findRow(app, "Dentist"), "the calendar rows are gone in the state \(state)")
+        if gantt {
+            XCTAssertNotNil(findRow(app, "Write homepage copy"), "the NoGantt rows are gone in the state \(state)")
+        }
+        save("agenda-state-" + state.replacingOccurrences(of: "=", with: "-"))
     }
 
     func test6NotLinked() throws {
@@ -215,6 +287,63 @@ final class NoDriveAgendaUITests: XCTestCase {
             Thread.sleep(forTimeInterval: 2)
         } while Date() < deadline
         return nil
+    }
+
+    /// Like `findRow`, but only a row of the list (a button with an `agendaRow-` identifier), not a problem sentence.
+    private func findRowButton(_ app: XCUIApplication, _ text: String, timeout: TimeInterval = 60) -> XCUIElement? {
+        let element = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'agendaRow-' AND label CONTAINS %@", text)).firstMatch
+        let list = app.descendants(matching: .any)["agendaList"]
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            ensureAgenda(app)
+            if element.exists { return element }
+            for _ in 0..<8 {
+                if list.exists { list.swipeUp() }
+                if element.exists { return element }
+            }
+            for _ in 0..<8 where list.exists { list.swipeDown() }
+            Thread.sleep(forTimeInterval: 2)
+        } while Date() < deadline
+        return nil
+    }
+
+    /// How many rows of the list (not problem sentences) hold `text`.
+    private func rowCount(_ app: XCUIApplication, _ text: String) -> Int {
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'agendaRow-' AND label CONTAINS %@", text)).count
+    }
+
+    /// Scrolls the list up until the element is there and can be tapped.
+    private func scrollTo(_ app: XCUIApplication, _ target: XCUIElement) -> Bool {
+        let list = app.descendants(matching: .any)["agendaList"]
+        for _ in 0..<14 {
+            if target.exists, target.isHittable { return true }
+            guard list.exists else { break }
+            list.swipeUp()
+        }
+        return target.exists && target.isHittable
+    }
+
+    /// A text of the Sources list; the list is scrolled from the top to find it.
+    private func findInSources(_ app: XCUIApplication, _ text: String) -> XCUIElement? {
+        let element = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+        let list = app.descendants(matching: .any)["agendaSourcesList"]
+        for _ in 0..<12 where list.exists { list.swipeDown() }
+        for _ in 0..<14 {
+            if element.exists, element.isHittable { return element }
+            if list.exists { list.swipeUp() }
+        }
+        return element.exists ? element : nil
+    }
+
+    /// Is `value` shown on the row of `name` (the setting of that source, or its locked label)?
+    private func settingShown(_ app: XCUIApplication, next name: String, is value: String) -> Bool {
+        guard let label = findInSources(app, name), label.exists else { return false }
+        let candidates = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@ OR value == %@ OR label ENDSWITH %@ OR value ENDSWITH %@", value, value, value, value))
+        for index in 0..<min(candidates.count, 40) {
+            let candidate = candidates.element(boundBy: index)
+            if candidate.exists, abs(candidate.frame.midY - label.frame.midY) < 30, candidate.frame.minX > label.frame.minX { return true }
+        }
+        return false
     }
 
     /// The Work calendar is not personal: its switch goes off (the Personal calendar stays on).

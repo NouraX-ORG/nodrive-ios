@@ -35,6 +35,7 @@
 "_nodrive_agenda_flag_not_assigned_" = "Not assigned to a person";
 "_nodrive_agenda_flag_not_linked_" = "Not linked to an account";
 "_nodrive_agenda_flag_not_shared_" = "%1$@ has %2$d tasks in a project not shared with %1$@";
+"_nodrive_agenda_flag_not_shared_one_" = "%1$@ has 1 task in a project not shared with %1$@";
 "_nodrive_agenda_flag_two_agents_" = "Two agents for %@: choose one";
 "_nodrive_agenda_from_" = "From";
 "_nodrive_agenda_gantt_copy_note_" = "NoGantt copies your tasks into this calendar. NoAgenda shows them already; you can switch the copy off in NoGantt.";
@@ -97,6 +98,7 @@
 "_nodrive_agenda_sources_" = "Sources";
 "_nodrive_agenda_spoken_by_agent_" = "done by %@";
 "_nodrive_agenda_spoken_by_you_" = "done by you";
+"_nodrive_agenda_spoken_board_" = "linked to a board card";
 "_nodrive_agenda_spoken_locked_" = "can't be changed";
 "_nodrive_agenda_to_" = "To";
 "_nodrive_agenda_today_" = "Today";

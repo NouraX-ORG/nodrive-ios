@@ -14,7 +14,6 @@ enum NCAgendaDAVXML {
     static let csNS = "http://calendarserver.org/ns/"
     static let appleNS = "http://apple.com/ns/ical/"
     static let ocNS = "http://owncloud.org/ns"
-    static let ncNS = "http://nextcloud.org/ns"
 
     // AGENDA-BODY-BEGIN principal
     static let principalBody = #"""
@@ -31,7 +30,7 @@ enum NCAgendaDAVXML {
     // AGENDA-BODY-BEGIN home
     static let homeBody = #"""
     <?xml version="1.0" encoding="utf-8"?>
-    <d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:a="http://apple.com/ns/ical/" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
+    <d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/" xmlns:a="http://apple.com/ns/ical/" xmlns:oc="http://owncloud.org/ns">
       <d:prop>
         <d:resourcetype/>
         <d:displayname/>
@@ -41,7 +40,6 @@ enum NCAgendaDAVXML {
         <cs:getctag/>
         <d:current-user-privilege-set/>
         <oc:owner-principal/>
-        <nc:owner-displayname/>
         <cs:source/>
       </d:prop>
     </d:propfind>

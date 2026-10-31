@@ -25,8 +25,12 @@ writes to any server: no write request exists in the code (`NCAgendaMethod` has 
   agents of the registry. The first time, **"Which of your calendars are personal?"** is asked once.
 - A row opens a detail sheet (read only here) with **Open in NoCalendar / NoTasks / NoGantt / NoBoard**, which
   opens the page signed in.
-- Offline, the last data stays readable and is marked with the time it was saved. Background App Refresh updates
-  it when iOS allows (it shares the app's one refresh task; no new background identifier).
+- Offline, the last data stays readable and is marked with the time it was saved. NoAgenda reads again when it
+  opens, on pull to refresh and when the app comes back to the foreground while NoAgenda is shown. Background App
+  Refresh updates it when iOS allows (it shares the app's one refresh task; no new background identifier). When iOS
+  ends the background time, the refresh stops at its next check and the saved rows stay.
+- The accent of the screens (chips, Today, Sources, the month selection) is the brand colour of the account's theme,
+  like the other NoDrive screens.
 
 ## How it works
 
@@ -46,8 +50,8 @@ background refresh (A7).
 
 **Version guard** (design 5): Deck `1.19.x` may be written to (from the editing step); any other version is shown
 read only. NoGantt has no readable version, so each answer is checked against the 2.4.1 contract in
-`NCAgendaGanttContract`: a missing key or another type makes NoGantt read only, and the rows that decoded are still
-shown. **Auth fallback**: a 401 or 403 from NoGantt or NoBoard shows a banner with **Open in NoGantt / NoBoard**;
+`NCAgendaGanttContract`: a missing key (a nullable key may be null, but it must be there) or another type makes
+NoGantt read only, and the rows that decoded are still shown. Rows of a home under the guard carry the lock. **Auth fallback**: a 401 or 403 from NoGantt or NoBoard shows a banner with **Open in NoGantt / NoBoard**;
 the credential never goes anywhere else.
 
 ## Tests
@@ -56,15 +60,20 @@ the credential never goes anywhere else.
   NoGantt contract and reads, Deck), `NoDriveAgendaRulesTests` (every row of the defaults of 6.1, event rules,
   agents, integrity flags with their audience, team problems, dedupe, chips, All/Work/Personal, day plan, colours),
   `NoDriveAgendaRuntimeTests` (transport, store, offline, refused, read-only guard, one refresh at a time,
-  background only after the first open, cache without secrets, a log without titles or addresses, links).
+  background only after the first open, a cancelled refresh stops at once, a calendar that is hidden and shown again
+  is read again, account removal during a refresh leaves no cache, the foreground refresh, cache without secrets, a log
+  without titles or addresses, links). The NoGantt share rules are tested with the share answer recorded from the
+  real 2.4.1 (`principal_type`, `principal_id`, `permission`).
 - **Server checks** (job `agenda-server`, a real Nextcloud 35.0.2 with Calendar 6.6.4, Tasks 0.18.1, Deck 1.19.1 and
   nc_gantt 2.4.1, each installed from its pinned release with the SHA-256 checked): `tools/ci/agenda-seed.py` and
   `tools/ci/agenda_gantt_seed.py` seed the data of design section 12; `tools/ci/server_agenda_check.py` proves the
   auth proof, sends the app's own request bodies (the `AGENDA-BODY` markers in `NCAgendaDAVXML.swift`) and checks
-  every NoGantt and Deck answer against the contract in `NCAgendaGanttReader.swift`;
-  `tools/ci/agenda-snapshot.py` records the real answers.
+  every NoGantt and Deck answer (the project shares too) against the contract in `NCAgendaGanttReader.swift`, where
+  a nullable key must be present; `tools/ci/agenda-snapshot.py` records the real answers.
 - **Simulator tests** (shard `agenda`): `tools/ci/agenda_stand_in.py` (`drive-stand-in.py --agenda`) replays the
-  recorded answers for drive.nourax.org; `NoDriveAgendaUITests` runs as ali, mara and olaf, light and dark;
+  recorded answers for drive.nourax.org; `NoDriveAgendaUITests` runs as ali, mara and olaf, light and dark; in the
+  light run the stand-in is also switched to three states (NoGantt offline, NoBoard refused, Deck version 1.20.0)
+  and `test7State` checks each banner;
   `tools/ci/agenda-check.py` reads the stand-in log (only drive.nourax.org, every request with `OCS-APIRequest`,
   reads only, no request to the Deck calendar).
 
@@ -83,6 +92,20 @@ the credential never goes anywhere else.
 
 - Translations of `NoAgenda.strings` (English only). Listed in `plans/pending-owner-changes.md`.
 - Background refresh runs when iOS decides; refresh on open, on pull and on returning to the app never depends on it.
+  A refresh that only joins one already running waits for that one (the run belongs to the screen); a cancelled
+  background task cancels only the run it started.
+- The `agenda-server` job has no parity check of the stand-in against the real server on the same requests: the
+  stand-in replays the recorded answers byte for byte, so the only difference would be a request the stand-in does
+  not know, which `agenda-check.py` and the simulator tests already show. A real check needs the stand-in and the
+  real server side by side, which the macOS runner cannot do (no Docker there).
+- The four "Open in" links are checked by their address (unit tests) and by the signed-in page opening in the
+  simulator. There is no Playwright check against the real NoCalendar, NoTasks, NoGantt and NoBoard pages in CI: the
+  routes of those web apps are the apps' own and change with their versions; it is an owner test row.
+- The seed's Deck link of a NoGantt task ("Landing page build" with a board badge) is not accepted by NoGantt 2.4.1
+  (a project needs a Deck sync level first), so the UI test checks "once" for that task, and the badge itself is
+  covered by the unit test `linkedCard`.
+- `projects/{id}/shares` is read on every refresh for the projects the person administers (plan: at most daily), and
+  a 401 or 403 on one project's tasks marks NoGantt as refused. Both are small and left for the editing step.
 - A `sync-collection` delta read for a changed busy calendar is a later optimisation (a changed calendar is read in
   full; unchanged ones are skipped by their sync token).
 - The Sources screen shows the working hours from the device settings; reading the person's schedule from NoGantt

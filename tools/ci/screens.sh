@@ -464,6 +464,37 @@ agenda_standin() {   # agenda_standin <user>: (re)start the stand-in for this us
   return 1
 }
 
+# One state of the homes (design 2.8): the stand-in is switched to the mode, and the test test7State of ali checks the
+# banner. The control path is the stand-in's own (it is not a NoAgenda read); the mode goes back to normal afterwards.
+agenda_state() {   # agenda_state <udid> <variant> <mode>
+  local udid=$1 variant=$2 mode=$3 si="$RUNNER_TEMP/stand-in" tag code passed
+  tag=$(printf '%s' "$mode" | tr -c 'a-zA-Z0-9' '-')
+  curl -fsS --cacert "$si/ca.pem" -X POST -o /dev/null "https://drive.nourax.org/__ci/agenda?mode=$mode" || {
+    echo "agenda $variant state $mode: the stand-in did not switch"; return 1; }
+  set +e
+  TEST_RUNNER_NODRIVE_VARIANT="$variant" TEST_RUNNER_NODRIVE_SHOTS_DIR="$SHOTS" \
+  TEST_RUNNER_NODRIVE_AGENDA_USER="ali" TEST_RUNNER_NODRIVE_AGENDA_TODAY="$AGENDA_TODAY" \
+  TEST_RUNNER_NODRIVE_AGENDA_STATE="$mode" \
+  TEST_RUNNER_NODRIVE_UITEST_ACCOUNT="https://drive.nourax.org|ali|$NODRIVE_WS_APP_PASSWORD" \
+    xcodebuild test-without-building \
+      -xctestrun "$XCTESTRUN" \
+      -destination "id=$udid" \
+      -only-testing:NextcloudUITests/NoDriveAgendaUITests/test7State \
+      -parallel-testing-enabled NO \
+      -resultBundlePath "$RESULTS/ui-$variant-state-$tag.xcresult" \
+      > "$RESULTS/ui-$variant-state-$tag.log" 2>&1
+  code=$?
+  set -e
+  xcbeautify --renderer github-actions < "$RESULTS/ui-$variant-state-$tag.log" || true
+  xcrun xcresulttool get test-results summary --path "$RESULTS/ui-$variant-state-$tag.xcresult" \
+    > "$RESULTS/ui-$variant-state-$tag-summary.json" 2>/dev/null || true
+  passed=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("passedTests", 0))' "$RESULTS/ui-$variant-state-$tag-summary.json" 2>/dev/null || echo 0)
+  if [ "$passed" = "0" ]; then echo "agenda $variant state $mode: the test did not pass"; code=1; fi
+  echo "agenda $variant state $mode: xcodebuild exit $code, passed tests $passed"
+  curl -fsS --cacert "$si/ca.pem" -X POST -o /dev/null "https://drive.nourax.org/__ci/agenda?mode=normal" || true
+  return $code
+}
+
 agenda() {   # agenda <udid> <variant>: all NoAgenda UI tests, for ali, mara and olaf
   local udid=$1 variant=$2 status=0 user
   mkdir -p "$SHOTS/$variant" "$RESULTS"
@@ -498,6 +529,13 @@ agenda() {   # agenda <udid> <variant>: all NoAgenda UI tests, for ali, mara and
     if [ "$passed" = "0" ]; then echo "agenda $variant $user: no test passed"; code=1; fi
     [ "$code" = "0" ] || status=1
     echo "agenda $variant $user: xcodebuild exit $code, passed tests $passed"
+    # The states of the homes (offline NoGantt, refused NoBoard, another Deck version): once, in the light run
+    if [ "$user" = "ali" ] && [ "$variant" = "agenda-light" ]; then
+      local mode
+      for mode in offline-gantt refuse-deck deck-version=1.20.0; do
+        agenda_state "$udid" "$variant" "$mode" || status=1
+      done
+    fi
   done
   echo "agenda $variant: status $status; files: $(ls "$SHOTS/$variant" | tr '\n' ' ')"
   return $status

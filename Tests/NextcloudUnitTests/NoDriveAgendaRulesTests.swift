@@ -206,6 +206,18 @@ struct NoDriveAgendaCalendarRulesTests {
         #expect(snapshot.items.first?.sourceKey == "cal:personal")
     }
 
+    @Test("A calendar uri with a colon does not break the one-row rule")
+    func dedupeWithColon() {
+        var invitation = S.component("same", "Planning", start: "2026-10-30T09:00:00Z", end: "2026-10-30T10:00:00Z")
+        invitation.organizer = "mara@example.org"
+        invitation.attendees = [ICalAttendee(address: "ali@example.org", partstat: "ACCEPTED")]
+        let snapshot = S.assemble(calendars: [
+            S.calendarSource("my:cal", items: [invitation]), S.calendarSource("team", owner: "mara", items: [invitation]),
+        ])
+        #expect(snapshot.items.count == 1)
+        #expect(snapshot.items.first?.sourceKey == "cal:my:cal")
+    }
+
     @Test("Hidden calendars give no rows")
     func hiddenCalendars() {
         let event = S.component("e", "Board thing", start: "2026-10-30T09:00:00Z", end: "2026-10-30T10:00:00Z")
@@ -424,6 +436,60 @@ struct NoDriveAgendaGanttRulesTests {
         let row = snapshot.items.first { $0.title == "Mixed" }
         #expect(row?.agent == .other(label: NCAgendaText.f("_nodrive_agenda_agent_of_", "Sara")))
     }
+
+    @Test("An agent of another organisation on a task of a project I run is never named in a flag sentence")
+    func otherOrganisationFlags() throws {
+        var gantt = S.gantt
+        gantt.resources.append(S.person(60, "Foreign planning", uid: nil))
+        var registry = S.registry
+        registry.agents.append(RegistryAgent(id: "AG-0008", name: "Out-Bot", person: "sara", status: .active, organisation: "other-org", ganttResourceIds: [60]))
+        gantt.tasks["1"] = [S.task(30, "Foreign orphan", resources: [60]), S.task(31, "Foreign pairing", resources: [1, 60])]
+        let snapshot = S.assemble(me: S.mara, gantt: gantt, registry: registry)
+        let flags = snapshot.items.flatMap { $0.flags }
+        #expect(flags.contains { $0.kind == .agentWithoutPerson })
+        #expect(flags.contains { $0.kind == .agentOfOtherPerson })
+        let texts = snapshot.problems.map(\.text) + flags.map(\.text)
+        #expect(!texts.isEmpty)
+        #expect(texts.allSatisfy { !$0.contains("Out-Bot") })
+        #expect(texts.contains { $0.contains(NCAgendaText.f("_nodrive_agenda_agent_of_", "Sara")) })
+        // The same agent in my own organisation is named
+        var own = S.registry
+        own.agents.append(RegistryAgent(id: "AG-0008", name: "Out-Bot", person: "sara", status: .active, organisation: "demo-org", ganttResourceIds: [60]))
+        let ownTexts = S.assemble(me: S.mara, gantt: gantt, registry: own).problems.map(\.text)
+        #expect(ownTexts.contains { $0.contains("Out-Bot") })
+    }
+
+    @Test("The not-shared sentence is singular for one task")
+    func notSharedOne() {
+        let one = IntegrityFlag(kind: .notShared, audience: .manager, names: ["Sara"], count: 1)
+        #expect(one.text == NCAgendaText.f("_nodrive_agenda_flag_not_shared_one_", "Sara"))
+        #expect(!one.text.contains("1 tasks"))
+        let two = IntegrityFlag(kind: .notShared, audience: .manager, names: ["Sara"], count: 2)
+        #expect(two.text == NCAgendaText.f("_nodrive_agenda_flag_not_shared_", "Sara", 2))
+    }
+
+    @Test("Rows of NoGantt under the version guard carry the lock")
+    func guardLock() {
+        var gantt = S.gantt
+        gantt.contractOK = false
+        let rows = S.assemble(gantt: gantt).items.filter { $0.kind == .ganttTask }
+        #expect(!rows.isEmpty)
+        #expect(rows.allSatisfy { $0.lock == .guardReadOnly })
+        #expect(S.assemble(gantt: S.gantt).items.filter { $0.kind == .ganttTask }.allSatisfy { $0.lock == nil })
+    }
+
+    @Test("The recorded 2.4.1 share shape gives the not-shared flag for a person the project is not shared with")
+    func notSharedFromRecordedShares() throws {
+        var gantt = S.gantt
+        let recorded = AgendaFixtures.shares
+            .replacingOccurrences(of: "\"principal_id\":\"ali\"", with: "\"principal_id\":\"mara\"")
+            .replacingOccurrences(of: "\"principal_id\":\"sara\"", with: "\"principal_id\":\"olaf\"")
+        gantt.shares["1"] = NCAgendaGanttReader.decodeShares(NCAgendaHTTP.ocsData(Data(recorded.utf8)))
+        #expect(gantt.shares["1"]?.map(\.with) == ["mara", "olaf"])
+        let snapshot = S.assemble(me: S.mara, gantt: gantt)
+        #expect(snapshot.problems.contains { $0.key == "team:notShared:1:sara" })
+        #expect(!snapshot.problems.contains { $0.key == "team:notShared:1:olaf" })
+    }
 }
 
 @Suite("NoDrive NoAgenda rules: boards and dedupe")
@@ -478,6 +544,15 @@ struct NoDriveAgendaBoardRulesTests {
         #expect(snapshot.problems.contains { $0.key.hasPrefix("team:late:") && $0.text.contains("Late card") })
         #expect(snapshot.items.first { $0.title == "Nobody" }?.flags.map(\.kind) == [.notAssigned])
         #expect(snapshot.items.first { $0.title == "Mara's own" }?.relation == .mine)
+    }
+
+    @Test("Cards under the Deck version guard carry the lock")
+    func deckGuardLock() {
+        var raw = deck(cards: [card(1, "Mine", assigned: ["ali"])])
+        raw.version = "1.20.0"
+        #expect(S.assemble(deck: raw).items.first?.lock == .guardReadOnly)
+        raw.version = "1.19.1"
+        #expect(S.assemble(deck: raw).items.first?.lock == nil)
     }
 
     @Test("A card with several assignees names all of them")

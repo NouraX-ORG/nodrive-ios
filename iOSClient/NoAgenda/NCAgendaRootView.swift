@@ -17,17 +17,24 @@ struct NCAgendaRootView: View {
         .navigationTitle(NCAgendaEntry.title)
         .navigationBarTitleDisplayMode(.inline)
         .task { await model.start() }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            Task { await model.appCameToForeground() }
+        }
         .sheet(item: $model.selectedItem) { item in
             NCAgendaDetailSheet(model: model, item: item)
+                .tint(model.accentColor)
                 .presentationDetents([.medium, .large])
         }
         .sheet(isPresented: $model.showSources) {
             NavigationStack { NCAgendaSourcesView(model: model) }
+                .tint(model.accentColor)
         }
         .sheet(isPresented: $model.showPersonalQuestion) {
             NCAgendaPersonalQuestionView(model: model)
+                .tint(model.accentColor)
                 .presentationDetents([.medium, .large])
         }
+        .tint(model.accentColor)
     }
 
     // MARK: Header
@@ -267,11 +274,11 @@ struct NCAgendaMonthGrid: View {
                     .font(.body)
                     .foregroundStyle(selected ? Color.white : Color.primary)
                 Circle()
-                    .fill(model.hasItems(on: date) ? (selected ? Color.white : Color.accentColor) : Color.clear)
+                    .fill(model.hasItems(on: date) ? (selected ? Color.white : model.accentColor) : Color.clear)
                     .frame(width: 6, height: 6)
             }
             .frame(maxWidth: .infinity, minHeight: 40)
-            .background(selected ? Color.accentColor : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+            .background(selected ? model.accentColor : Color.clear, in: RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("agendaMonthDay-\(dayNumber)")

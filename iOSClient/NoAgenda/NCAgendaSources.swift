@@ -33,7 +33,8 @@ enum NCAgendaColors {
     }
 
     static func color(_ text: String) -> Color {
-        guard let (red, green, blue) = rgb(text) else { return Color.accentColor }
+        // A colour that can't be read is cobalt (#2563EB)
+        guard let (red, green, blue) = rgb(text) else { return Color(red: 37.0 / 255, green: 99.0 / 255, blue: 235.0 / 255) }
         return Color(red: Double(red) / 255, green: Double(green) / 255, blue: Double(blue) / 255)
     }
 }
