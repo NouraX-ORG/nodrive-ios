@@ -25,6 +25,12 @@ Server login, the 6 Simulator screens shards, Simulator screens report); no re-r
 passed as run [41017526380](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41017526380) (commit `fba37eeb52`). `main` was moved to
 `20ce353bbb` by a fast-forward, so the same checks ran again on `main`: run [41067448530](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41067448530), green after re-runs of the shard "smoke" (the known flake "Failed to determine hittability of NoDrive Icon") and of the shard "walks" (twice: the German walk did not find the first intro slide, a start-up timing flake that the branch `ci/settle-wait` works on; the code is the same as in the green run above). The documents on top of it are the only later change.
 
+NoAgenda (feature `feature/noagenda-core`, with the final fixes of review 1 to 3 and the final review): run [41230680780](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41230680780),
+commit `ce48f28a66` (already on top of `main`, so no merge was needed), all 12 jobs green on the first attempt (Branding gate, Build and
+unit tests, NoAgenda server, Server login, the 7 Simulator screens shards, Simulator screens report). Earlier runs of the branch failed in
+the shard `agenda` on a finder that lost the list (`41221832640`, fixed by `ce48f28a66`). The merge to `main` adds only documents on top of
+that commit; the same checks run again on the merge commit and on `main`.
+
 Reference run: **[40206804804](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40206804804)**
 on `main` (commit `b03563c3c9`), all 3 jobs green. Xcode 27.1 (build 27A9275), runner image
 `xcode-27-arm64`, iPhone 17 simulator with iOS 27.0, unsigned (`CODE_SIGNING_ALLOWED=NO`).
@@ -96,6 +102,13 @@ on `main` (commit `b03563c3c9`), all 3 jobs green. Xcode 27.1 (build 27A9275), r
 | A renamed upload also records the photo's original name once it succeeded (so the next library scan does not queue the photo again); a failed one records nothing; a second queue item of the same photo is marked done, not renamed again; a stale entry never hides a photo; the file survives a restart and is pruned after 90 days | CI | pass (unit) | suite "NoDrive conflict ledger" |
 | The setting per account: default Smart, unknown value reads as Smart, kept per account and across instances; the texts are exactly the contract's | CI | pass (unit) | suite "NoDrive conflict policy" |
 | No Nextcloud text in the new screens | CI | pass | UI test `assertNoUpstreamName` on the list and the Auto upload screen; `screens-report` for `conflicts-light` and `conflicts-dark`: no problem; `check-branding.py`: 0 unclassified |
+| NoAgenda: unit tests (registry, iCalendar, CalDAV, NoGantt and Deck answers, rules of design 6.1, agents, integrity flags with their audience, team problems, dedupe, chips, All/Work/Personal, day plan, transport, store, offline cache, log) | CI | pass | run [41230680780](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41230680780): `Test run with 474 tests in 53 suites passed`; the 15 suites `NoDrive NoAgenda ...` passed (including the review-3 tests: unique problem keys, my stray agent said once, a refused project marked, card sentences like task sentences, problems hidden under Personal) |
+| NoAgenda on a real Nextcloud 35.0.2 with Calendar 6.6.4, Tasks 0.18.1, Deck 1.19.1 and nc_gantt 2.4.1 (each from its pinned release, SHA-256 checked): the app password plus `OCS-APIRequest` is accepted by NoGantt, Deck, CalDAV and `cloud/user` | CI | pass (throwaway server) | job "NoAgenda server", `agenda-server.md`: 44 PASS, 0 FAIL; 412 without `OCS-APIRequest`; "reading changed no calendar object" |
+| NoAgenda reads: the app's own request bodies and every NoGantt and Deck answer fit the 2.4.1 contract (a nullable key must be present); the seed of design section 12 is read back | CI | pass (throwaway server) | same job: `server_agenda_check.py` 0 FAIL; `seed.json` has the stray label card and the writer and design planning resources |
+| NoAgenda screens in light and dark as three people (Ali, Mara, Olaf): the sidebar entry, the one-time question "Which of your calendars are personal?", Day, Week, Month, the detail sheet, Personal only, Sources, My team with the integrity problems, "Show all team tasks", "Not linked" | CI | pass (stand-in) | shard `agenda`: 9 UI runs `Passed` (ali, mara, olaf in light and dark, plus the 3 states), 27 screenshots, no `finder-failed-*.png`; stand-in log: only drive.nourax.org, every request with `OCS-APIRequest`, reads only |
+| NoAgenda banners for NoGantt offline, NoBoard refused and Deck 1.20.0 (read only); saved rows stay | CI | pass (stand-in) | screenshots `agenda-state-offline-gantt`, `agenda-state-refuse-deck`, `agenda-state-deck-version-1.20.0` (light) |
+| NoAgenda changes nothing on any server and deletes nothing | CI | pass | review: `NCAgendaMethod` has only GET, PROPFIND and REPORT; `agenda-check.py` finds no other method in the stand-in log; the cache is the app's own files and holds no secret |
+| No Nextcloud text, logo or colour in the NoAgenda screens; the accent is cobalt | CI | pass | `check-branding.py`: `486 hits: 267 internal, 217 legal, 2 artwork, 0 unclassified`; `rebrand.py --check`: `344 files checked, 0 would change`; `screens-report` ok; screenshots looked at |
 | Auto upload with photos already on the Drive: the same photo is not uploaded again, a different photo with the same name is kept as `name 1.ext`, in the app (simulator or iPhone) | owner | pending | see the owner steps below; CI covers the decision logic, the size the app reads on a real server and the screen, not an upload from the simulator's Photos library |
 | Sign in with "Log in with Nourax" on the real drive.nourax.org | owner | pending | Mac simulator at home (WAF) |
 | File list after sign-in | owner | pending | |
@@ -126,6 +139,14 @@ on `main` (commit `b03563c3c9`), all 3 jobs green. Xcode 27.1 (build 27A9275), r
 | With the switch on, the same unexpected close sends a report by itself and shows "Problem report sent", with no question | owner | pending | |
 | iPhone only, optional: after a real crash the next start sends one report that contains the crash text (`crash.txt`) | owner | pending | Apple hands crash data only to a real device; the simulator cannot show it |
 | If you already have a folder called "Problem reports" with your own files, NoDrive puts the report in it and shares the whole folder read-only with Nourax Support. Decide if that is acceptable | owner | pending | one answer for all three apps; see the to-do list |
+| NoAgenda: side menu → Apps shows **NoAgenda** as the first entry; it opens a screen with Day, Week and Month | owner | pending | drive.nourax.org, your own account; the first time a question "Which of your calendars are personal?" appears once and does not come back |
+| NoAgenda Day, Week and Month show your own events, to-dos, NoGantt tasks and NoBoard cards, each once, with its source colour and "🤖 Writer-Bot" or "👤 Self" | owner | pending | compare with NoCalendar, NoTasks, NoGantt and NoBoard on the web; a meeting that is in two calendars shows once |
+| NoAgenda proves the app password is accepted by NoGantt and NoBoard on the real server | owner | pending | your NoGantt tasks show; if a banner says NoGantt or NoBoard did not accept NoDrive's sign-in, tell the Workspace session |
+| NoAgenda: if you run a project or board, "My team" shows only problems (late, due today, blocked, not assigned, overbooked), and "Show all team tasks" shows the rest; under Personal the team part is empty | owner | pending | a project or board you manage |
+| NoAgenda offline: switch on flight mode and open NoAgenda; the last data is there, marked with the time it was saved | owner | pending |  |
+| NoAgenda Sources: set a calendar to Hidden and back to Personal; its events leave and come back in Day. Change an event in NoCalendar on the web: the row follows after you come back to the app | owner | pending |  |
+| NoAgenda: open a row and tap "Open in NoCalendar" (or NoTasks, NoGantt, NoBoard): the signed-in page of that item opens | owner | pending | the real pages are not tested in CI |
+| NoAgenda changes nothing and deletes nothing, anywhere | owner | pending | after a day of use look at NoCalendar, NoTasks, NoGantt and NoBoard on the web: nothing was changed by the app |
 | Dark mode and German after sign-in | owner | pending | |
 | Device name under Settings → Security on drive.nourax.org | owner | pending | read it back for the Workspace session |
 | Sync works away from home (mobile data), after one sign-in at home | owner | pending | iPhone only |
@@ -238,14 +259,35 @@ are owner tests.
 
 ## NoAgenda (step 1, read only)
 
-See `docs/noagenda.md` for what is tested where. Screenshots (light and dark) are written to
-`docs/screenshots/ios/agenda/` by the shard `agenda`: `agenda-sidebar`, `agenda-personal-question`, `agenda-day`,
-`agenda-week`, `agenda-month`, `agenda-detail`, `agenda-personal-only`, `agenda-sources`, `agenda-team`,
-`agenda-team-all`, `agenda-not-linked`, and (light only) `agenda-state-offline-gantt`, `agenda-state-refuse-deck`,
-`agenda-state-deck-version-1-20-0`. The tests check: Day (the meeting in two calendars once, the task once, the
-agent-without-person problem, no tasks of other people), Sources (the hidden board calendar with its reason, the
-project and board defaults), the team problems as manager (not assigned, not linked, not shared) and the switch
-"Show all team tasks" (scrolled to), and the three states of the homes.
+See `docs/noagenda.md` for what is tested where. Screenshots (light and dark) are in
+`docs/screenshots/ios/agenda-light/` and `docs/screenshots/ios/agenda-dark/` (1200 px copies from run
+[41230680780](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41230680780), commit `ce48f28a66`, iPhone 17, iOS 27.0; the signed-in account and the answers are made by the CI stand-in
+that replays the recorded answers of the real NoGantt, Deck and Calendar). Looked at for Nextcloud's name, logo,
+colours and links: none; the accent is cobalt.
+
+| Screen | light | dark |
+|---|---|---|
+| Side menu with NoAgenda as the first entry of Apps | [agenda-sidebar](screenshots/ios/agenda-light/agenda-sidebar.png) | [agenda-sidebar](screenshots/ios/agenda-dark/agenda-sidebar.png) |
+| The one-time question "Which of your calendars are personal?" | [agenda-personal-question](screenshots/ios/agenda-light/agenda-personal-question.png) | [agenda-personal-question](screenshots/ios/agenda-dark/agenda-personal-question.png) |
+| Day | [agenda-day](screenshots/ios/agenda-light/agenda-day.png) | [agenda-day](screenshots/ios/agenda-dark/agenda-day.png) |
+| Week | [agenda-week](screenshots/ios/agenda-light/agenda-week.png) | [agenda-week](screenshots/ios/agenda-dark/agenda-week.png) |
+| Month | [agenda-month](screenshots/ios/agenda-light/agenda-month.png) | [agenda-month](screenshots/ios/agenda-dark/agenda-month.png) |
+| A row opened (detail, read only) | [agenda-detail](screenshots/ios/agenda-light/agenda-detail.png) | [agenda-detail](screenshots/ios/agenda-dark/agenda-detail.png) |
+| Personal only | [agenda-personal-only](screenshots/ios/agenda-light/agenda-personal-only.png) | [agenda-personal-only](screenshots/ios/agenda-dark/agenda-personal-only.png) |
+| Sources | [agenda-sources](screenshots/ios/agenda-light/agenda-sources.png) | [agenda-sources](screenshots/ios/agenda-dark/agenda-sources.png) |
+| My team as manager (problems only) | [agenda-team](screenshots/ios/agenda-light/agenda-team.png) | [agenda-team](screenshots/ios/agenda-dark/agenda-team.png) |
+| "Show all team tasks" | [agenda-team-all](screenshots/ios/agenda-light/agenda-team-all.png) | [agenda-team-all](screenshots/ios/agenda-dark/agenda-team-all.png) |
+| A person not linked to an account | [agenda-not-linked](screenshots/ios/agenda-light/agenda-not-linked.png) | [agenda-not-linked](screenshots/ios/agenda-dark/agenda-not-linked.png) |
+| NoGantt offline, saved rows stay (light only) | [agenda-state-offline-gantt](screenshots/ios/agenda-light/agenda-state-offline-gantt.png) |  |
+| NoBoard refused, banner with "Open in NoBoard" (light only) | [agenda-state-refuse-deck](screenshots/ios/agenda-light/agenda-state-refuse-deck.png) |  |
+| Deck 1.20.0, read only (light only) | [agenda-state-deck-version-1.20.0](screenshots/ios/agenda-light/agenda-state-deck-version-1.20.0.png) |  |
+
+The tests check: Day (the meeting in two calendars once, the task once, the agent-without-person problem, no tasks of
+other people), Sources (the hidden board calendar with its reason, the project and board defaults), the team problems
+as manager (not assigned, not linked, not shared, "belongs to X, not Y") and the switch "Show all team tasks"
+(scrolled to), and the three states of the homes. The shard `agenda` was flaky in earlier runs (the Browse tab showed
+the Files root while a finder looked for the list); the finders now scroll by a drag on the screen and save
+`finder-failed-<text>.png` when they give up. Watch it when a run of `main` turns red.
 
 ## Owner test steps (Mac)
 

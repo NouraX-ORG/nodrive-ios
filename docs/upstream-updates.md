@@ -138,3 +138,23 @@ If upstream ever turns Crashlytics on or installs its own `NSSetUncaughtExceptio
 was there before it (`NSGetUncaughtExceptionHandler()`), and the branding unit test keeps checking
 `disable_crash_service`. The log file names (`log.txt`, `log-<date>.txt`) and `NCPreferences.sharedLogDirectory` come
 from NextcloudKit and upstream: if they change, a report has no logs and the unit test "log folder helper" fails.
+
+## Hooks of NoAgenda
+
+The feature keeps its logic in our own folder `iOSClient/NoAgenda/` (with its `en.lproj/NoAgenda.strings`) and touches
+upstream files only through the small hooks below, each marked with a `// NoDrive:` comment. `python3 tools/rebrand.py`
+writes them (function `noagenda`) and fails with "anchor not found" when upstream moved the code; after a merge take
+upstream's side of the file, run `rebrand.py`, and move the anchor if it fails.
+
+| Id | File and anchor | Hook |
+|---|---|---|
+| A1 | `iOSClient/Main/NCSidebarView.swift`, after `var openWorkspaceApp` | `var openAgenda: () -> Void = {}` |
+| A2 | same file, `if !workspaceApps.apps.isEmpty {` | the condition also accepts `NCAgendaEntry.isShown(account:)`, so the Apps section is there for NoAgenda alone |
+| A3 | same file, before `ForEach(workspaceApps.apps)` | the NoAgenda sidebar item (`sidebarItem(... action: openAgenda)`) |
+| A4 | `iOSClient/Main/NCMainTabBarController+Sidebar.swift`, after `openSidebarWorkspaceApp(app)` | the `openAgenda:` closure: `removeSidebar()`, `openSidebarAgenda()` |
+| A5 | same file, the selection kept by its restoration identifier | NoAgenda keeps its selection like the Workspace apps |
+| A6 | `iOSClient/Account/NCAccount.swift`, after `NCWorkspaceWeb.shared.forget(...)` | `await NCAgendaStore.forget(account: account)` (cache and settings of a removed account) |
+| A7 | `iOSClient/Refresh/AppDelegate+AppRefresh.swift`, around `autoUploadBackgroundSync()` | `async let noAgenda: Void = NCAgendaBackground.refresh()` and `await noAgenda` (the app's one refresh task; no new background identifier) |
+
+The folder `iOSClient/NoAgenda` is listed in `APP_SOURCE_FOLDERS` of `tools/rebrand.py`, which adds every `.swift` file of it
+to the app target; `NoAgenda.strings` is a NoDrive-owned resource like the other features' strings.

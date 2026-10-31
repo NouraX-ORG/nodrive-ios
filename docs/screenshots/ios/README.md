@@ -87,3 +87,8 @@ granted before the launch). `01-auto-upload-row` (the new row, default Smart), `
   `tools/rebrand.py --check`; the owner sees it on the Mac.
 - Screens after sign-in (file list, settings, about and licences, Files app location, widgets) need
   an account and are owner tests.
+
+NoAgenda (`agenda-light/`, `agenda-dark/`): from run [41230680780](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41230680780) on
+`feature/noagenda-core` (commit `ce48f28a66`, the UI tests `NoDriveAgendaUITests` as ali, mara and olaf, signed in by the CI
+stand-in that replays the recorded answers of NoGantt 2.4.1, Deck and Calendar). The names are in `docs/testing.md`, section
+"NoAgenda". The three `agenda-state-*` files exist in light only.

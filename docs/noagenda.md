@@ -91,8 +91,23 @@ the credential never goes anywhere else.
 - Nextcloud 35 did not have the person's default "personal" calendar before first use; the seed creates it.
 - The shared calendar of another person appears in the home as `<name>_shared_by_<user>`.
 
+## Status
+
+Green on its head: run [41230680780](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41230680780) (commit `ce48f28a66`), all 12 jobs, first
+attempt; 474 unit tests, 44 PASS in `agenda-server`, 9 UI runs in the shard `agenda`. The independent final review approved it with
+7 nits, listed first below (`plans/round3-ios-agenda-core-final-review-1.md`). Rows for the owner: "NoAgenda" in `docs/testing.md`.
+
 ## Open points
 
+- Review nits not fixed in this step:
+  - A task in a project I run that has only my own agent (known by registry id) and no person has no team row, so a late one gets no
+    "late" team problem (the card case keeps its row). Only "... is on the task without you" is left.
+  - A calendar that fails to read is not marked in Sources with the time (`RawCalendar.failedAt` is stored but not shown).
+  - The note of a refused project says "Showing the rows that were saved" even when nothing was saved, and gives only the time.
+  - Under Personal the "My team" header and the "Show all team tasks" switch still show, with nothing under them.
+  - "Not linked to an account" does not name the planning person, so two unlinked people on one task give one sentence.
+  - The docstring of `tools/ci/agenda_gantt_seed.py` still says Design-Bot is known by name only (it is known by registry id).
+  - The root cause of the flaky agenda shard is not known.
 - A project whose tasks the server refuses (401 or 403) keeps its saved rows and is marked in Sources with the time
   it could not be read. Calendars that fail to read are only reported by the banner (not marked one by one).
 - The agenda UI shard is sometimes slow to come up. Every finder that gives up now keeps a screenshot
