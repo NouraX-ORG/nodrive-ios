@@ -48,10 +48,14 @@ enum NCUITestAccount {
     private static func injectIfRequested() async {
         guard let requested = requestedAccount() else { return }
 
-        // Wait for the first screen: the intro of a launch without an account.
+        // Wait for the first screen: the intro of a launch without an account. Any navigation controller is not
+        // enough: on a busy Mac the scene can still be starting, and when it then sets the intro as the root it
+        // replaces the main screen the account creation just showed (the test then waits for a main screen that never
+        // comes). So wait for the intro itself.
         for _ in 0..<240 {
             if let window = UIApplication.shared.mainAppWindow,
-               window.rootViewController is UINavigationController {
+               let navigation = window.rootViewController as? UINavigationController,
+               navigation.viewControllers.first is NCIntroViewController {
                 break
             }
             try? await Task.sleep(for: .milliseconds(500))
@@ -63,6 +67,17 @@ enum NCUITestAccount {
                                         user: requested.user,
                                         password: requested.password,
                                         controller: nil)
+        NSLog("NODRIVE-UITEST account created; root is \(type(of: window.rootViewController as Any)), scene state \(window.windowScene?.activationState.rawValue ?? -1)")
+
+        // Diagnostics only: the test must never show the main screen itself, because that would hide an app bug.
+        // Suspected (run 41110301742): createAccount shows the main screen on UIApplication.mainAppWindow, which
+        // may be nil while the scene is not foreground-active (for example while a system prompt is up), so the
+        // intro stays. That is an app issue to fix in NCAccount.createAccount, not here. Log what happened.
+        for _ in 0..<20 {
+            if window.rootViewController is NCMainTabBarController { return }
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+        NSLog("NODRIVE-UITEST the main screen was not shown 10 s after the account creation; root is \(type(of: window.rootViewController as Any)), scene state \(window.windowScene?.activationState.rawValue ?? -1)")
     }
 }
 

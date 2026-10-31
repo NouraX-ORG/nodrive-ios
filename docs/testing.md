@@ -148,6 +148,7 @@ on `main` (commit `b03563c3c9`), all 3 jobs green. Xcode 27.1 (build 27A9275), r
   artifacts, runs the network gate, the screenshot report and the docs copies over all of them, and uploads
   `nodrive-ios-screenshots` and `nodrive-ios-screens-results` as before. A new UI test group is a new matrix
   entry plus its steps (how-to at the top of the job in the workflow file).
+- A fresh simulator is slow on its first app start, so `screens.sh prepare-first` ends with a warm-up (install, launch, wait, terminate; `switch` then reinstalls cleanly). The intro slide wait reads the cell position from one snapshot (`waitForSlide`), because the cell vanishes while the intro scrolls and a separate `exists` then `frame` failed the test on a busy Mac. The Debug-only test account hook (`NCUITestAccount`) waits for the intro screen itself before it signs in, so the scene start can not replace the main screen afterwards, and shows the main screen itself when the account creation did not (its `mainAppWindow` is nil while the scene is inactive); `conflicts` also writes `ui-<variant>-hook.log`.
 - `tools/ci/network-gate.py` reads the DNS captures (all shards, joined) and fails on any Nextcloud,
   ownCloud, Firebase or Crashlytics name. `tools/ci/screens-report.py` checks every screenshot and
   makes the 1200 px copies below.
