@@ -153,6 +153,7 @@ struct NCAgendaAssembler {
             let color = NCAgendaColors.mapped(calendar.color)
             var source = AgendaSource(key: NCAgendaSources.calendarKey(calendar.uri), kind: calendar.onlyTodos ? .list : .calendar,
                                       name: calendar.name, color: color, setting: cls.setting)
+            if calendar.isAppGenerated { source.name = NCAgendaText.t("_nodrive_agenda_board_calendar_") }
             source.lockedReason = cls.locked
             source.isNew = cls.isNew
             source.note = cls.note

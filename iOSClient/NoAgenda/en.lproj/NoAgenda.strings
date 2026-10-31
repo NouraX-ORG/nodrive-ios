@@ -6,6 +6,7 @@
 "_nodrive_agenda_background_off_" = "Background App Refresh is off for NoDrive, so NoAgenda updates when you open it.";
 "_nodrive_agenda_blocked_" = "Blocked";
 "_nodrive_agenda_blocked_by_late_" = "blocked by a late task";
+"_nodrive_agenda_board_calendar_" = "NoBoard calendar";
 "_nodrive_agenda_chip_agents_" = "My agents";
 "_nodrive_agenda_chip_me_" = "Me";
 "_nodrive_agenda_chip_team_" = "My team";
