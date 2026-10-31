@@ -186,6 +186,13 @@ final class NoDriveAgendaUITests: XCTestCase {
     }
 
     private func ensureAgenda(_ app: XCUIApplication) {
+        // The question can arrive after the first read finished; it covers the list until it is answered
+        let question = app.descendants(matching: .any)["agendaPersonalQuestion"]
+        if question.exists {
+            chooseWorkCalendar(app)
+            app.buttons["agendaPersonalDone"].tap()
+            Thread.sleep(forTimeInterval: 2)
+        }
         for _ in 0..<3 where !app.descendants(matching: .any)["agendaList"].exists {
             showAgenda(app)
             Thread.sleep(forTimeInterval: 3)
@@ -201,10 +208,10 @@ final class NoDriveAgendaUITests: XCTestCase {
             ensureAgenda(app)
             if element.exists { return element }
             for _ in 0..<8 {
-                list.swipeUp()
+                if list.exists { list.swipeUp() }
                 if element.exists { return element }
             }
-            for _ in 0..<8 { list.swipeDown() }
+            for _ in 0..<8 where list.exists { list.swipeDown() }
             Thread.sleep(forTimeInterval: 2)
         } while Date() < deadline
         return nil
