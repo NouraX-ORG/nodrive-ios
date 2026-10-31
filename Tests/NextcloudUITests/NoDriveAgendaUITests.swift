@@ -280,11 +280,11 @@ final class NoDriveAgendaUITests: XCTestCase {
         repeat {
             ensureAgenda(app)
             if element.exists { return element }
-            for _ in 0..<8 {
-                if list.exists { list.swipeUp() }
+            for _ in 0..<14 {
+                if list.exists { list.swipeUp(velocity: .slow) }
                 if element.exists { return element }
             }
-            for _ in 0..<8 where list.exists { list.swipeDown() }
+            for _ in 0..<14 where list.exists { list.swipeDown() }
             Thread.sleep(forTimeInterval: 2)
         } while Date() < deadline
         return nil
@@ -298,11 +298,11 @@ final class NoDriveAgendaUITests: XCTestCase {
         repeat {
             ensureAgenda(app)
             if element.exists { return element }
-            for _ in 0..<8 {
-                if list.exists { list.swipeUp() }
+            for _ in 0..<14 {
+                if list.exists { list.swipeUp(velocity: .slow) }
                 if element.exists { return element }
             }
-            for _ in 0..<8 where list.exists { list.swipeDown() }
+            for _ in 0..<14 where list.exists { list.swipeDown() }
             Thread.sleep(forTimeInterval: 2)
         } while Date() < deadline
         return nil
@@ -331,7 +331,7 @@ final class NoDriveAgendaUITests: XCTestCase {
         // Only upwards: a swipe down on the top of the sheet would close it. The checks go from the top of the list down.
         for _ in 0..<14 {
             if element.exists { return element }
-            if list.exists { list.swipeUp() }
+            if list.exists { list.swipeUp(velocity: .slow) }
         }
         return element.exists ? element : nil
     }
