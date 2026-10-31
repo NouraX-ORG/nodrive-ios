@@ -285,6 +285,7 @@ final class NoDriveAgendaUITests: XCTestCase {
                 if element.exists { return element }
             }
             for _ in 0..<14 where list.exists { list.swipeDown() }
+            if element.exists { return element }
             Thread.sleep(forTimeInterval: 2)
         } while Date() < deadline
         return nil
@@ -303,6 +304,7 @@ final class NoDriveAgendaUITests: XCTestCase {
                 if element.exists { return element }
             }
             for _ in 0..<14 where list.exists { list.swipeDown() }
+            if element.exists { return element }
             Thread.sleep(forTimeInterval: 2)
         } while Date() < deadline
         return nil
