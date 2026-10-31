@@ -146,7 +146,8 @@ final class NoDriveAgendaUITests: XCTestCase {
         guard user == "mara" else { throw XCTSkip("this check runs for mara") }
         let app = try openAgenda()
         let problem = findRow(app, "Banner design", timeout: 90)
-        XCTAssertNotNil(problem, "the team problem for Banner design is missing")
+        let seen = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'agendaProblem-' OR identifier BEGINSWITH 'agendaRow-'")).allElementsBoundByIndex.map(\.identifier)
+        XCTAssertNotNil(problem, "the team problem for Banner design is missing; rows on screen: \(seen)")
         XCTAssertTrue(problem?.label.contains("Sara") == true)
         save("agenda-team")
         // The integrity problems of design 4.4
@@ -325,11 +326,11 @@ final class NoDriveAgendaUITests: XCTestCase {
 
     /// A text of the Sources list; the list is scrolled from the top to find it.
     private func findInSources(_ app: XCUIApplication, _ text: String) -> XCUIElement? {
-        let element = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+        let element = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
         let list = app.descendants(matching: .any)["agendaSourcesList"]
-        for _ in 0..<12 where list.exists { list.swipeDown() }
+        // Only upwards: a swipe down on the top of the sheet would close it. The checks go from the top of the list down.
         for _ in 0..<14 {
-            if element.exists, element.isHittable { return element }
+            if element.exists { return element }
             if list.exists { list.swipeUp() }
         }
         return element.exists ? element : nil

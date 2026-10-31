@@ -159,20 +159,26 @@ actor NCAgendaStore {
     }
 
     /// One refresh at a time: a caller that comes while one runs waits for that one.
-    /// A cancelled caller cancels the run it started (for the shared background task: iOS ended the time), and the
-    /// run then stops at its next check and gives the saved rows. A caller that only joined a running refresh
-    /// waits for that run, which belongs to the screen.
-    func refresh() async -> AgendaRefreshResult {
+    /// With `cancellable` (the shared background task: iOS ended the time) a cancelled caller cancels the run it
+    /// started, and the run stops at its next check and gives the saved rows. The screen's refresh is not
+    /// cancellable: it finishes and saves, even when the screen was left meanwhile. A caller that only joins a
+    /// running refresh waits for that run; a run that was cancelled is never joined, a fresh one starts.
+    func refresh(cancellable: Bool = false) async -> AgendaRefreshResult {
         if forgotten { return AgendaRefreshResult() }
-        if let running = inFlight { return await running.value }
+        if let running = inFlight, !running.isCancelled { return await running.value }
         let task = Task { await self.performRefresh() }
         inFlight = task
-        let result = await withTaskCancellationHandler {
-            await task.value
-        } onCancel: {
-            task.cancel()
+        let result: AgendaRefreshResult
+        if cancellable {
+            result = await withTaskCancellationHandler {
+                await task.value
+            } onCancel: {
+                task.cancel()
+            }
+        } else {
+            result = await task.value
         }
-        inFlight = nil
+        if inFlight == task { inFlight = nil }
         return result
     }
 

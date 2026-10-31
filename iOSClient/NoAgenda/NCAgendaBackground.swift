@@ -17,7 +17,7 @@ enum NCAgendaBackground {
     @discardableResult
     static func refresh(store: NCAgendaStore) async -> Bool {
         guard await store.settings().openedOnce, !Task.isCancelled else { return false }
-        let result = await store.refresh()
+        let result = await store.refresh(cancellable: true)
         NCAgendaLog.log("background-refresh", count: result.snapshot.items.count)
         return true
     }

@@ -303,7 +303,7 @@ struct NoDriveAgendaStoreTests {
         let fullCount = first.requests.count
         let slow = AgendaFixtures.server()
         let store = R.store(slow, root: root, delay: true)
-        let task = Task { await store.refresh() }
+        let task = Task { await store.refresh(cancellable: true) }
         try await Task.sleep(nanoseconds: 80_000_000)
         task.cancel()
         let result = await task.value
@@ -313,6 +313,28 @@ struct NoDriveAgendaStoreTests {
         #expect(atReturn < fullCount)
         #expect(!result.status.offline)
         #expect(result.snapshot.items.contains { $0.title == "Dentist" })
+    }
+
+    @Test("The screen's refresh is not cancelled with the screen, and a refresh that follows a cancelled run starts its own")
+    func screenRefreshSurvives() async throws {
+        let root = R.tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = R.store(AgendaFixtures.server(), root: root, delay: true)
+        let screen = Task { await store.refresh() }
+        try await Task.sleep(nanoseconds: 60_000_000)
+        screen.cancel()
+        let done = await screen.value
+        #expect(done.snapshot.items.contains { $0.title == "Dentist" })
+        // A background run is cancelled; a screen refresh that comes right after gets a full read, not the empty rows
+        let other = R.tempRoot()
+        defer { try? FileManager.default.removeItem(at: other) }
+        let second = R.store(AgendaFixtures.server(), root: other, delay: true)
+        let background = Task { await second.refresh(cancellable: true) }
+        try await Task.sleep(nanoseconds: 60_000_000)
+        background.cancel()
+        let result = await second.refresh()
+        #expect(result.snapshot.items.contains { $0.title == "Dentist" })
+        _ = await background.value
     }
 
     @Test("The shared background task: a cancelled NoAgenda refresh returns at once")
