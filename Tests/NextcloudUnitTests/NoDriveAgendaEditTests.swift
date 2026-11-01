@@ -630,7 +630,7 @@ struct NoDriveAgendaGanttDeckWriterTests {
         #expect(body["owner"] as? String == "mara")
         #expect(body["order"] as? Int == 3)
         #expect(body["type"] as? String == "plain")
-        #expect(body["duedate"] as? String == "2026-11-04T12:00:00Z")
+        #expect(body["duedate"] as? String == "2026-11-04T12:00:00+00:00")
         #expect(body["done"] as? String == "2026-10-29T10:00:00+00:00")
         #expect(body["color"] as? String == "ff0000")
         #expect(body["archived"] as? Bool == false)
@@ -639,7 +639,11 @@ struct NoDriveAgendaGanttDeckWriterTests {
         for key in ["title", "type", "owner", "description", "order", "duedate", "startdate", "archived", "done"] {
             #expect(bare.keys.contains(key), "\(key) is missing from the body")
         }
-        #expect(NCAgendaDeckWriter.body(fresh: ["title": "T", "owner": "mara"], change: DeckChange(done: true))["done"] as? Bool == true)
+        // Done is the date it was done (a boolean gives an error 500 on the real Deck); not done is null
+        let doneBody = NCAgendaDeckWriter.body(fresh: ["title": "T", "owner": "mara"], change: DeckChange(done: true), now: AgendaEditSupport.date("2026-10-30T12:00:00Z"))
+        #expect(doneBody["done"] as? String == "2026-10-30T12:00:00+00:00")
+        #expect(NCAgendaDeckWriter.body(fresh: ["title": "T", "owner": "mara", "done": "2026-10-29T10:00:00+00:00"], change: DeckChange(done: false))["done"] is NSNull)
+        #expect(NCAgendaDeckWriter.isoDate(AgendaEditSupport.date("2026-11-04T12:00:00Z")) == "2026-11-04T12:00:00+00:00")
     }
 
     @Test("Another lastModified than the one the person saw is a conflict, and nothing is written")

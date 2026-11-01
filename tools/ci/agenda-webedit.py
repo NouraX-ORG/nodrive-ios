@@ -52,6 +52,18 @@ def survival(name, path, expected_title):
     return kept_id, kept_tag
 
 
+def diag(page, label, out):
+    """What the page looks like when it can not be driven (for the next try): a screenshot and the first words on it."""
+    try:
+        text = page.evaluate(r"() => (document.body.innerText || '').replace(/\s+/g, ' ').slice(0, 400)")
+        counts = page.evaluate("() => ({events: document.querySelectorAll('.fc-event').length, inputs: document.querySelectorAll('input, textarea').length, "
+                               "editable: document.querySelectorAll('[contenteditable=true]').length})")
+        info(label + ' page', 'text: %s | %s' % (text, counts))
+        page.screenshot(path=os.path.join(out, 'webedit-%s.png' % label.split()[0].lower()))
+    except Exception as e:  # noqa: BLE001
+        info(label + ' page', 'no diagnosis (%s)' % type(e).__name__)
+
+
 def login(page, base, user, password):
     page.goto(base + '/login', wait_until='networkidle', timeout=90000)
     page.fill('input[name="user"]', user)
@@ -85,7 +97,7 @@ def edit_task(page, base):
 def edit_event(page, base):
     page.goto(base + '/index.php/apps/calendar/', wait_until='networkidle', timeout=90000)
     page.wait_for_timeout(4000)
-    page.get_by_text('Writer-Bot review').first.click(timeout=30000)
+    page.locator('.fc-event', has_text='Writer-Bot review').first.click(timeout=30000)
     page.wait_for_timeout(1500)
     try:
         page.get_by_role('button', name=re.compile('Edit', re.I)).first.click(timeout=10000)
@@ -133,10 +145,7 @@ def main():
                             action(page, base)
                         except Exception as e:  # noqa: BLE001
                             info(label, 'not driven: %s %s' % (type(e).__name__, str(e).splitlines()[0][:100] if str(e) else ''))
-                            try:
-                                page.screenshot(path=os.path.join(args.out, 'webedit-%s.png' % label.split()[0].lower()))
-                            except Exception:  # noqa: BLE001
-                                pass
+                            diag(page, label, args.out)
                     survival('Tasks page', '/remote.php/dav/calendars/ali/personal/draft-report.ics', 'Draft report (web edit)')
                     survival('Calendar page', '/remote.php/dav/calendars/ali/work/writer-review.ics', 'Writer-Bot review (web edit)')
                 browser.close()

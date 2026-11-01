@@ -8,6 +8,8 @@ import Foundation
 /// here ever deletes a card.
 struct NCAgendaDeckWriter {
     let http: NCAgendaHTTP
+    /// The time a card is marked done (Deck keeps `done` as a date).
+    var now: @Sendable () -> Date = { Date() }
     var root: String { NCAgendaDeckReader.root }
 
     static let labelColor = "2563EB"
@@ -39,15 +41,17 @@ struct NCAgendaDeckWriter {
         root + "boards/\(board)/stacks/\(stack)/cards/\(card)"
     }
 
+    /// "2026-11-04T12:00:00+00:00", the form Deck itself writes.
     static func isoDate(_ date: Date) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssxxx"
         return formatter.string(from: date)
     }
 
     /// The full body of the update: every field from the fresh card, the changed one replaced.
-    static func body(fresh: [String: Any], change: DeckChange) -> [String: Any] {
+    static func body(fresh: [String: Any], change: DeckChange, now: Date = Date()) -> [String: Any] {
         var body: [String: Any] = [:]
         body["title"] = NCAgendaJSON.string(fresh["title"]) ?? ""
         body["type"] = NCAgendaJSON.string(fresh["type"]) ?? "plain"
@@ -71,7 +75,8 @@ struct NCAgendaDeckWriter {
             body["duedate"] = NSNull()
         }
         if let done = change.done {
-            body["done"] = done
+            // Deck wants the date it was done (a boolean gives an error 500); not done is null
+            body["done"] = done ? isoDate(now) : NSNull()
         } else if let text = NCAgendaJSON.string(fresh["done"]), !text.isEmpty, !(fresh["done"] is NSNull) {
             body["done"] = text
         } else if let flag = fresh["done"] as? Bool, flag {
@@ -99,7 +104,7 @@ struct NCAgendaDeckWriter {
         if let failure { return failure }
         guard let fresh else { return .offline }
         if let seenLastModified, NCAgendaJSON.int(fresh["lastModified"]) != seenLastModified { return .conflict }
-        let body = Self.body(fresh: fresh, change: change)
+        let body = Self.body(fresh: fresh, change: change, now: now())
         let (response, putFailure) = await send(.put, path: Self.cardPath(root, board: board, stack: stack, card: card), body: body)
         if let putFailure { return putFailure }
         guard let response else { return .offline }

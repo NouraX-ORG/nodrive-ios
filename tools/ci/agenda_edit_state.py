@@ -271,9 +271,13 @@ class EditState:
             for other in self._tasks_of(project['id']):
                 if any(dep.get('predecessor_id') == 't-%d' % task_id for dep in other.get('dependencies', [])):
                     start = self._date(other['start_date'])
-                    if start < new_end:
+                    # a successor starts after the end of its predecessor (the next working day); a date without a time is 00:00
+                    if start <= new_end:
                         before.append(copy.deepcopy(other))
-                        delta = datetime.timedelta(days=(new_end - start).days)
+                        new_start = new_end + datetime.timedelta(days=1)
+                        while new_start.weekday() >= 5:
+                            new_start += datetime.timedelta(days=1)
+                        delta = datetime.timedelta(days=(new_start - start).days)
                         for key in ('start_date', 'end_date'):
                             other[key] = (self._date(other[key]) + delta).isoformat() + other[key][10:]
                         other['updated_at'] = _stamp()
@@ -286,7 +290,7 @@ class EditState:
         self.ops[op] = (project['id'], before)
         self.gantt_dirty.add('projects/%d/tasks' % project['id'])
         self._touch_my_tasks(task)
-        data = {'task': task, 'propagated': propagated, 'op_id': op, 'deck': None}
+        data = {'task': task, 'propagated': propagated, 'op_id': op, 'deck': {'pending': [], 'deviations': [], 'failed': [], 'gone': []}}
         return 200, json.dumps(_ocs(data)), 'application/json; charset=utf-8', {}
 
     def _gantt_revert(self, op):
@@ -408,7 +412,10 @@ class EditState:
             found['startdate'] = payload.get('startdate')
             found['archived'] = bool(payload.get('archived'))
             done = payload.get('done')
-            found['done'] = (_now().isoformat() if done is True else (done if isinstance(done, str) else None))
+            if done is True or done is False:
+                # the real Deck: done is a date or null; a boolean is an error 500 (measured by server_agenda_edit_facts.py)
+                return 500, json.dumps({'message': 'done must be a date'}), 'application/json', {}
+            found['done'] = done if isinstance(done, str) else None
             if 'color' in payload:
                 found['color'] = payload['color']
             found['lastModified'] = int(found.get('lastModified') or 0) + 1

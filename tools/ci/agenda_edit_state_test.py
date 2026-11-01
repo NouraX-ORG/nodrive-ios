@@ -84,7 +84,7 @@ def main():
     data = json.loads(text)['ocs']['data']
     assert code == 200 and [p['title'] for p in data['propagated']] == ['B'] and data['op_id'].startswith('op-')
     tasks = json.loads(st.dispatch('GET', g + 'projects/5/tasks', {}, b'', True)[1])['ocs']['data']
-    assert tasks[1]['start_date'].startswith('2026-10-31')
+    assert tasks[1]['start_date'].startswith('2026-11-02')   # the next working day after Saturday the 31st
     assert st.dispatch('POST', g + 'changes/%s/revert' % data['op_id'], {}, b'{}', True)[0] == 200
     tasks = json.loads(st.dispatch('GET', g + 'projects/5/tasks', {}, b'', True)[1])['ocs']['data']
     assert tasks[1]['start_date'].startswith('2026-10-29') and tasks[0]['end_date'].startswith('2026-10-28')
@@ -106,7 +106,9 @@ def main():
     code, text, _, _ = st.dispatch('PUT', card, {}, json.dumps({'title': 'C2', 'owner': 'mara'}).encode(), True)
     out = json.loads(text)
     assert code == 200 and out['description'] == '' and out['startdate'] is None and out['duedate'] is None
-    full = json.dumps({'title': 'C3', 'owner': 'mara', 'description': 'keep', 'startdate': 'S', 'duedate': 'D', 'done': True}).encode()
+    boolean = json.dumps({'title': 'C3', 'owner': 'mara', 'done': True}).encode()
+    assert st.dispatch('PUT', card, {}, boolean, True)[0] == 500   # the real Deck: done is a date, a boolean is an error
+    full = json.dumps({'title': 'C3', 'owner': 'mara', 'description': 'keep', 'startdate': 'S', 'duedate': 'D', 'done': '2026-10-30T10:00:00+00:00'}).encode()
     out = json.loads(st.dispatch('PUT', card, {}, full, True)[1])
     assert out['description'] == 'keep' and out['startdate'] == 'S' and out['done'] and out['lastModified'] > 5
     assert st.dispatch('PUT', card + '/assignLabel', {}, json.dumps({'labelId': 7}).encode(), True)[0] == 200

@@ -229,7 +229,7 @@ actor NCAgendaEditQueue {
             return await writer.changeAgent(projectId: project, taskId: task, seenUpdatedAt: command.link.updatedAt, choice: choice, context: ganttContext)
         case .deckUpdate, .deckAgent:
             guard let board = command.link.boardId, let stack = command.link.stackId, let card = command.link.cardId else { return missing }
-            let writer = NCAgendaDeckWriter(http: http)
+            let writer = NCAgendaDeckWriter(http: http, now: clock)
             if command.kind == .deckUpdate {
                 guard let change = command.deck else { return missing }
                 return await writer.update(board: board, stack: stack, card: card, seenLastModified: command.link.lastModified, change: change)

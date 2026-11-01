@@ -136,7 +136,8 @@ def run(target, requests, seed, delta, mutate_seed_card):
         for name, key in TASK_KEYS.items():
             text = text.replace('{task:%s}' % name, str(ids[key]))
         for name in ('ali', 'writer', 'research'):
-            text = text.replace('{resource:%s}' % name, str(resources[name]))
+            # a resource id in a JSON body is a number: the quotes of the symbol go
+            text = text.replace('"{resource:%s}"' % name, str(resources[name])).replace('{resource:%s}' % name, str(resources[name]))
         text = text.replace('{board}', str(board)).replace('{stack}', str(stack)).replace('{card:Plain card}', str(card))
         for k, v in (extra or {}).items():
             text = text.replace(k, str(v))
@@ -352,6 +353,7 @@ def main():
     ap.add_argument('--snapshot', required=True, help='recorded before the replay (tools/ci/agenda-snapshot.py)')
     ap.add_argument('--seed', required=True)
     ap.add_argument('--out', default='build/agenda-replay')
+    ap.add_argument('--stand-in-only', action='store_true', help='for a try on a PC: only the stand-in side, no server')
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     requests = json.load(open(args.requests, encoding='utf-8'))
@@ -363,7 +365,7 @@ def main():
 
     real = Target('real server')
     holder = {'seed': seed, 'target': real}
-    real_results = run(real, requests, seed, delta, seed_card(holder))
+    real_results = [] if args.stand_in_only else run(real, requests, seed, delta, seed_card(holder))
     stand = Target('stand-in', agenda_edit_state.EditState('ali', snapshot['users']['ali']))
     holder['target'] = stand
     stand_results = run(stand, requests, seed, delta, seed_card(holder))
@@ -391,7 +393,8 @@ def main():
             only_real = sorted(real_paths - paths)[:4]
             only_stand = sorted(paths - real_paths)[:4]
             mismatches.append('%s: answer shape differs (only real: %s; only stand-in: %s)' % (step, only_real, only_stand))
-    row('the stand-in answers like the real server (status and answer shape of every step)', not mismatches, '; '.join(mismatches[:6]))
+    if not args.stand_in_only:
+        row('the stand-in answers like the real server (status and answer shape of every step)', not mismatches, '; '.join(mismatches[:6]))
     delete_count = sum(1 for step, _, _ in real.log if step == 'event-delete')
     row('the only DELETE of the job is the event delete', delete_count == 1, str(delete_count))
 

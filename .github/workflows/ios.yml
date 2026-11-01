@@ -246,6 +246,7 @@ jobs:
             build/agenda-server/*.txt
             build/agenda-server/status.json
             build/agenda-server/seed.json
+            build/agenda-server/webedit-*.png
           if-no-files-found: warn
           retention-days: 14
 
