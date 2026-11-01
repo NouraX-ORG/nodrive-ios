@@ -58,6 +58,14 @@ def main():
     assert st.dispatch('PUT', path, {}, b'x', True)[0] == 400
     code, _, _, hdr = st.dispatch('PUT', path, {'If-Match': '"e1"'}, ICS.replace('Dentist', 'Moved').encode(), True)
     assert code == 204 and hdr['ETag'] != '"e1"'
+    # The calendar home: a written calendar has a new sync token and ctag (the app reads a calendar again only then)
+    home = ('<d:multistatus xmlns:d="DAV:"><d:response><d:href>/remote.php/dav/calendars/ali/work/</d:href><d:propstat><d:prop>'
+            '<d:sync-token>http://sabre.io/ns/sync/9</d:sync-token></d:prop></d:propstat></d:response><d:response>'
+            '<d:href>/remote.php/dav/calendars/ali/other/</d:href><d:propstat><d:prop><d:sync-token>http://sabre.io/ns/sync/9</d:sync-token>'
+            '</d:prop></d:propstat></d:response></d:multistatus>')
+    after = st.home(home)
+    assert after != home and after.count('sync/9<') == 1 and 'sync/1009<' in after
+    assert make().home(home) == home
     assert 'Moved' in st.dispatch('REPORT', '/remote.php/dav/calendars/ali/work/', {}, b'name="VEVENT"', True)[1]
     new = '/remote.php/dav/calendars/ali/work/n.ics'
     assert st.dispatch('PUT', new, {'If-None-Match': '*'}, ICS.encode(), True)[0] == 201

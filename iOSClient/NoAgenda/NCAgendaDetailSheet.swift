@@ -16,6 +16,14 @@ struct NCAgendaDetailSheet: View {
                     Button(item.home.openTitle) { model.open(item.link, title: item.home.openTitle) }
                         .accessibilityIdentifier("agendaDetailOpen")
                 }
+                if case let .locked(text) = model.ability(of: item) {
+                    // At the top: the sheet opens at half height, and the person must see why there is no Edit button.
+                    Section {
+                        Label(text, systemImage: "lock.fill").font(.footnote)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityIdentifier("agendaDetailLock")
+                    }
+                }
                 Section {
                     Label(item.title.isEmpty ? " " : item.title, systemImage: item.kind.symbolName)
                         .font(.headline)
@@ -61,12 +69,6 @@ struct NCAgendaDetailSheet: View {
                         ForEach(Array(item.flags.enumerated()), id: \.offset) { _, flag in
                             Label(flag.text, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
                         }
-                    }
-                }
-                if case let .locked(text) = model.ability(of: item) {
-                    Section {
-                        Label(text, systemImage: "lock.fill").font(.footnote)
-                            .accessibilityIdentifier("agendaDetailLock")
                     }
                 }
             }

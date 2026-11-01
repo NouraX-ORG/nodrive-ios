@@ -36,7 +36,8 @@ final class NoDriveAgendaEditUITests: XCTestCase {
         XCTAssertTrue(late?.label.contains("clash") == true, "Late call is not marked as a (soft) clash")
         // The workload bar: Big push is 60 hours over two days; the day is overbooked
         let bar = element(app, "agendaWorkloadBar")
-        XCTAssertTrue(scrollTo(app, bar, up: false), "the workload bar is missing")
+        scrollToTop(app)
+        XCTAssertTrue(bar.waitForExistence(timeout: 20), "the workload bar is missing")
         XCTAssertTrue(bar.label.contains("h planned") && bar.label.contains("h free"), "the bar says: \(bar.label)")
         XCTAssertTrue(bar.label.contains("overbooked"), "the day is not overbooked: \(bar.label)")
         save("agenda-day-conflicts")
@@ -160,7 +161,7 @@ final class NoDriveAgendaEditUITests: XCTestCase {
         title.typeText(" moved")
         app.buttons["agendaEditorSave"].tap()
         let banner = element(app, "agendaBanner-queueNotSent")
-        XCTAssertTrue(waitFor(banner, in: app, timeout: 60), "no 'not sent' banner after the item changed meanwhile")
+        XCTAssertTrue(waitForBanner(banner, in: app, timeout: 60), "no 'not sent' banner after the item changed meanwhile")
         XCTAssertTrue(banner.label.contains("1 change not sent"), "the banner says: \(banner.label)")
         element(app, "agendaBannerReview").tap()
         let list = element(app, "agendaNotSentList")
@@ -173,14 +174,16 @@ final class NoDriveAgendaEditUITests: XCTestCase {
     func testConflictB() throws {
         let app = try openAgenda()
         let banner = element(app, "agendaBanner-queueNotSent")
-        XCTAssertTrue(waitFor(banner, in: app, timeout: 60), "the unsent change did not survive the restart")
+        XCTAssertTrue(waitForBanner(banner, in: app, timeout: 60), "the unsent change did not survive the restart")
         element(app, "agendaBannerReview").tap()
         let apply = app.buttons["agendaApplyAgain"]
         XCTAssertTrue(apply.waitForExistence(timeout: 20))
         apply.tap()
         // Sent on top of the new version: the banner goes and the row has the new title
-        XCTAssertTrue(waitUntilGone(banner, in: app, timeout: 60), "the banner is still there after Apply my change again")
-        if app.buttons["agendaNotSentDone"].exists { app.buttons["agendaNotSentDone"].tap() }
+        XCTAssertTrue(app.staticTexts["Everything was sent."].waitForExistence(timeout: 60) || !app.buttons["agendaApplyAgain"].exists,
+                      "the list still holds the change after Apply my change again")
+        if app.buttons["agendaNotSentDone"].waitForExistence(timeout: 10) { app.buttons["agendaNotSentDone"].tap() }
+        XCTAssertTrue(waitBannerGone(banner, in: app, timeout: 60), "the banner is still there after Apply my change again")
         XCTAssertNotNil(findRowButton(app, "Client call moved"), "the change was not applied")
         save("agenda-applied-again")
     }
@@ -201,7 +204,7 @@ final class NoDriveAgendaEditUITests: XCTestCase {
         title.typeText(" waiting")
         app.buttons["agendaEditorSave"].tap()
         let waiting = element(app, "agendaBanner-queueWaiting")
-        XCTAssertTrue(waitFor(waiting, in: app, timeout: 60), "no 'waiting to send' banner")
+        XCTAssertTrue(waitForBanner(waiting, in: app, timeout: 60), "no 'waiting to send' banner")
         XCTAssertTrue(waiting.label.contains("Waiting to send 1 change"), "the banner says: \(waiting.label)")
         XCTAssertNotNil(findRowButton(app, "Lunch hold waiting"), "the waiting change is not drawn on its row")
         save("agenda-waiting")
@@ -211,7 +214,7 @@ final class NoDriveAgendaEditUITests: XCTestCase {
         let app = try openAgenda()
         // The app is back online and the queue is sent after the reads
         let waiting = element(app, "agendaBanner-queueWaiting")
-        XCTAssertTrue(waitUntilGone(waiting, in: app, timeout: 90), "the waiting change was not sent when the network was back")
+        XCTAssertTrue(waitBannerGone(waiting, in: app, timeout: 90), "the waiting change was not sent when the network was back")
         XCTAssertNotNil(findRowButton(app, "Lunch hold waiting"), "the sent change is not in the list")
         XCTAssertFalse(element(app, "agendaBanner-queueNotSent").exists, "the change ended in 'not sent'")
         save("agenda-sent-after-waiting")
@@ -345,6 +348,39 @@ final class NoDriveAgendaEditUITests: XCTestCase {
             from.press(forDuration: 0.05, thenDragTo: to, withVelocity: .default, thenHoldForDuration: 0)
         }
         return target.exists && target.isHittable
+    }
+
+    /// Scrolls the list back to its first row (the banners and the workload bar are there).
+    private func scrollToTop(_ app: XCUIApplication) {
+        for _ in 0..<12 {
+            let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
+            let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9))
+            from.press(forDuration: 0.05, thenDragTo: to, withVelocity: .fast, thenHoldForDuration: 0)
+        }
+        Thread.sleep(forTimeInterval: 1)
+    }
+
+    /// A banner sits at the top of the list: the list is scrolled there before it is looked for.
+    private func waitForBanner(_ banner: XCUIElement, in app: XCUIApplication, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            ensureAgenda(app)
+            if banner.exists { return true }
+            scrollToTop(app)
+            if banner.waitForExistence(timeout: 3) { return true }
+        } while Date() < deadline
+        return false
+    }
+
+    private func waitBannerGone(_ banner: XCUIElement, in app: XCUIApplication, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            ensureAgenda(app)
+            scrollToTop(app)
+            if !banner.exists { return true }
+            Thread.sleep(forTimeInterval: 2)
+        } while Date() < deadline
+        return false
     }
 
     private func openSidebar(_ app: XCUIApplication) {

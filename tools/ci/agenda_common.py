@@ -31,7 +31,12 @@ def seed_day():
     forced = os.environ.get('NODRIVE_AGENDA_TODAY')
     if forced:
         return datetime.datetime.strptime(forced, '%Y-%m-%d').date()
-    return datetime.datetime.now(datetime.timezone.utc).date()
+    day = datetime.datetime.now(datetime.timezone.utc).date()
+    # NoGantt moves a task that follows another to the next working day, so on a Sunday "Publish banners" starts on the Monday and
+    # is not "in progress" on the pinned day. The tests pin "today", so a weekend is seeded as the Friday before it.
+    if day.weekday() >= 5:
+        day -= datetime.timedelta(days=day.weekday() - 4)
+    return day
 
 
 def request(user, method, path, body=None, headers=None, ocs=True, timeout=60):

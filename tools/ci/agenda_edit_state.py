@@ -55,6 +55,7 @@ class EditState:
         self.touched = set()
         self.counter = 0
         self.dirty_calendars = set()
+        self.versions = {}           # calendar uri -> number of changes since the recording
         self.objects = {}            # calendar uri -> {href: {'etag', 'ics'}}
         self.ops = {}
         self.gantt = {}              # path key -> parsed JSON ('projects/N/tasks', 'my-tasks', ...)
@@ -110,6 +111,25 @@ class EditState:
         m = re.match(r'^/remote\.php/dav/calendars/[^/]+/([^/]+)/[^/]+\.ics$', path)
         return m.group(1) if m else None
 
+    def _changed(self, uri):
+        self.dirty_calendars.add(uri)
+        self.versions[uri] = self.versions.get(uri, 0) + 1
+
+    def home(self, text):
+        """The calendar home answer: like the real server, a calendar that was written to has a new sync token and ctag, so the
+        app reads it again (the recorded text says the same token for ever)."""
+        if not self.versions:
+            return text
+
+        def block(match):
+            part = match.group(0)
+            href = re.search(r'<d:href>[^<]*/calendars/[^/<]+/([^/<]+)/</d:href>', part)
+            version = self.versions.get(href.group(1)) if href else None
+            if not version:
+                return part
+            return re.sub(r'(sabre\.io/ns/sync/)(\d+)', lambda m: m.group(1) + str(int(m.group(2)) + 1000 * version), part)
+        return re.sub(r'<d:response>.*?</d:response>', block, text, flags=re.S)
+
     def report(self, uri, kind):
         """The REPORT answer of one calendar; the recorded text while nothing changed."""
         reports = (self.data.get('reports') or {}).get(uri)
@@ -144,7 +164,7 @@ class EditState:
                 # The item "changed somewhere else" between the app's read and its write.
                 self.touched.add(path)
                 obj['etag'] = self._etag(obj['ics'])
-                self.dirty_calendars.add(uri)
+                self._changed(uri)
             return 200, obj['ics'], 'text/calendar; charset=utf-8', {'ETag': obj['etag']}
         if method == 'PUT':
             existing = objs.get(path)
@@ -158,7 +178,7 @@ class EditState:
                 return 400, '', 'text/plain', {}
             etag = self._etag(text)
             objs[path] = {'etag': etag, 'ics': text}
-            self.dirty_calendars.add(uri)
+            self._changed(uri)
             return (204 if existing else 201), '', 'text/plain', {'ETag': etag}
         if method == 'DELETE':
             existing = objs.get(path)
@@ -167,7 +187,7 @@ class EditState:
             if headers.get('If-Match') != existing['etag']:
                 return 412, '', 'text/plain', {}
             del objs[path]
-            self.dirty_calendars.add(uri)
+            self._changed(uri)
             return 204, '', 'text/plain', {}
         return 405, '', 'text/plain', {}
 

@@ -47,16 +47,6 @@ struct NCAgendaRootView: View {
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name(NCGlobal.shared.notificationCenterNetworkReachability))) { _ in
             Task { await model.networkMayBeBack() }
         }
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                // "+": the sheet makes a new event or a new to-do (the choice is in the sheet)
-                Button { model.showCreate = true } label: {
-                    Image(systemName: "plus")
-                }
-                .accessibilityLabel(NCAgendaEditText.t("_nodrive_agenda_edit_add_"))
-                .accessibilityIdentifier("agendaAdd")
-            }
-        }
         .sheet(isPresented: $model.showPersonalQuestion) {
             NCAgendaPersonalQuestionView(model: model)
                 .tint(model.accentColor)
@@ -121,6 +111,13 @@ struct NCAgendaRootView: View {
                         .accessibilityIdentifier("agendaUpdated")
                 }
                 Spacer()
+                // "+": the sheet makes a new event or a new to-do (the choice is in the sheet). In the page itself: the bar above
+                // belongs to the main screen of the app, not to this view.
+                Button { model.showCreate = true } label: {
+                    Image(systemName: "plus.circle.fill").font(.title3)
+                }
+                .accessibilityLabel(NCAgendaEditText.t("_nodrive_agenda_edit_add_"))
+                .accessibilityIdentifier("agendaAdd")
                 Button {
                     model.showSources = true
                 } label: {

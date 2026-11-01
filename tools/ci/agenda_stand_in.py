@@ -182,7 +182,7 @@ def handle(h, method, path, body):
     if method == 'PROPFIND' and path.startswith('/remote.php/dav/principals/'):
         return done(207, data['principal']['text'])
     if method == 'PROPFIND' and path.rstrip('/') == '/remote.php/dav/calendars/' + user:
-        return done(207, data['home']['text'])
+        return done(207, edit.home(data['home']['text']))
     if method == 'REPORT' and path.startswith('/remote.php/dav/calendars/'):
         uri = path.rstrip('/').split('/')[-1]
         reports = data['reports'].get(uri)
