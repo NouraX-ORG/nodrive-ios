@@ -69,10 +69,12 @@ extension NCAgendaViewModel {
     var editBanners: [AgendaBanner] {
         var list: [AgendaBanner] = []
         if waitingCount > 0 {
-            list.append(AgendaBanner(id: "queueWaiting", text: NCAgendaEditText.f("_nodrive_agenda_edit_waiting_", waitingCount), openHome: nil, opensNotSent: false))
+            let text = waitingCount == 1 ? NCAgendaEditText.t("_nodrive_agenda_edit_waiting_one_") : NCAgendaEditText.f("_nodrive_agenda_edit_waiting_", waitingCount)
+            list.append(AgendaBanner(id: "queueWaiting", text: text, openHome: nil, opensNotSent: false))
         }
         if !notSentCommands.isEmpty {
-            list.append(AgendaBanner(id: "queueNotSent", text: NCAgendaEditText.f("_nodrive_agenda_edit_not_sent_", notSentCommands.count), openHome: nil, opensNotSent: true))
+            let text = notSentCommands.count == 1 ? NCAgendaEditText.t("_nodrive_agenda_edit_not_sent_one_") : NCAgendaEditText.f("_nodrive_agenda_edit_not_sent_", notSentCommands.count)
+            list.append(AgendaBanner(id: "queueNotSent", text: text, openHome: nil, opensNotSent: true))
         }
         return list
     }
@@ -92,7 +94,7 @@ extension NCAgendaViewModel {
     func ability(of item: AgendaItem) -> NCAgendaEditAbility {
         if item.relation == .team || item.kind == .milestone { return .notOffered }
         if item.pending { return .locked(NCAgendaEditText.t("_nodrive_agenda_edit_lock_pending_")) }
-        if item.lock == .repeating { return .locked(NCAgendaText.f("_nodrive_agenda_lock_repeating_", item.home.openTitle)) }
+        if item.lock == .repeating { return .locked(NCAgendaText.f("_nodrive_agenda_lock_repeating_", item.home.productName)) }
         if item.lock == .readOnlyCalendar { return .locked(NCAgendaText.t("_nodrive_agenda_lock_read_only_")) }
         if item.lock == .viewerProject { return .locked(NCAgendaText.t("_nodrive_agenda_lock_viewer_")) }
         if item.lock == .guardReadOnly { return .locked(NCAgendaText.t("_nodrive_agenda_lock_guard_")) }

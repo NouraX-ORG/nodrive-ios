@@ -114,6 +114,11 @@ jobs:
       - name: The NoAgenda test hooks exist in Debug builds only
         run: python tools/ci/workspace-check.py --debug-only iOSClient/NoAgenda/NCAgendaUITestHooks.swift
 
+      - name: The NoAgenda stand-in keeps the rules of the real server (its writable state), and the edit-log check can fail
+        run: |
+          python tools/ci/agenda_edit_state_test.py
+          python tools/ci/agenda-edit-check.py --self-test
+
   server-login:
     name: Server login (a real Nextcloud 35 in Docker; the app's web view sign-in)
     needs: branding
@@ -200,11 +205,25 @@ jobs:
         if: ${{ !cancelled() }}
         run: bash tools/ci/agenda-server.sh snapshot
 
-      - name: The snapshot holds no seeded password
+      - name: Server facts of the editing step (conditional headers, NoGantt refusals, Deck full replace; real server code)
+        id: facts
+        if: ${{ !cancelled() }}
+        run: bash tools/ci/agenda-server.sh facts
+
+      - name: Install Playwright (the runner's Chrome is used; no browser download)
+        if: ${{ !cancelled() }}
+        run: python -m pip install --disable-pip-version-check playwright==1.55.0
+
+      - name: Does the agent survive an edit in the Calendar and Tasks pages? (design 4.2)
+        id: webedit
+        if: ${{ !cancelled() }}
+        run: bash tools/ci/agenda-server.sh webedit
+
+      - name: The reports and the snapshot hold no seeded password
         if: ${{ !cancelled() }}
         run: |
           set -eu
-          for name in $(env | grep -E '^NODRIVE_AGENDA_(PW_|ADMIN_PW)' | cut -d= -f1); do
+          for name in $(env | grep -E '^NODRIVE_AGENDA_(PW_|ADMIN_PW|LOGIN_PW_)' | cut -d= -f1); do
             if grep -qF -- "${!name}" build/agenda-server/agenda-snapshot.json build/agenda-server/*.md build/agenda-server/*.txt 2> /dev/null; then
               echo "a seeded app password is in an artifact"; exit 1
             fi
@@ -390,6 +409,8 @@ jobs:
         run: |
           XCTESTRUN=$(find DerivedData/Build/Products -maxdepth 1 -name "*.xctestrun" | head -n 1)
           echo "xctestrun: $XCTESTRUN"
+          # NoDriveAgendaRequestExportTests writes the requests of the Swift writers here (the job agenda-replay sends them)
+          export TEST_RUNNER_NODRIVE_EXPORT_DIR="$GITHUB_WORKSPACE/results/export"
           set -o pipefail
           xcodebuild test-without-building \
             -xctestrun "$XCTESTRUN" \
@@ -406,12 +427,73 @@ jobs:
             head -c 3000 results/unit-tests-summary.json || true
           fi
 
+      - name: The exported requests are there (input of the job agenda-replay)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: python3 -c 'import json; d=json.load(open("results/export/agenda-requests.json")); print("exported scenarios:", len(d["scenarios"]))'
+
       - name: Upload test results and build reports
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
           name: nodrive-ios-test-results
           path: results/
+          if-no-files-found: warn
+          retention-days: 14
+
+  # The requests that the Swift writers built (unit test NoDriveAgendaRequestExportTests) are sent to a real throwaway
+  # server, and the state is read back. The same steps run against the stand-in's state; the answers must agree.
+  agenda-replay:
+    name: NoAgenda replay (the app's own edit requests on a real Nextcloud 35 with NoGantt 2.4.1 and Deck)
+    needs: ios
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.products_run_id == '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Download the exported requests (unit test results of the ios job)
+        uses: actions/download-artifact@v8
+        with:
+          name: nodrive-ios-test-results
+          path: artifacts/ios-results
+
+      - name: Start the throwaway server (Nextcloud 35.0.2 in Docker, never drive.nourax.org)
+        run: bash tools/ci/agenda-server.sh start
+
+      - name: Install the four apps from their pinned releases (SHA-256 checked)
+        run: bash tools/ci/agenda-server.sh apps
+
+      - name: Seed the server
+        run: bash tools/ci/agenda-server.sh seed
+
+      - name: Record the answers before the replay (the stand-in's state starts from them)
+        run: bash tools/ci/agenda-server.sh snapshot
+
+      - name: Replay the app's requests and read the state back
+        id: replay
+        run: |
+          export AGENDA_REQUESTS="$GITHUB_WORKSPACE/artifacts/ios-results/export/agenda-requests.json"
+          test -f "$AGENDA_REQUESTS"
+          bash tools/ci/agenda-server.sh replay
+
+      - name: Stop the server
+        if: ${{ always() }}
+        run: |
+          bash tools/ci/agenda-server.sh stop
+          rm -f build/agenda-server/server.env
+
+      - name: Upload the replay report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: nodrive-ios-agenda-replay
+          path: |
+            build/agenda-server/agenda-replay.md
+            build/agenda-server/seed.json
           if-no-files-found: warn
           retention-days: 14
 
@@ -693,6 +775,28 @@ jobs:
           bash tools/ci/screens.sh switch "$UDID" en en_US dark
           bash tools/ci/screens.sh agenda "$UDID" agenda-dark
 
+      - name: NoAgenda editing, signed in as ali (light)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && matrix.shard == 'agenda' }}
+        run: |
+          export AGENDA_SNAPSHOT="$GITHUB_WORKSPACE/artifacts/agenda/agenda-snapshot.json"
+          export AGENDA_TODAY=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["seed_day"])' "$AGENDA_SNAPSHOT")
+          bash tools/ci/screens.sh prepare-first "$UDID"
+          bash tools/ci/screens.sh switch "$UDID" en en_US light
+          bash tools/ci/screens.sh agenda-edit "$UDID" agenda-edit-light
+
+      - name: NoAgenda editing, signed in as ali (dark)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && matrix.shard == 'agenda' }}
+        run: |
+          export AGENDA_SNAPSHOT="$GITHUB_WORKSPACE/artifacts/agenda/agenda-snapshot.json"
+          export AGENDA_TODAY=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["seed_day"])' "$AGENDA_SNAPSHOT")
+          bash tools/ci/screens.sh prepare-first "$UDID"
+          bash tools/ci/screens.sh switch "$UDID" en en_US dark
+          bash tools/ci/screens.sh agenda-edit "$UDID" agenda-edit-dark
+
+      - name: NoAgenda editing stand-in log (only drive.nourax.org, OCS-APIRequest, only the writes of design section 9, DELETE only with If-Match)
+        if: ${{ !cancelled() && steps.sim.outcome == 'success' && matrix.shard == 'agenda' }}
+        run: python3 tools/ci/agenda-edit-check.py "$RESULTS/stand-in-edit.jsonl"
+
       - name: NoAgenda stand-in log (only drive.nourax.org, every request with OCS-APIRequest, reads only, no Deck calendar)
         if: ${{ !cancelled() && steps.sim.outcome == 'success' && matrix.shard == 'agenda' }}
         run: |
@@ -792,7 +896,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           python3 tools/ci/screens-report.py --shots "$SHOTS" --results "$RESULTS" \
-            --variants ${{ inputs.only_agenda == true && 'agenda-light agenda-dark' || inputs.only_reports == true && 'reports-light reports-dark' || inputs.only_workspace == true && 'workspace-light workspace-dark' || inputs.only_conflicts == true && 'conflicts-light conflicts-dark' || 'en-light de-light ar-light en-dark workspace-light workspace-dark reports-light reports-dark conflicts-light conflicts-dark agenda-light agenda-dark' }} \
+            --variants ${{ inputs.only_agenda == true && 'agenda-light agenda-dark agenda-edit-light agenda-edit-dark' || inputs.only_reports == true && 'reports-light reports-dark' || inputs.only_workspace == true && 'workspace-light workspace-dark' || inputs.only_conflicts == true && 'conflicts-light conflicts-dark' || 'en-light de-light ar-light en-dark workspace-light workspace-dark reports-light reports-dark conflicts-light conflicts-dark agenda-light agenda-dark agenda-edit-light agenda-edit-dark' }} \
             --docs-out "$GITHUB_WORKSPACE/screenshots-docs" --json "$RESULTS/screens-report.json"
 
       - name: No throwaway password in any result file

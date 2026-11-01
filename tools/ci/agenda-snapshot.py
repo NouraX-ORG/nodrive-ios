@@ -61,7 +61,7 @@ def record_user(user, day, bodies):
                         'todos': text_of(user, 'REPORT', path, bodies['todos'], dict(xml, Depth='1'))}
     out['reports'] = reports
     gantt = {}
-    for name in ('my-tasks', 'projects', 'resources', 'settings', 'task-sync', 'capacity-check'):
+    for name in ('my-tasks', 'projects', 'resources', 'settings', 'task-sync', 'capacity-check', 'work-schedules', 'holidays'):
         gantt[name] = json_of(user, GANTT + name + '?format=json')
     try:
         projects = json.loads(gantt['projects']['text'])['ocs']['data']

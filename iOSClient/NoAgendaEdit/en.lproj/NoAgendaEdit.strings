@@ -31,6 +31,8 @@
 
 "_nodrive_agenda_edit_waiting_" = "Waiting to send %d changes";
 "_nodrive_agenda_edit_not_sent_" = "%d changes not sent";
+"_nodrive_agenda_edit_waiting_one_" = "Waiting to send 1 change";
+"_nodrive_agenda_edit_not_sent_one_" = "1 change not sent";
 "_nodrive_agenda_edit_review_" = "Review";
 "_nodrive_agenda_edit_not_sent_title_" = "Not sent";
 "_nodrive_agenda_edit_nothing_unsent_" = "Everything was sent.";

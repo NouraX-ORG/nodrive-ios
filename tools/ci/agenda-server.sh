@@ -12,6 +12,9 @@
 #   seed       tools/ci/agenda-seed.py
 #   check      tools/ci/server_agenda_check.py (auth proof, the app's own request bodies, the contract)
 #   snapshot   tools/ci/agenda-snapshot.py (the real answers the app reads, per user, no secret)
+#   facts      tools/ci/server_agenda_edit_facts.py (the conditional headers, NoGantt's refusals, Deck's full replace)
+#   webedit    tools/ci/agenda-webedit.py (does the agent survive an edit in the Calendar and Tasks pages?)
+#   replay     tools/ci/agenda-replay.py (the requests of the Swift writers, sent to this server; needs $AGENDA_REQUESTS)
 #   stop       remove the container.
 set -euo pipefail
 
@@ -61,7 +64,7 @@ start() {
         token=$(docker exec -u www-data -e NC_PASS="$pw" "$NAME" php occ user:auth-tokens:add --password-from-env --name nodrive-ci "$user" | tail -n 1 | tr -d '\r')
         echo "::add-mask::$token"
         [ ${#token} -ge 32 ] || { echo "app password for $user failed"; exit 1; }
-        ( umask 077; echo "NODRIVE_AGENDA_PW_${user^^}=$token" >> "$envfile" )
+        ( umask 077; echo "NODRIVE_AGENDA_PW_${user^^}=$token" >> "$envfile"; echo "NODRIVE_AGENDA_LOGIN_PW_${user^^}=$pw" >> "$envfile" )
     done
     if [ -n "${GITHUB_ENV:-}" ]; then cat "$envfile" >> "$GITHUB_ENV"; fi
     echo "server up on port $PORT, users: ${USERS[*]} (app passwords created, values masked)"
@@ -112,6 +115,8 @@ discover() {
         echo "== deck link date_action"
         grep -rn "date_action" "$dir/lib" | head -n 12
         sed -n 70,110p "$dir/lib/Service/DeckLinkService.php"
+        echo "== Deck: the card update (full replace; how done is read)"
+        docker exec "$NAME" sh -c 'grep -n -B3 -A22 "public function update" /var/www/html/apps/deck/lib/Controller/CardApiController.php | head -n 60; grep -n "setDone\|setStartdate\|setDuedate\|function update" /var/www/html/apps/deck/lib/Service/CardService.php | head -n 30' 2>&1 | head -n 120
         echo "== project and task creation fields"
         grep -n "'title'\|'start_date'\|'end_date'\|'owner_id'" "$dir/lib/Service/ProjectService.php" "$dir/lib/Service/TaskService.php" | head -n 40
     } >> "$OUT/discover.txt" 2>&1
@@ -125,6 +130,9 @@ case "${1:-}" in
     seed) python3 tools/ci/agenda-seed.py --container "$NAME" --out "$OUT" ;;
     check) python3 tools/ci/server_agenda_check.py --container "$NAME" --out "$OUT" ;;
     snapshot) python3 tools/ci/agenda-snapshot.py --out "$OUT" ;;
+    facts) python3 tools/ci/server_agenda_edit_facts.py --seed "$OUT/seed.json" --out "$OUT" ;;
+    webedit) python3 tools/ci/agenda-webedit.py --out "$OUT" ;;
+    replay) python3 tools/ci/agenda-replay.py --requests "${AGENDA_REQUESTS:?AGENDA_REQUESTS is not set}" --snapshot "$OUT/agenda-snapshot.json" --seed "$OUT/seed.json" --out "$OUT" ;;
     stop) docker rm -f "$NAME" > /dev/null 2>&1 || true ;;
-    *) echo "usage: $0 start|apps|discover|seed|check|snapshot|stop"; exit 2 ;;
+    *) echo "usage: $0 start|apps|discover|seed|check|snapshot|facts|webedit|replay|stop"; exit 2 ;;
 esac

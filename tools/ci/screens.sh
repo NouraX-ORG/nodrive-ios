@@ -448,13 +448,13 @@ conflicts() {
 
 # NoAgenda: the app against the stand-in that replays the real server's recorded answers (tools/ci/agenda-snapshot.py).
 # One stand-in run per user (ali, mara, olaf); the tests of that user run against it.
-agenda_standin() {   # agenda_standin <user>: (re)start the stand-in for this user with the snapshot
-  local user=$1 si="$RUNNER_TEMP/stand-in"
+agenda_standin() {   # agenda_standin <user> [log file]: (re)start the stand-in for this user with the snapshot
+  local user=$1 si="$RUNNER_TEMP/stand-in" log="${2:-$RESULTS/stand-in.jsonl}"
   sudo pkill -f drive-stand-in.py || true
   sleep 1
   export NODRIVE_WS_USER="$user"
   sudo -E nohup "$(command -v python3)" tools/ci/drive-stand-in.py --cert "$si/chain.pem" --key "$si/leaf.key" \
-    --log "$RESULTS/stand-in.jsonl" --workspace --agenda "$AGENDA_SNAPSHOT" > "$RESULTS/stand-in-agenda-$user.out" 2>&1 &
+    --log "$log" --workspace --agenda "$AGENDA_SNAPSHOT" > "$RESULTS/stand-in-agenda-$user.out" 2>&1 &
   local i
   for i in $(seq 1 30); do
     curl -fsS --cacert "$si/ca.pem" -o /dev/null https://drive.nourax.org/status.php && return 0
@@ -541,6 +541,66 @@ agenda() {   # agenda <udid> <variant>: all NoAgenda UI tests, for ali, mara and
   return $status
 }
 
+# NoAgenda editing (design 9): the app against the stand-in that also takes writes with the real server's rules
+# (tools/ci/agenda_edit_state.py). Every part starts a fresh stand-in, so one part cannot change what the next sees.
+agenda_mode() {   # agenda_mode <mode>: the stand-in's own control path
+  local si="$RUNNER_TEMP/stand-in"
+  curl -fsS --cacert "$si/ca.pem" -X POST -o /dev/null "https://drive.nourax.org/__ci/agenda?mode=$1" || {
+    echo "agenda: the stand-in did not switch to $1"; return 1; }
+}
+
+agenda_edit_tests() {   # agenda_edit_tests <udid> <variant> <label> <test>...: one xcodebuild run of some tests of ali
+  local udid=$1 variant=$2 label=$3 code passed failed only=() t
+  shift 3
+  for t in "$@"; do only+=("-only-testing:NextcloudUITests/NoDriveAgendaEditUITests/$t"); done
+  set +e
+  TEST_RUNNER_NODRIVE_VARIANT="$variant" TEST_RUNNER_NODRIVE_SHOTS_DIR="$SHOTS" \
+  TEST_RUNNER_NODRIVE_AGENDA_TODAY="$AGENDA_TODAY" \
+  TEST_RUNNER_NODRIVE_UITEST_ACCOUNT="https://drive.nourax.org|ali|$NODRIVE_WS_APP_PASSWORD" \
+    xcodebuild test-without-building \
+      -xctestrun "$XCTESTRUN" \
+      -destination "id=$udid" \
+      "${only[@]}" \
+      -parallel-testing-enabled NO \
+      -resultBundlePath "$RESULTS/ui-$variant-$label.xcresult" \
+      > "$RESULTS/ui-$variant-$label.log" 2>&1
+  code=$?
+  set -e
+  xcbeautify --renderer github-actions < "$RESULTS/ui-$variant-$label.log" || true
+  xcrun xcresulttool get test-results summary --path "$RESULTS/ui-$variant-$label.xcresult" \
+    > "$RESULTS/ui-$variant-$label-summary.json" 2>/dev/null || true
+  passed=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("passedTests", 0))' "$RESULTS/ui-$variant-$label-summary.json" 2>/dev/null || echo 0)
+  failed=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("failedTests", 0))' "$RESULTS/ui-$variant-$label-summary.json" 2>/dev/null || echo 1)
+  if [ "$passed" != "$#" ] || [ "$failed" != "0" ]; then echo "agenda $variant $label: passed $passed of $#, failed $failed"; code=1; fi
+  echo "agenda $variant $label: xcodebuild exit $code, passed tests $passed of $#"
+  return $code
+}
+
+agenda_edit() {   # agenda_edit <udid> <variant>: the editing tests, the conflict and the waiting queue
+  local udid=$1 variant=$2 status=0 log="$RESULTS/stand-in-edit.jsonl"
+  mkdir -p "$SHOTS/$variant" "$RESULTS"
+  xcrun simctl install "$udid" "${AGENDA_APP:-app/NoDrive.app}"
+  # 1. the edits of design section 9
+  agenda_standin ali "$log" || return 1
+  agenda_edit_tests "$udid" "$variant" edits test1DayConflictsAndWorkload test2EditAgentOfTask test3CreateEvent test4LockedViewerTask \
+    test5RepeatingEvent test6TodoDone || status=1
+  # 2. the edit conflict: the item changes between the app's read and its write; then it is applied again after a restart
+  agenda_standin ali "$log" || return 1
+  agenda_mode touch || status=1
+  agenda_edit_tests "$udid" "$variant" conflict-a testConflictA || status=1
+  agenda_mode normal || status=1
+  agenda_edit_tests "$udid" "$variant" conflict-b testConflictB || status=1
+  # 3. no network: the edit waits, survives a restart and is sent when the network is back
+  agenda_standin ali "$log" || return 1
+  agenda_edit_tests "$udid" "$variant" warm-up test4LockedViewerTask || status=1
+  agenda_mode offline-all || status=1
+  agenda_edit_tests "$udid" "$variant" waiting-a testWaitingA || status=1
+  agenda_mode normal || status=1
+  agenda_edit_tests "$udid" "$variant" waiting-b testWaitingB || status=1
+  echo "agenda $variant (editing): status $status; files: $(ls "$SHOTS/$variant" | tr '\n' ' ')"
+  return $status
+}
+
 case "$cmd" in
   check-tools) check_tools "$@" ;;
   make-certs) make_certs "$@" ;;
@@ -555,5 +615,6 @@ case "$cmd" in
   reports) reports "$@" ;;
   conflicts) conflicts "$@" ;;
   agenda) agenda "$@" ;;
+  agenda-edit) agenda_edit "$@" ;;
   *) echo "usage: see the header of $0" >&2; exit 2 ;;
 esac

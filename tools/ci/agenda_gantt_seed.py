@@ -87,6 +87,8 @@ def seed(day, deck, step):
     task('website', 'write', 'Write homepage copy', -2, 1, [row('ali', 4), row('writer')], work=8, manual_progress=40,
          **({'subproject_id': phase} if phase else {}))
     task('website', 'big', 'Big push', 0, 1, [row('ali', 60)], work=60)
+    # Writer-Bot has 60 hours on one day: it is overbooked (the registry gives it 40 hours a week); Ali's own share is 1 hour
+    task('website', 'crunch', 'Writer crunch', 0, 0, [row('ali', 1), row('writer', 60)], work=61)
     task('website', 'banner', 'Banner design', -4, -2, [row('sara', 8), row('design')], work=8)
     task('website', 'publish', 'Publish banners', -1, 2, [row('sara', 4)], work=4,
          **({'dependencies': [{'predecessor_id': 't-%d' % made['banner'], 'dependency_type': 'FS', 'lag_days': 0}]} if 'banner' in made else {}))

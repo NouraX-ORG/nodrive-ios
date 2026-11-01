@@ -46,6 +46,7 @@
 		414B2573FB02F907B732DF0E /* NCAgendaAgentLoad.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B696AC0BCE58DEA422AB67 /* NCAgendaAgentLoad.swift */; };
 		455FF32C4C7BA5FB62B3A79F /* NCProblemReportUITestHooks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F1C2C962F1A9152E0B16468 /* NCProblemReportUITestHooks.swift */; };
 		4F28A412511057356740386E /* NoDriveConflictSettingsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 147F4F9993C49C815E05DA69 /* NoDriveConflictSettingsUITests.swift */; };
+		574FDE2232BE10E06D4C19D2 /* NoDriveAgendaEditUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 321A7D7F36CD423BFDE031F5 /* NoDriveAgendaEditUITests.swift */; };
 		5942A36427D5669B8E4B6876 /* NCAgendaCalDAVWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD8557BF632E7B1921BFA3BB /* NCAgendaCalDAVWriter.swift */; };
 		5972B7636ADDE2F639F8D203 /* NCAgendaDeckWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 976A590B423EFA8E6BCB5826 /* NCAgendaDeckWriter.swift */; };
 		5C6408CBDA0A1C7ECB627448 /* NoDriveBrandingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67D3CBA9F8EECF40CA6C503C /* NoDriveBrandingTests.swift */; };
@@ -1437,6 +1438,7 @@
 		2C33C48A23E2CC26005F963B /* Notification_Service_Extension-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Notification_Service_Extension-Bridging-Header.h"; sourceTree = "<group>"; };
 		2E6DC3133C380E9E57DB6B2F /* NCAgendaRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCAgendaRegistry.swift; sourceTree = "<group>"; };
 		303D1CE5F8D8FE8E53940B87 /* NCAgendaUITestHooks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCAgendaUITestHooks.swift; sourceTree = "<group>"; };
+		321A7D7F36CD423BFDE031F5 /* NoDriveAgendaEditUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoDriveAgendaEditUITests.swift; sourceTree = "<group>"; };
 		32D8C5A749EA0D927D18956C /* NCProblemReportSender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCProblemReportSender.swift; sourceTree = "<group>"; };
 		34C829D587D8BE3439359CE1 /* NoDriveAgendaParsingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoDriveAgendaParsingTests.swift; sourceTree = "<group>"; };
 		370D26AE248A3D7A00121797 /* NCCellMain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCCellMain.swift; sourceTree = "<group>"; };
@@ -2745,6 +2747,7 @@
 				147F4F9993C49C815E05DA69 /* NoDriveConflictSettingsUITests.swift */,
 				1A941485D68F7EC606E1741E /* NoDriveProblemReportsUITests.swift */,
 				EEF873AB6020EF2BCE482691 /* NoDriveAgendaUITests.swift */,
+				321A7D7F36CD423BFDE031F5 /* NoDriveAgendaEditUITests.swift */,
 			);
 			path = NextcloudUITests;
 			sourceTree = "<group>";
@@ -5207,6 +5210,7 @@
 				4F28A412511057356740386E /* NoDriveConflictSettingsUITests.swift in Sources */,
 				9BAE098365BE57C281C1948A /* NoDriveProblemReportsUITests.swift in Sources */,
 				79E9847526E066367D8935C7 /* NoDriveAgendaUITests.swift in Sources */,
+				574FDE2232BE10E06D4C19D2 /* NoDriveAgendaEditUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

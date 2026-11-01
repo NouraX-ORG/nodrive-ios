@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import agenda_common as c  # noqa: E402
 
 RESULTS = []
+DENTIST_KEEP = ['BEGIN:VALARM', 'ACTION:DISPLAY', 'TRIGGER:-PT15M', 'DESCRIPTION:Reminder', 'END:VALARM', 'X-CI-UNKNOWN:keep-me']
 
 
 def step(name, ok, detail=''):
@@ -41,12 +42,15 @@ def seed_calendars(day):
     step('calendar personal (ali)', mkcalendar('ali', 'personal', 'Personal', ['VEVENT', 'VTODO']))
     step('calendar work (ali)', mkcalendar('ali', 'work', 'Work', ['VEVENT']))
     items = [
-        ('ali', 'personal', 'dentist', c.event('ci-dentist', 'Dentist', c.utc(day, 10), c.utc(day, 11))),
+        # An alarm and a property NoAgenda does not know: an edit must keep both (the replay checks it)
+        ('ali', 'personal', 'dentist', c.event('ci-dentist', 'Dentist', c.utc(day, 10), c.utc(day, 11), DENTIST_KEEP)),
         ('ali', 'work', 'client-call', c.event('ci-client-call', 'Client call', c.utc(day, 10), c.utc(day, 11))),
         ('ali', 'work', 'standup', c.event('ci-standup', 'Stand-up', c.utc(d(-30), 8), c.utc(d(-30), 8, 15),
                                            ['RRULE:FREQ=DAILY'])),
         ('ali', 'work', 'day-off', c.event('ci-day-off', 'Day off', d(3), d(4), all_day=True)),
         ('ali', 'work', 'free', c.event('ci-free', 'Lunch hold', c.utc(day, 12), c.utc(day, 13), ['TRANSP:TRANSPARENT'])),
+        # overlaps the tentative "Tentative sync" of the team calendar (16:00 to 17:00): a soft clash
+        ('ali', 'work', 'late-call', c.event('ci-late-call', 'Late call', c.utc(day, 16, 30), c.utc(day, 17, 30))),
         ('ali', 'work', 'writer-review', c.event('ci-writer-review', 'Writer-Bot review', c.utc(day, 14), c.utc(day, 15), agent)),
         ('ali', 'work', 'tag-only', c.event('ci-tag-only', 'Tag only review', c.utc(d(1), 14), c.utc(d(1), 15),
                                             ['CATEGORIES:agent:AG-0001'])),

@@ -490,8 +490,18 @@ class Handler(BaseHTTPRequestHandler):
             self._record(201, {'event': 'report-mkcol'})
             self._send(201, '', 'text/plain')
 
+    def do_DELETE(self):
+        body = self._body()
+        path = urlsplit(self.path).path
+        if self.server.agenda and agenda_stand_in.handle(self, 'DELETE', path, body):
+            return
+        self._record(404)
+        self._json(404, {'message': 'not served by the CI stand-in'})
+
     def do_PUT(self):
         body = self._body()
+        if self.server.agenda and agenda_stand_in.handle(self, 'PUT', urlsplit(self.path).path, body):
+            return
         reports = self._reports()
         target = self._reports_path(urlsplit(self.path).path) if reports else None
         if not reports or not target or target[0] != 'file' or not self._basic_ok() or not reports['folder']:

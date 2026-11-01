@@ -14,10 +14,17 @@ It answers the app's NoAgenda reads from the real server's recorded answers (too
 A control path switches modes for the state screenshots: POST /__ci/agenda?mode=NAME with offline-gantt (503),
 refuse-gantt (403), refuse-deck (403), deck-version=1.20.0, or normal. Every request is logged by name and fact only
 (path, whether OCS-APIRequest came); never a header value.
+
+The editing step adds writes (tools/ci/agenda_edit_state.py holds the state and the rules of the real server): PUT, DELETE
+and POST on the paths above, with If-Match, If-None-Match and the Deck full replace. Two more modes: "touch" (an item
+changes between the app's read and its write: the app must say "kept the other change") and "offline-all" (the connection
+is dropped, like no network).
 """
 import hashlib
 import json
 from urllib.parse import parse_qs, urlsplit
+
+import agenda_edit_state
 
 GANTT_PREFIX = '/ocs/v2.php/apps/nc_gantt/api/v1/'
 DECK_PREFIX = '/index.php/apps/deck/api/v1.0/'
@@ -29,14 +36,25 @@ class AgendaState:
         self.snapshot = snapshot
         self.mode = 'normal'
         self.deck_version = None
+        self.edits = {}
+
+    def edit_for(self, user, data):
+        """The writable state of one user (made when first needed)."""
+        if user not in self.edits:
+            self.edits[user] = agenda_edit_state.EditState(user, data)
+            self.edits[user].touch = self.mode == 'touch'
+        return self.edits[user]
 
     def set_mode(self, mode):
         self.mode = 'normal'
         self.deck_version = None
         if mode.startswith('deck-version='):
             self.deck_version = mode.split('=', 1)[1]
-        elif mode in ('offline-gantt', 'refuse-gantt', 'refuse-deck'):
+        elif mode in ('offline-gantt', 'refuse-gantt', 'refuse-deck', 'touch', 'offline-all'):
             self.mode = mode
+        for edit in self.edits.values():
+            edit.touch = self.mode == 'touch'
+            edit.touched = set()
 
 
 def _ocs(data):
@@ -59,9 +77,15 @@ def handle(h, method, path, body):
             or (path.startswith('/remote.php/dav/files/') and '/NoAgenda/' in path)
             or path.startswith(GANTT_PREFIX) or path.startswith(DECK_PREFIX)
             or (path == '/ocs/v2.php/cloud/capabilities' and method == 'GET'))
+    if state.mode == 'offline-all' and (ours or path == '/ocs/v2.php/cloud/user'):
+        # No network: the connection is dropped without an answer
+        h._record(0, {'agenda': True, 'event': 'offline-drop', 'ocs_header': h.headers.get('OCS-APIRequest') == 'true'})
+        h.close_connection = True
+        return True
     if not ours:
         return False
     ocs_header = h.headers.get('OCS-APIRequest') == 'true'
+    request_headers = {'If-Match': h.headers.get('If-Match'), 'If-None-Match': h.headers.get('If-None-Match')}
     if not h._basic_ok():
         h._record(401, {'ocs_header': ocs_header, 'agenda': True})
         h._json(401, _ocs([]))
@@ -74,9 +98,15 @@ def handle(h, method, path, body):
         return True
 
     def done(status, text, ctype='application/xml; charset=utf-8', headers=None):
-        h._record(status, {'ocs_header': ocs_header, 'agenda': True})
+        facts = {'ocs_header': ocs_header, 'agenda': True}
+        if method in ('PUT', 'DELETE', 'POST'):
+            facts.update(event='agenda-write', if_match=request_headers['If-Match'] is not None,
+                         if_none_match=request_headers['If-None-Match'])
+        h._record(status, facts)
         h._send(status, text, ctype, headers)
         return True
+
+    edit = state.edit_for(user, data)
 
     if path == '/ocs/v2.php/cloud/capabilities':
         caps = json.loads(data['capabilities']['text'])['ocs']['data']
@@ -108,6 +138,9 @@ def handle(h, method, path, body):
             return done(503, json.dumps({'message': 'unavailable'}), 'application/json')
         if state.mode == 'refuse-gantt':
             return done(403, json.dumps({'message': 'forbidden'}), 'application/json')
+        res = edit.dispatch(method, path, request_headers, body, ocs_header)
+        if res is not None:
+            return done(*res)
         key = path[len(GANTT_PREFIX):]
         entry = data['gantt'].get(key)
         if entry is None:
@@ -119,6 +152,9 @@ def handle(h, method, path, body):
             return done(412, json.dumps({'message': 'CSRF check failed'}), 'application/json')
         if state.mode == 'refuse-deck':
             return done(403, json.dumps({'message': 'forbidden'}), 'application/json')
+        res = edit.dispatch(method, path, request_headers, body, ocs_header)
+        if res is not None:
+            return done(*res)
         rest = path[len(DECK_PREFIX):]
         if rest == 'boards':
             entry = data['deck']['boards']
@@ -139,6 +175,10 @@ def handle(h, method, path, body):
             return done(304, '', 'application/json', {'ETag': etag})
         return done(200, entry['text'], 'application/json; charset=utf-8', {'ETag': etag})
 
+    if path.startswith('/remote.php/dav/calendars/') and method in ('GET', 'PUT', 'DELETE', 'REPORT'):
+        res = edit.dispatch(method, path, request_headers, body, ocs_header)
+        if res is not None:
+            return done(*res)
     if method == 'PROPFIND' and path.startswith('/remote.php/dav/principals/'):
         return done(207, data['principal']['text'])
     if method == 'PROPFIND' and path.rstrip('/') == '/remote.php/dav/calendars/' + user:

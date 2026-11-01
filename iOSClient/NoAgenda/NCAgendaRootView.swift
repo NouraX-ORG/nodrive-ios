@@ -49,12 +49,8 @@ struct NCAgendaRootView: View {
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Menu {
-                    Button { model.showCreate = true } label: {
-                        Label(NCAgendaEditText.t("_nodrive_agenda_edit_new_event_"), systemImage: "calendar.badge.plus")
-                    }
-                    .accessibilityIdentifier("agendaAddEvent")
-                } label: {
+                // "+": the sheet makes a new event or a new to-do (the choice is in the sheet)
+                Button { model.showCreate = true } label: {
                     Image(systemName: "plus")
                 }
                 .accessibilityLabel(NCAgendaEditText.t("_nodrive_agenda_edit_add_"))

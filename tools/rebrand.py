@@ -125,6 +125,7 @@ TEST_FILES = [
     ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveAgendaConflictTests.swift'),
     ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveAgendaRequestExportTests.swift'),
     ('NextcloudUITests', 'NextcloudUITests', 'NoDriveAgendaUITests.swift'),
+    ('NextcloudUITests', 'NextcloudUITests', 'NoDriveAgendaEditUITests.swift'),
 ]
 # Our own source folders of the app target, each a new group inside its parent group:
 # (target, folder, parent group name). Every .swift file of the folder is added.
