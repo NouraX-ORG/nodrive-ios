@@ -59,7 +59,7 @@ final class NoDriveWorkspaceUITests: XCTestCase {
         for hidden in ["files", "activity", "photos", "external_index1", "plainhttp", "userinfo"] {
             XCTAssertFalse(app.descendants(matching: .any)["sidebarWorkspaceApp-\(hidden)"].exists, "\(hidden) is listed")
         }
-        let appNames = app.buttons.allElementsBoundByIndex.filter { $0.identifier.hasPrefix("sidebarWorkspaceApp-") }.map(\.label)
+        let appNames = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "sidebarWorkspaceApp-")).allElementsBoundByIndex.map(\.label)
         record("sidebar-apps", ["names": appNames])
         save("02-workspace-menu")
         saveTexts(app, "02-workspace-menu")

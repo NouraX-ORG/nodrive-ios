@@ -45,7 +45,8 @@ final class NoDriveAgendaEditUITests: XCTestCase {
         XCTAssertNotNil(findRow(app, "Writer-Bot is overbooked on"), "the problem about the overbooked agent is missing")
         // An agent's item never clashes with mine: the Writer-Bot review (14:00) is not marked
         let review = findRowButton(app, "Writer-Bot review")
-        XCTAssertTrue(review?.label.contains("clash") == false, "an agent item is marked as a clash")
+        XCTAssertNotNil(review, "the Writer-Bot review row is missing")
+        XCTAssertTrue(review?.label.contains("clash") == false, "an agent item is marked as a clash: \(review?.label ?? "")")
         // The Conflicts chip keeps only rows with a mark
         element(app, "agendaChip-conflicts").tap()
         Thread.sleep(forTimeInterval: 1)
@@ -56,6 +57,7 @@ final class NoDriveAgendaEditUITests: XCTestCase {
         // Week: the workload bar per day
         app.segmentedControls["agendaViewPicker"].buttons["Week"].tap()
         Thread.sleep(forTimeInterval: 2)
+        scrollToTop(app)
         XCTAssertTrue(element(app, "agendaWorkloadBarWeek").waitForExistence(timeout: 20), "the week has no workload bar")
         save("agenda-week-workload")
     }
@@ -303,8 +305,10 @@ final class NoDriveAgendaEditUITests: XCTestCase {
                 if list.exists { scrollList(app, up: true, slow: true) }
                 if target.exists { return target }
             }
-            for _ in 0..<14 where list.exists { scrollList(app, up: false) }
-            if target.exists { return target }
+            for _ in 0..<14 where list.exists {
+                scrollList(app, up: false, slow: true)
+                if target.exists { return target }
+            }
             Thread.sleep(forTimeInterval: 2)
         } while Date() < deadline
         if !absent { saveFailure(app, looking: text) }
@@ -318,7 +322,7 @@ final class NoDriveAgendaEditUITests: XCTestCase {
             let row = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'agendaRow-' AND label CONTAINS %@ AND label CONTAINS %@", title, text)).firstMatch
             if row.exists { return true }
             for _ in 0..<10 { scrollList(app, up: true, slow: true); if row.exists { return true } }
-            for _ in 0..<10 { scrollList(app, up: false); if row.exists { return true } }
+            for _ in 0..<10 { scrollList(app, up: false, slow: true); if row.exists { return true } }
             Thread.sleep(forTimeInterval: 2)
         } while Date() < deadline
         saveFailure(app, looking: title + " / " + text)

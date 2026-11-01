@@ -288,8 +288,10 @@ final class NoDriveAgendaUITests: XCTestCase {
                 if list.exists { scrollList(app, up: true, slow: true) }
                 if element.exists { return element }
             }
-            for _ in 0..<14 where list.exists { scrollList(app, up: false) }
-            if element.exists { return element }
+            for _ in 0..<14 where list.exists {
+                scrollList(app, up: false)
+                if element.exists { return element }
+            }
             Thread.sleep(forTimeInterval: 2)
         } while Date() < deadline
         if !absent { saveFailure(app, looking: text) }
@@ -308,8 +310,10 @@ final class NoDriveAgendaUITests: XCTestCase {
                 if list.exists { scrollList(app, up: true, slow: true) }
                 if element.exists { return element }
             }
-            for _ in 0..<14 where list.exists { scrollList(app, up: false) }
-            if element.exists { return element }
+            for _ in 0..<14 where list.exists {
+                scrollList(app, up: false)
+                if element.exists { return element }
+            }
             Thread.sleep(forTimeInterval: 2)
         } while Date() < deadline
         saveFailure(app, looking: text)
