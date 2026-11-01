@@ -20,12 +20,19 @@ enum NCAgendaUITestHooks {
         // Noon, so a zone difference never moves the day.
         return Calendar.current.date(byAdding: .hour, value: 12, to: day)
     }
+
+    /// NODRIVE_AGENDA_WORKDAYS=all: every weekday is a working day, so the seeded overbooked day shows on any run day.
+    static var everyDayWorks: Bool {
+        let info = ProcessInfo.processInfo
+        return info.arguments.contains("UI_TESTING") && info.environment["NODRIVE_AGENDA_WORKDAYS"] == "all"
+    }
 }
 
 #else
 
 enum NCAgendaUITestHooks {
     static var today: Date? { nil }
+    static var everyDayWorks: Bool { false }
 }
 
 #endif

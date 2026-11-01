@@ -74,11 +74,13 @@ actor NCAgendaStore {
     static func forget(account: String) async {
         // The store stops and deletes its own folder, so a refresh that is running cannot write it back.
         await registry.take(account)?.forget()
+        // The unsent edits go with the account (editing step)
+        await NCAgendaEditQueue.forget(account: account)
         NCAgendaCache.forget(account: account)
     }
 
     let account: String
-    private let cache: NCAgendaCache
+    let cache: NCAgendaCache
     private let makeHTTP: HTTPFactory
     private let clock: @Sendable () -> Date
     private var inFlight: Task<AgendaRefreshResult, Never>?

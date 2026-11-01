@@ -29,6 +29,38 @@ struct NCAgendaRootView: View {
             NavigationStack { NCAgendaSourcesView(model: model) }
                 .tint(model.accentColor)
         }
+        .sheet(isPresented: $model.showCreate) {
+            NCAgendaCreateSheet(model: model)
+                .tint(model.accentColor)
+        }
+        .sheet(isPresented: $model.showNotSent) {
+            NCAgendaNotSentView(model: model)
+                .tint(model.accentColor)
+        }
+        .overlay(alignment: .bottom) {
+            if let toast = model.toast {
+                NCAgendaToastView(toast: toast) { Task { await model.undo(toast) } }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.default, value: model.toast)
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name(NCGlobal.shared.notificationCenterNetworkReachability))) { _ in
+            Task { await model.networkMayBeBack() }
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    Button { model.showCreate = true } label: {
+                        Label(NCAgendaEditText.t("_nodrive_agenda_edit_new_event_"), systemImage: "calendar.badge.plus")
+                    }
+                    .accessibilityIdentifier("agendaAddEvent")
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel(NCAgendaEditText.t("_nodrive_agenda_edit_add_"))
+                .accessibilityIdentifier("agendaAdd")
+            }
+        }
         .sheet(isPresented: $model.showPersonalQuestion) {
             NCAgendaPersonalQuestionView(model: model)
                 .tint(model.accentColor)
@@ -73,6 +105,7 @@ struct NCAgendaRootView: View {
                          isOn: Binding(get: { model.filter.agents }, set: { value in model.setFilter { $0.agents = value } }))
                     chip("👥 " + NCAgendaText.t("_nodrive_agenda_chip_team_"), id: "team",
                          isOn: Binding(get: { model.filter.team }, set: { value in model.setFilter { $0.team = value } }))
+                    chip("⚠ " + NCAgendaEditText.t("_nodrive_agenda_edit_conflicts_"), id: "conflicts", isOn: $model.conflictsOnly)
                 }
             }
 
@@ -127,21 +160,31 @@ struct NCAgendaRootView: View {
             }
             switch model.view {
             case .day:
+                workloadSection(model.day, compact: false)
                 daySections(model.plan(for: model.day), showEmpty: true)
             case .week:
                 ForEach(model.weekDays, id: \.self) { date in
                     Section(NCAgendaFormat.dayTitle(date)) {
+                        if let load = model.workload(for: date) { NCAgendaWorkloadBar(workload: load, compact: true) }
                         dayRows(model.plan(for: date))
                     }
                 }
             case .month:
                 Section { NCAgendaMonthGrid(model: model) }
+                workloadSection(model.day, compact: false)
                 daySections(model.plan(for: model.day), showEmpty: true)
             }
         }
         .listStyle(.insetGrouped)
         .refreshable { await model.refresh() }
         .accessibilityIdentifier("agendaList")
+    }
+
+    @ViewBuilder
+    private func workloadSection(_ date: Date, compact: Bool) -> some View {
+        if let load = model.workload(for: date) {
+            Section { NCAgendaWorkloadBar(workload: load, compact: compact) }
+        }
     }
 
     private func bannerRow(_ banner: AgendaBanner) -> some View {
@@ -151,6 +194,11 @@ struct NCAgendaRootView: View {
                 Button(home.openTitle) { model.openHome(home) }
                     .font(.subheadline.weight(.semibold))
                     .accessibilityIdentifier("agendaBannerOpen-" + banner.id)
+            }
+            if banner.opensNotSent {
+                Button(NCAgendaEditText.t("_nodrive_agenda_edit_review_")) { model.showNotSent = true }
+                    .font(.subheadline.weight(.semibold))
+                    .accessibilityIdentifier("agendaBannerReview")
             }
         }
         .accessibilityElement(children: .combine)

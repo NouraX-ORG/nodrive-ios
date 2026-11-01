@@ -3,6 +3,41 @@
 
 import Foundation
 
+/// An agent's own availability (design 4.1), as far as the conflict maths needs it.
+struct AgentAvailability: Codable, Equatable, Sendable {
+    var timezone: String?
+    /// 0 = Monday ... 6 = Sunday; every day of the weekly pattern. Empty: the registry gave none (all seven days).
+    var days: [Int] = []
+    var capacityHoursPerWeek: Double?
+    /// "yyyy-MM-dd"
+    var daysOff: [String] = []
+
+    /// The days the agent works. No pattern in the registry means every day.
+    var workDays: Set<Int> { days.isEmpty ? Set(0...6) : Set(days) }
+
+    /// Hours the agent can do on one working day: the weekly capacity over the working days.
+    var dailyCapacity: Double? {
+        guard let capacityHoursPerWeek, !workDays.isEmpty else { return nil }
+        return capacityHoursPerWeek / Double(workDays.count)
+    }
+
+    static let dayNames = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+    static func parse(_ value: Any?) -> AgentAvailability? {
+        guard let object = value as? [String: Any] else { return nil }
+        var result = AgentAvailability()
+        result.timezone = NCAgendaJSON.string(object["timezone"])
+        for case let block as [String: Any] in object["weekly"] as? [Any] ?? [] {
+            for case let name as String in block["days"] as? [Any] ?? [] {
+                if let index = dayNames.firstIndex(of: name.lowercased().prefix(3).description), !result.days.contains(index) { result.days.append(index) }
+            }
+        }
+        result.capacityHoursPerWeek = NCAgendaJSON.double(object["capacity_hours_per_week"])
+        result.daysOff = (object["days_off"] as? [Any])?.compactMap { NCAgendaJSON.string($0) } ?? []
+        return result
+    }
+}
+
 struct RegistryAgent: Codable, Equatable, Sendable {
     var id: String
     var name: String
@@ -12,6 +47,7 @@ struct RegistryAgent: Codable, Equatable, Sendable {
     var ganttResourceIds: [Int] = []
     var boardLabel: String?
     var calendarTag: String?
+    var availability: AgentAvailability?
 }
 
 struct NCAgendaRegistry: Codable, Equatable, Sendable {
@@ -49,7 +85,8 @@ struct NCAgendaRegistry: Codable, Equatable, Sendable {
                                         organisation: NCAgendaJSON.string(row["organisation"]) ?? "",
                                         ganttResourceIds: resourceIds,
                                         boardLabel: (label?.isEmpty ?? true) ? nil : label,
-                                        calendarTag: (tag?.isEmpty ?? true) ? nil : tag))
+                                        calendarTag: (tag?.isEmpty ?? true) ? nil : tag,
+                                        availability: AgentAvailability.parse(row["availability"])))
         }
         return .valid(NCAgendaRegistry(agents: agents))
     }

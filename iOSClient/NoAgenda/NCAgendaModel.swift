@@ -159,6 +159,8 @@ struct IntegrityFlag: Codable, Equatable, Sendable {
 
 enum LockReason: String, Codable, Sendable {
     case readOnlyCalendar, viewerProject, guardReadOnly, repeating
+    /// A new item that still waits to be sent.
+    case pendingCreate
 }
 
 /// How a calendar, list, project or board is used (design 6.1).
@@ -269,8 +271,21 @@ struct AgendaItem: Codable, Equatable, Identifiable, Sendable {
     var flags: [IntegrityFlag] = []
     var lock: LockReason?
     var timeZoneNote: String?
+    /// A short description (2,000 characters at most) of an event or to-do, for the editor.
+    var descriptionText: String?
+    var descriptionLength = 0
+    /// A change of this row waits in the offline queue (the clock mark).
+    var pending = false
+    /// Set by the conflict maths (design 7).
+    var clash: ClashKind?
+    var dayOff = false
     var link: AgendaLink
     var id: String { key }
+}
+
+/// A clash of two timed items of mine: a soft one when one of them is only tentative (drawn dashed).
+enum ClashKind: String, Codable, Sendable {
+    case hard, soft
 }
 
 /// A problem row: "Problems with your agents" (mine) and "My team".

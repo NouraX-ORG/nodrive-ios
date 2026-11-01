@@ -32,11 +32,15 @@ enum NCAgendaHTTPError: Error, Equatable {
     case invalid
 }
 
-/// The methods NoAgenda uses to read. (The writing methods come with the editing step.)
+/// The methods NoAgenda uses. The reads are GET, PROPFIND and REPORT; the writes (the editing step) are PUT, POST and
+/// DELETE. DELETE is used for one thing only: an event or to-do of the person's own calendar, with `If-Match`.
 enum NCAgendaMethod: String {
     case get = "GET"
     case propfind = "PROPFIND"
     case report = "REPORT"
+    case put = "PUT"
+    case post = "POST"
+    case delete = "DELETE"
 }
 
 struct NCAgendaResponse {

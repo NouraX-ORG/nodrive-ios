@@ -22,6 +22,8 @@ struct AgendaBanner: Identifiable, Equatable {
     var id: String
     var text: String
     var openHome: AgendaHome?
+    /// The banner of the offline queue: it opens the "Not sent" list.
+    var opensNotSent = false
 }
 
 /// Texts and times for rows and the header. Plain functions.
@@ -72,6 +74,9 @@ enum NCAgendaFormat {
         if item.blocked { parts.append(NCAgendaText.t("_nodrive_agenda_blocked_")) }
         if item.boardBadge { parts.append(NCAgendaText.t("_nodrive_agenda_spoken_board_")) }
         if item.lock != nil { parts.append(NCAgendaText.t("_nodrive_agenda_spoken_locked_")) }
+        if item.clash != nil { parts.append(NCAgendaEditText.t("_nodrive_agenda_edit_clash_")) }
+        if item.dayOff { parts.append(NCAgendaEditText.t("_nodrive_agenda_edit_day_off_")) }
+        if item.pending { parts.append(NCAgendaEditText.t("_nodrive_agenda_edit_waiting_spoken_")) }
         return parts.joined(separator: ", ")
     }
 }
@@ -92,6 +97,16 @@ final class NCAgendaViewModel {
     var showSources = false
     var selectedItem: AgendaItem?
     var calendar = Calendar.current
+    // The editing step (iOSClient/NoAgendaEdit): the waiting edits, what the editor needs, and the rows as shown.
+    var commands: [NCAgendaEditCommand] = []
+    var editContext = AgendaEditContext()
+    var display = AgendaSnapshot()
+    var pattern = AgendaWorkPattern()
+    var conflictsOnly = false
+    var toast: AgendaToast?
+    var showCreate = false
+    var showNotSent = false
+    var isSending = false
     /// Opens a page of the server signed in (set by the screen that hosts NoAgenda).
     var openPage: (URL, String) -> Void = { _, _ in }
     private var now: () -> Date
@@ -115,6 +130,7 @@ final class NCAgendaViewModel {
         result = await store.cached()
         applyStoredView()
         hasLoaded = !result.snapshot.sources.isEmpty
+        await reloadEditState()
         _ = await store.updateSettings { $0.openedOnce = true }
         await refresh()
     }
@@ -123,6 +139,9 @@ final class NCAgendaViewModel {
         isLoading = true
         result = await store.refresh()
         applyStoredView()
+        await reloadEditState()
+        // What waits in the offline queue goes out now that the homes were read (the guards are known).
+        await sendWaiting()
         isLoading = false
         hasLoaded = true
         if !result.settings.personalQuestionAnswered, ownCalendars.isEmpty == false, !result.status.offline, !result.status.signedOut {
@@ -186,14 +205,15 @@ final class NCAgendaViewModel {
     // MARK: Lists
 
     func plan(for date: Date) -> AgendaDayPlan {
-        NCAgendaPlanner.plan(day: date, snapshot: result.snapshot, filter: filter, showAllTeam: showAllTeam, now: today, calendar: calendar)
+        let plan = NCAgendaPlanner.plan(day: date, snapshot: display, filter: filter, showAllTeam: showAllTeam, now: today, calendar: calendar)
+        return conflictsOnly ? NCAgendaEditConflictsFilter.apply(plan) : plan
     }
 
     var weekDays: [Date] { NCAgendaPlanner.weekDays(of: day, calendar: calendar) }
     var monthCells: [Date?] { NCAgendaPlanner.monthGrid(of: day, calendar: calendar) }
 
     func hasItems(on date: Date) -> Bool {
-        NCAgendaPlanner.hasItems(on: date, snapshot: result.snapshot, filter: filter, calendar: calendar)
+        NCAgendaPlanner.hasItems(on: date, snapshot: display, filter: filter, calendar: calendar)
     }
 
     var updatedText: String? {
@@ -220,6 +240,7 @@ final class NCAgendaViewModel {
         if status.registry == .invalid {
             list.append(AgendaBanner(id: "registryInvalid", text: NCAgendaText.t("_nodrive_agenda_registry_invalid_"), openHome: nil))
         }
+        list += editBanners
         return list
     }
 
@@ -255,6 +276,7 @@ final class NCAgendaViewModel {
         let fresh = await store.cached()
         result.snapshot = fresh.snapshot
         result.settings = updated
+        await reloadEditState()
     }
 
     func choose(_ setting: SourceSetting, for key: String) async {

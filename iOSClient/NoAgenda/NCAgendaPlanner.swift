@@ -103,8 +103,13 @@ enum NCAgendaPlanner {
             }
         }
         if isToday {
-            plan.ownProblems = snapshot.problems.filter { $0.relation == .mine && filter.allows($0) }
+            plan.ownProblems = snapshot.problems.filter { $0.relation == .mine && $0.kind != .overbooked && filter.allows($0) }
             plan.teamProblems = snapshot.problems.filter { $0.relation == .team && filter.allows($0) }
+        }
+        // An agent of mine that is overbooked on a day (design 7) shows on that day.
+        plan.ownProblems += snapshot.problems.filter { problem in
+            guard problem.relation == .mine, problem.kind == .overbooked, filter.allows(problem), let date = problem.date else { return false }
+            return calendar.isDate(date, inSameDayAs: day)
         }
         plan.timed = ordered(plan.timed)
         plan.dueToday = ordered(plan.dueToday)

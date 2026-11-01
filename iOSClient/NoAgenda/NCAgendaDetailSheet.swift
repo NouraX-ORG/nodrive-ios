@@ -7,6 +7,7 @@ import SwiftUI
 struct NCAgendaDetailSheet: View {
     @Bindable var model: NCAgendaViewModel
     let item: AgendaItem
+    @State private var showEditor = false
 
     var body: some View {
         NavigationStack {
@@ -62,15 +63,25 @@ struct NCAgendaDetailSheet: View {
                         }
                     }
                 }
-                if let lock = item.lock {
+                if case let .locked(text) = model.ability(of: item) {
                     Section {
-                        Label(lockText(lock), systemImage: "lock.fill").font(.footnote)
+                        Label(text, systemImage: "lock.fill").font(.footnote)
+                            .accessibilityIdentifier("agendaDetailLock")
                     }
                 }
+            }
+            .navigationDestination(isPresented: $showEditor) {
+                NCAgendaEditorView(model: model, item: item)
             }
             .navigationTitle(NCAgendaText.t("_nodrive_agenda_detail_title_"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    if case .editable = model.ability(of: item) {
+                        Button(NCAgendaEditText.t("_nodrive_agenda_edit_edit_")) { showEditor = true }
+                            .accessibilityIdentifier("agendaDetailEdit")
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(NCAgendaText.t("_nodrive_agenda_done_")) { model.selectedItem = nil }
                         .accessibilityIdentifier("agendaDetailDone")
@@ -81,14 +92,5 @@ struct NCAgendaDetailSheet: View {
 
     private func row(_ title: String, _ value: String) -> some View {
         LabeledContent(title, value: value)
-    }
-
-    private func lockText(_ lock: LockReason) -> String {
-        switch lock {
-        case .readOnlyCalendar: return NCAgendaText.t("_nodrive_agenda_lock_read_only_")
-        case .viewerProject: return NCAgendaText.t("_nodrive_agenda_lock_viewer_")
-        case .guardReadOnly: return NCAgendaText.t("_nodrive_agenda_lock_guard_")
-        case .repeating: return NCAgendaText.f("_nodrive_agenda_lock_repeating_", item.home.openTitle)
-        }
     }
 }

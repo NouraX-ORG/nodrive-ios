@@ -166,7 +166,10 @@ extension NCAgendaAssembler {
                         flags.append(IntegrityFlag(kind: .twoAgents, audience: .both, names: [input.me.displayName]))
                     }
                     var item = base(key: "gantt:\(task.id)", relation: .mine, personName: nil, agent: agent, flags: flags)
-                    item.workShare = task.resources.first { myResourceIds.contains($0.resourceId) }?.work
+                    if let mineRow = task.resources.first(where: { myResourceIds.contains($0.resourceId) }), let work = mineRow.work {
+                        // NoGantt counts work in the unit of the planning person (hours, or person-days): the maths uses hours.
+                        item.workShare = NCAgendaWorkUnits.hours(work, unit: resources[mineRow.resourceId]?.unit, hoursPerPt: gantt.hoursPerPt)
+                    }
                     items.append(item)
                     if let card = task.deckCardId { cardIdsOfGanttTasks.insert(card) }
                     if mine.count > 1 {

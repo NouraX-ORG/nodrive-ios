@@ -74,6 +74,21 @@ struct GanttResource: Codable, Equatable, Sendable {
     var type: String
     var uid: String?
     var uidDisplayName: String?
+    /// The unit `work` is counted in ("h", or a person-day unit). Nil when NoGantt did not say.
+    var unit: String?
+    /// The work calendar of this planning person (holidays belong to a calendar).
+    var calendarId: Int?
+}
+
+/// A planning person's working days (`work-schedules`): bit 0 = Monday ... bit 6 = Sunday.
+struct GanttWorkSchedule: Codable, Equatable, Sendable {
+    var resourceId: Int
+    var workDays: Int
+}
+
+struct GanttHoliday: Codable, Equatable, Sendable {
+    var date: String
+    var calendarId: Int?
 }
 
 struct GanttFinding: Codable, Equatable, Sendable {
@@ -101,6 +116,12 @@ struct RawGantt: Codable, Equatable, Sendable {
     var subprojects: [String: [GanttSubproject]] = [:]
     var resources: [GanttResource] = []
     var timezone: String?
+    /// NoGantt's working hours ("09:00") and the hours of one person-day. Optional: a read from before this field still loads.
+    var workStart: String?
+    var workEnd: String?
+    var hoursPerPt: Double?
+    var workSchedules: [GanttWorkSchedule]?
+    var holidays: [GanttHoliday]?
     var findings: [String: [GanttFinding]] = [:]
     var copyEnabled = false
     var copyCalendarUri: String?
@@ -247,8 +268,34 @@ struct NCAgendaGanttReader {
         if let settingsObject = try await get("settings") as? [String: Any] {
             if !NCAgendaGanttContract.conforms(settingsObject, to: NCAgendaGanttContract.settings) { raw.contractOK = false }
             raw.timezone = NCAgendaJSON.string(settingsObject["timezone"])
+            raw.workStart = NCAgendaJSON.string(settingsObject["work_start"])
+            raw.workEnd = NCAgendaJSON.string(settingsObject["work_end"])
+            raw.hoursPerPt = NCAgendaJSON.double(settingsObject["hours_per_pt"])
         } else {
             raw.contractOK = false
+        }
+
+        // The working pattern and the days off (used by the conflict maths). A failed or odd answer gives nothing: the
+        // person's own pattern from the settings is used then, and the contract guard is not touched.
+        do {
+            let schedules = try await get("work-schedules")
+            raw.workSchedules = NCAgendaJSON.dictionaries(schedules).compactMap { row in
+                guard let resource = NCAgendaJSON.int(row["resource_id"]), let days = NCAgendaJSON.int(row["work_days"]) else { return nil }
+                return GanttWorkSchedule(resourceId: resource, workDays: days)
+            }
+        } catch {
+            try Task.checkCancellation()
+            raw.workSchedules = previous?.workSchedules
+        }
+        do {
+            let holidays = try await get("holidays")
+            raw.holidays = NCAgendaJSON.dictionaries(holidays).compactMap { row in
+                guard let date = NCAgendaJSON.string(row["holiday_date"]) else { return nil }
+                return GanttHoliday(date: String(date.prefix(10)), calendarId: NCAgendaJSON.int(row["calendar_id"]))
+            }
+        } catch {
+            try Task.checkCancellation()
+            raw.holidays = previous?.holidays
         }
 
         var sync = prefetched
@@ -397,7 +444,8 @@ struct NCAgendaGanttReader {
         guard let id = NCAgendaJSON.int(row["id"]) else { return nil }
         let uid = NCAgendaJSON.string(row["uid"])
         return GanttResource(id: id, name: NCAgendaJSON.string(row["name"]) ?? "", type: NCAgendaJSON.string(row["type"]) ?? "",
-                             uid: (uid?.isEmpty ?? true) ? nil : uid, uidDisplayName: NCAgendaJSON.string(row["uid_display_name"]))
+                             uid: (uid?.isEmpty ?? true) ? nil : uid, uidDisplayName: NCAgendaJSON.string(row["uid_display_name"]),
+                             unit: NCAgendaJSON.string(row["unit"]), calendarId: NCAgendaJSON.int(row["calendar_id"]))
     }
 
     static func decodeFinding(_ row: [String: Any]) -> GanttFinding? {

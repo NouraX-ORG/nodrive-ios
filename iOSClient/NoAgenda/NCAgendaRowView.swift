@@ -53,6 +53,12 @@ struct NCAgendaRowView: View {
             }
             .padding(.vertical, 2)
             .contentShape(Rectangle())
+            // A soft clash (a tentative item) is drawn dashed.
+            .overlay {
+                if item.clash == .soft {
+                    RoundedRectangle(cornerRadius: 6).strokeBorder(Color.orange, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                }
+            }
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
@@ -71,6 +77,17 @@ struct NCAgendaRowView: View {
     @ViewBuilder
     private var badges: some View {
         VStack(alignment: .trailing, spacing: 4) {
+            if item.pending {
+                Image(systemName: "clock").foregroundStyle(.secondary)
+            }
+            if item.clash == .hard {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+            } else if item.clash == .soft {
+                Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+            }
+            if item.dayOff {
+                Image(systemName: "calendar.badge.exclamationmark").foregroundStyle(.orange)
+            }
             if item.late {
                 Image(systemName: "alarm").foregroundStyle(.red)
             }

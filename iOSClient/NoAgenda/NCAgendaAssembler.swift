@@ -204,6 +204,8 @@ struct NCAgendaAssembler {
         item.iAmOrganiser = iAmOrganiser
         item.invited = invited
         item.repeating = component.isRepeating
+        item.descriptionText = component.descriptionText
+        item.descriptionLength = component.descriptionLength
         item.transparent = component.transparency == "TRANSPARENT"
         item.status = component.status
         item.percent = component.percent

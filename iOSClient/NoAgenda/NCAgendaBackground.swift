@@ -19,6 +19,11 @@ enum NCAgendaBackground {
         guard await store.settings().openedOnce, !Task.isCancelled else { return false }
         let result = await store.refresh(cancellable: true)
         NCAgendaLog.log("background-refresh", count: result.snapshot.items.count)
+        // The edits that wait in the offline queue go out after the reads (editing step)
+        if !Task.isCancelled {
+            let context = await store.editContext(status: result.status)
+            _ = await NCAgendaEditQueue.shared(for: store.account).process(context: context)
+        }
         return true
     }
 

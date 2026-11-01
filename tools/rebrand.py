@@ -121,6 +121,9 @@ TEST_FILES = [
     ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveAgendaParsingTests.swift'),
     ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveAgendaRulesTests.swift'),
     ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveAgendaRuntimeTests.swift'),
+    ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveAgendaEditTests.swift'),
+    ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveAgendaConflictTests.swift'),
+    ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveAgendaRequestExportTests.swift'),
     ('NextcloudUITests', 'NextcloudUITests', 'NoDriveAgendaUITests.swift'),
 ]
 # Our own source folders of the app target, each a new group inside its parent group:
@@ -130,6 +133,7 @@ APP_SOURCE_FOLDERS = [
     ('Nextcloud', 'iOSClient/SmartConflicts', 'iOSClient'),
     ('Nextcloud', 'iOSClient/ProblemReports', 'iOSClient'),
     ('Nextcloud', 'iOSClient/NoAgenda', 'iOSClient'),
+    ('Nextcloud', 'iOSClient/NoAgendaEdit', 'iOSClient'),
 ]
 # Product of the UI-test target. Its runner app ("<product>-Runner") sits on the simulator's home
 # screen during the screenshot walk, so it must not carry the Nextcloud name. The target name

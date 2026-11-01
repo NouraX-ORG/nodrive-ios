@@ -1,0 +1,78 @@
+/* SPDX-FileCopyrightText: 2026 Nourax */
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* NoAgenda: editing, the offline queue and conflicts (design 7 and 9). English; translations are a to-do. */
+
+"_nodrive_agenda_edit_add_" = "Add";
+"_nodrive_agenda_edit_new_event_" = "New event";
+"_nodrive_agenda_edit_new_todo_" = "New to-do";
+"_nodrive_agenda_edit_new_title_" = "New item";
+"_nodrive_agenda_edit_calendar_" = "Calendar";
+"_nodrive_agenda_edit_list_" = "List";
+"_nodrive_agenda_edit_no_calendar_" = "You have no calendar or list of your own that NoAgenda may write to.";
+"_nodrive_agenda_edit_edit_" = "Edit";
+"_nodrive_agenda_edit_title_" = "Edit";
+"_nodrive_agenda_edit_save_" = "Save";
+"_nodrive_agenda_edit_cancel_" = "Cancel";
+"_nodrive_agenda_edit_delete_" = "Delete";
+"_nodrive_agenda_edit_delete_event_" = "Delete this event? It moves to the calendar's trash bin.";
+"_nodrive_agenda_edit_delete_todo_" = "Delete this to-do? It moves to the calendar's trash bin.";
+"_nodrive_agenda_edit_who_does_it_" = "Who does it?";
+"_nodrive_agenda_edit_invited_" = "You were invited, so this is always Self.";
+"_nodrive_agenda_edit_field_title_" = "Title";
+"_nodrive_agenda_edit_field_start_" = "Start";
+"_nodrive_agenda_edit_field_end_" = "End";
+"_nodrive_agenda_edit_field_due_" = "Due";
+"_nodrive_agenda_edit_field_done_" = "Done";
+"_nodrive_agenda_edit_field_percent_" = "Done:";
+"_nodrive_agenda_edit_description_" = "Description";
+"_nodrive_agenda_edit_description_long_" = "This description is too long to change here. Open in %@.";
+"_nodrive_agenda_edit_lock_pending_" = "This change is waiting to be sent.";
+"_nodrive_agenda_edit_lock_team_" = "This is someone else's meeting. You can only change meetings you organise.";
+
+"_nodrive_agenda_edit_waiting_" = "Waiting to send %d changes";
+"_nodrive_agenda_edit_not_sent_" = "%d changes not sent";
+"_nodrive_agenda_edit_review_" = "Review";
+"_nodrive_agenda_edit_not_sent_title_" = "Not sent";
+"_nodrive_agenda_edit_nothing_unsent_" = "Everything was sent.";
+"_nodrive_agenda_edit_conflict_" = "This changed somewhere else while you were editing. NoAgenda kept the other change.";
+"_nodrive_agenda_edit_apply_again_" = "Apply my change again";
+"_nodrive_agenda_edit_keep_other_" = "Keep the other change";
+"_nodrive_agenda_edit_server_error_" = "The server did not answer. Try again later.";
+"_nodrive_agenda_edit_refused_forbidden_" = "You are not allowed to change this.";
+"_nodrive_agenda_edit_refused_locked_" = "This is being changed by someone else right now.";
+"_nodrive_agenda_edit_refused_generic_" = "The server did not accept this change (%d).";
+"_nodrive_agenda_edit_refused_repeating_" = "This repeats. Change it in NoCalendar or NoTasks.";
+"_nodrive_agenda_edit_sum_change_" = "Change";
+"_nodrive_agenda_edit_sum_new_event_" = "New event";
+"_nodrive_agenda_edit_sum_new_todo_" = "New to-do";
+"_nodrive_agenda_edit_sum_delete_" = "Delete";
+"_nodrive_agenda_edit_sum_agent_" = "Who does it: %@";
+
+"_nodrive_agenda_edit_saved_" = "Saved.";
+"_nodrive_agenda_edit_moved_" = "Moved to %1$@ - %2$@.";
+"_nodrive_agenda_edit_also_moved_" = "Also moved: %@";
+"_nodrive_agenda_edit_adjusted_" = "NoGantt adjusted the dates.";
+"_nodrive_agenda_edit_undo_" = "Undo";
+"_nodrive_agenda_edit_undone_" = "Undone.";
+"_nodrive_agenda_edit_undo_failed_" = "NoGantt could not undo this. Check the task in NoGantt.";
+
+"_nodrive_agenda_edit_gantt_too_many_" = "This task already has 4 people or agents. Ask your project manager.";
+"_nodrive_agenda_edit_gantt_roles_only_" = "This project only allows roles. Ask your project manager.";
+"_nodrive_agenda_edit_gantt_work_" = "Changing the agent here would change the work estimate of this task. Open in NoGantt.";
+"_nodrive_agenda_edit_gantt_check_" = "Check this task in NoGantt.";
+"_nodrive_agenda_edit_gantt_no_change_" = "Nothing to change.";
+"_nodrive_agenda_edit_gantt_add_agent_" = "Ask your project manager to add 🤖 %@ to this project";
+"_nodrive_agenda_edit_gantt_forbidden_" = "NoGantt did not allow this change.";
+"_nodrive_agenda_edit_gantt_refused_" = "NoGantt did not accept this change: %@";
+"_nodrive_agenda_edit_deck_forbidden_" = "NoBoard did not allow this change.";
+"_nodrive_agenda_edit_deck_no_label_" = "%@ has no label for boards. Ask the person who runs the board.";
+"_nodrive_agenda_edit_deck_ask_manager_" = "The board has no label for %@. Ask the person who runs the board to add it.";
+
+"_nodrive_agenda_edit_conflicts_" = "Conflicts";
+"_nodrive_agenda_edit_clash_" = "clash";
+"_nodrive_agenda_edit_day_off_" = "deadline on a day off";
+"_nodrive_agenda_edit_waiting_spoken_" = "waiting to be sent";
+"_nodrive_agenda_edit_overbooked_spoken_" = "overbooked";
+"_nodrive_agenda_edit_workload_" = "%1$@ h planned / %2$@ h free";
+"_nodrive_agenda_edit_no_estimate_" = "%d with no estimate";
+"_nodrive_agenda_edit_agent_overbooked_" = "%1$@ is overbooked on %2$@";

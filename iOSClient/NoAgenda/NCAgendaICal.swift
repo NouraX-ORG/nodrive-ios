@@ -30,6 +30,8 @@ struct ICalComponent: Codable, Equatable, Sendable {
     var completed: Date?
     var percent: Int?
     var descriptionLength = 0
+    /// The description when it is short enough to be edited in NoAgenda (2,000 characters at most), else nil.
+    var descriptionText: String?
     /// A TZID the phone doesn't know: shown in the device's time zone, and the sheet says so.
     var unknownZone: String?
 
@@ -324,7 +326,9 @@ enum NCAgendaICal {
         case "PERCENT-COMPLETE":
             component.percent = Int(line.value.trimmingCharacters(in: .whitespaces))
         case "DESCRIPTION":
-            component.descriptionLength = unescape(line.value).count
+            let text = unescape(line.value)
+            component.descriptionLength = text.count
+            component.descriptionText = text.count <= 2000 ? text : nil
         default:
             break
         }
