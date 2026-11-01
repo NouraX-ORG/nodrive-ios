@@ -281,7 +281,7 @@ class EditState:
                         for key in ('start_date', 'end_date'):
                             other[key] = (self._date(other[key]) + delta).isoformat() + other[key][10:]
                         other['updated_at'] = _stamp()
-                        propagated.append({'id': other['id'], 'title': other['title']})
+                        propagated.append(copy.deepcopy(other))   # the real server sends the whole task
         for key in ('manual_progress', 'progress_mode', 'status'):
             if key in payload:
                 task[key] = payload[key]
@@ -290,7 +290,7 @@ class EditState:
         self.ops[op] = (project['id'], before)
         self.gantt_dirty.add('projects/%d/tasks' % project['id'])
         self._touch_my_tasks(task)
-        data = {'task': task, 'propagated': propagated, 'op_id': op, 'deck': {'pending': [], 'deviations': [], 'failed': [], 'gone': []}}
+        data = {'task': task, 'propagated': propagated, 'op_id': op, 'deck': {'pending': [], 'deviations': [], 'failed': [], 'gone': [], 'unconfirmed': [], 'updated': []}}
         return 200, json.dumps(_ocs(data)), 'application/json; charset=utf-8', {}
 
     def _gantt_revert(self, op):
