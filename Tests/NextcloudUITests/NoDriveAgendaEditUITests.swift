@@ -58,7 +58,8 @@ final class NoDriveAgendaEditUITests: XCTestCase {
         app.segmentedControls["agendaViewPicker"].buttons["Week"].tap()
         Thread.sleep(forTimeInterval: 2)
         scrollToTop(app)
-        XCTAssertTrue(element(app, "agendaWorkloadBarWeek").waitForExistence(timeout: 20), "the week has no workload bar")
+        // Only the days with planned work or busy time have a bar, and the list shows what is on the screen
+        XCTAssertTrue(scrollDownUntilExists(app, element(app, "agendaWorkloadBarWeek")), "the week has no workload bar")
         save("agenda-week-workload")
     }
 
@@ -352,6 +353,17 @@ final class NoDriveAgendaEditUITests: XCTestCase {
             from.press(forDuration: 0.05, thenDragTo: to, withVelocity: .default, thenHoldForDuration: 0)
         }
         return target.exists && target.isHittable
+    }
+
+    /// From the top of the list, slowly downwards, until the element is there.
+    private func scrollDownUntilExists(_ app: XCUIApplication, _ target: XCUIElement) -> Bool {
+        scrollToTop(app)
+        if target.exists { return true }
+        for _ in 0..<14 {
+            scrollList(app, up: true, slow: true)
+            if target.exists { return true }
+        }
+        return false
     }
 
     /// Scrolls the list back to its first row (the banners and the workload bar are there).
