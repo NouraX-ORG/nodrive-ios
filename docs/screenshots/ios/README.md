@@ -92,3 +92,7 @@ NoAgenda (`agenda-light/`, `agenda-dark/`): from run [41230680780](https://githu
 `feature/noagenda-core` (commit `ce48f28a66`, the UI tests `NoDriveAgendaUITests` as ali, mara and olaf, signed in by the CI
 stand-in that replays the recorded answers of NoGantt 2.4.1, Deck and Calendar). The names are in `docs/testing.md`, section
 "NoAgenda". The three `agenda-state-*` files exist in light only.
+
+NoAgenda editing (`agenda-edit-light/`, `agenda-edit-dark/`): from run [41393142152](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41393142152) on
+`feature/noagenda-edit` (commit `ab1cda20d5`, the UI tests `NoDriveAgendaEditUITests`). The names are in `docs/testing.md`, section
+"NoAgenda editing (step 2)".

@@ -3,7 +3,7 @@ SPDX-FileCopyrightText: 2026 Nourax
 SPDX-License-Identifier: GPL-3.0-or-later
 -->
 
-# NoAgenda (iOS), step 1: core, read only
+# NoAgenda (iOS), step 1: core, read only (step 2, editing, is described below)
 
 Binding spec: `plans/noagenda-decisions.md` (approved 2026-10-28). Platform plan: `plans/noagenda-ios-plan.md`
 (section 2, "agenda-core"). Branch `feature/noagenda-core`. Code: `iOSClient/NoAgenda/`. Nothing in this step
@@ -97,8 +97,22 @@ Green on its head: run [41230680780](https://github.com/NouraX-ORG/nodrive-ios/a
 attempt; 474 unit tests, 44 PASS in `agenda-server`, 9 UI runs in the shard `agenda`. The independent final review approved it with
 7 nits, listed first below (`plans/round3-ios-agenda-core-final-review-1.md`). Rows for the owner: "NoAgenda" in `docs/testing.md`.
 
+Step 2 (`feature/noagenda-edit`): green on its head, run [41393142152](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41393142152) (commit `ab1cda20d5`),
+all 16 jobs; 629 unit tests, replay 158 PASS and 0 FAIL, 6 UI tests plus conflict and waiting in each of the two shards. The independent
+review 3 approved it with 4 nits (open points below). Rows for the owner: "NoAgenda editing" in `docs/testing.md`.
+
 ## Open points
 
+- Review nits of step 2 not fixed (`plans/round3-ios-agenda-edit-review-3.md`):
+  - A NoGantt or NoBoard 401 during a write ends in Not sent (CalDAV holds a 401). Only a password that expires between the read and
+    the write is affected; "Apply my change again" works after signing in. To align: map 401 to `.offline` in `NCAgendaGanttWriter` and
+    `NCAgendaDeckWriter`.
+  - The read-only board lock has no view-model test of `ability(of:)` (only the decoding of `PERMISSION_EDIT` is tested).
+  - A NoGantt refusal shows the server's own words (at most 200 characters, "NoGantt did not accept this change: ..."). Show only the plain
+    sentence, or keep this choice.
+  - `delete()` refuses more than the row calls an invitation (any foreign `ORGANIZER`, and any `ORGANIZER` while my addresses are not
+    loaded). Safe direction, nothing is deleted; use the assembler's rule or a neutral sentence.
+  - A failed refresh after a save shows the old cached row until the next refresh.
 - Review nits not fixed in this step:
   - A task in a project I run that has only my own agent (known by registry id) and no person has no team row, so a late one gets no
     "late" team problem (the card case keeps its row). Only "... is on the task without you" is left.
@@ -143,10 +157,45 @@ attempt; 474 unit tests, 44 PASS in `agenda-server`, 9 UI runs in the shard `age
 - Owner test rows on drive.nourax.org (the simulator never meets the real server): see "Owner test steps" in
   `docs/testing.md`.
 
-## Editing (`feature/noagenda-edit`): choices recorded after review 1
+## Editing and conflicts (step 2, `feature/noagenda-edit`)
 
-The full description of the editing step comes with the docs stage. These are the decisions the independent review asked to be recorded
-(`plans/round3-ios-agenda-edit-review-1.md`):
+Binding spec: `plans/noagenda-decisions.md` sections 4.3 to 4.5, 5, 6.0, 6.1, 7 and 9. Platform plan: `plans/noagenda-ios-plan.md`
+(section 3, "agenda-edit"). Code: `iOSClient/NoAgendaEdit/` (all new logic; strings in `en.lproj/NoAgendaEdit.strings`, translations are a
+to-do). Step 1 files (`iOSClient/NoAgenda/`, NoDrive's own) got small hooks for the lock, the waiting mark and the clash mark; two are
+commented as hooks of this step: `NCAgendaStore.isUnchanged` and `DeckBoard.canEdit`. No upstream Swift file is touched.
+
+### What the user gets
+
+- **Edit** (button in the detail sheet): title, start and end or due date, done, percent, description (up to 2,000 characters) and **who
+  does it** (Self or one of my own agents) for an event, a to-do, a NoGantt task and a NoBoard card. **+** makes a new event or to-do in
+  my own Personal or Work calendar or list (Self preselected). **Delete** of an event or to-do moves it to the calendar's trash bin.
+- **Where it is written.** Events and to-dos by CalDAV (`PUT` with `If-Match` from a fresh read, a create with `If-None-Match: *`, so
+  the rest of the item stays byte for byte: alarms, attendees, unknown properties, the UID). NoGantt tasks by `PUT tasks/{id}`
+  (dates, percent, status, the planning person) with the follower tasks moving as NoGantt moves them, and **Undo** (`POST` of the
+  operation id). NoBoard cards by the Deck API (due date, the agent label). Every write goes through `NCAgendaHTTP.makeRequest`: the
+  account's own server, the existing app password, no redirects, no new credential.
+- **Nothing is overwritten.** Each command is queued with the version of the item it started from. It reads the item fresh before the
+  write; if the version moved, the other change stays and the command goes to **Not sent** with "Apply my change again", "Keep the other
+  change" and "Open in ...". NoGantt and Deck have no conditional write, so a gap of milliseconds remains (server item below).
+- **Offline.** A change without a connection waits (the row says "Waiting to be sent", the banner "Waiting to send n changes", with
+  Review), survives a restart and goes out in order when the connection is back. Signed out holds everything until the person signs in.
+- **Locks, with a reason and the signed-in "Open in ..." button:** repeating items, meetings someone else organises, viewer-only
+  projects, read-only boards, items of a home that refuses NoDrive's sign-in or is not installed, and a row with a change waiting.
+- **Clashes and workload (design 7).** Two timed Self items of mine that overlap are marked as a clash (a tentative one is a soft clash;
+  agent items never clash with mine); the Conflicts chip lists only marked rows. The bar of the day and of the week shows planned hours
+  (my own share of Gantt tasks, agent tasks included), free hours (my working time minus my busy Self events) and turns orange when
+  overbooked. My own agents get their own "... is overbooked on ..." problem against their registry capacity, working days and days off.
+- **Data safety.** No Gantt task or card is ever deleted. The only DELETE is the event or to-do delete; it checks again when it is sent
+  and refuses a series, an object with several components and an invitation.
+
+### Tests
+
+Where each thing is tested is in `docs/testing.md` (rows "NoAgenda editing ..."). In short: unit tests (the writers, the patcher, the
+queue, the rules; 27 NoAgenda suites), the **NoAgenda replay** job (the app's own request bytes against a real Nextcloud 35 with
+nc_gantt 2.4.1 and Deck, 17 scenarios), the shards `agenda-edit` and `agenda-edit-dark` (6 UI tests each, plus conflict and waiting in two
+parts with a restart between), and `tools/ci/agenda-edit-check.py` over the stand-in log.
+
+### Choices recorded after the reviews
 
 - **One Save, two commands.** A Gantt task or a card can make two commands from one Save (dates and agent, due date and agent). After the
   first is saved, the queue gives the second the new version of the item (NoGantt `updated_at` or Deck `lastModified`, from the answer of

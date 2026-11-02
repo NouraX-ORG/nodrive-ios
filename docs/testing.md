@@ -31,6 +31,12 @@ unit tests, NoAgenda server, Server login, the 7 Simulator screens shards, Simul
 the shard `agenda` on a finder that lost the list (`41221832640`, fixed by `ce48f28a66`). The merge to `main` adds only documents on top of
 that commit; the same checks run again on the merge commit and on `main`.
 
+NoAgenda editing and conflicts (feature `feature/noagenda-edit`, with the fixes of review 1 and 2 and the approval of review 3): run [41393142152](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41393142152),
+commit `ab1cda20d5` (already on top of `main` at `12f48e2e63`, so no merge was needed), all 16 jobs green (Branding gate, Build and unit tests,
+NoAgenda server, NoAgenda replay, Server login, the 9 Simulator screens shards, Simulator screens report). Earlier runs of the branch failed on
+finders and on test strings that later commits repaired (`41392069569`: a test text held a literal line break, fixed by `ab1cda20d5`). The
+merge to `main` adds only documents on top of that commit; the same checks run again on the docs commit and on `main`.
+
 Reference run: **[40206804804](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40206804804)**
 on `main` (commit `b03563c3c9`), all 3 jobs green. Xcode 27.1 (build 27A9275), runner image
 `xcode-27-arm64`, iPhone 17 simulator with iOS 27.0, unsigned (`CODE_SIGNING_ALLOWED=NO`).
@@ -109,6 +115,13 @@ on `main` (commit `b03563c3c9`), all 3 jobs green. Xcode 27.1 (build 27A9275), r
 | NoAgenda banners for NoGantt offline, NoBoard refused and Deck 1.20.0 (read only); saved rows stay | CI | pass (stand-in) | screenshots `agenda-state-offline-gantt`, `agenda-state-refuse-deck`, `agenda-state-deck-version-1.20.0` (light) |
 | NoAgenda changes nothing on any server and deletes nothing | CI | pass | review: `NCAgendaMethod` has only GET, PROPFIND and REPORT; `agenda-check.py` finds no other method in the stand-in log; the cache is the app's own files and holds no secret |
 | No Nextcloud text, logo or colour in the NoAgenda screens; the accent is cobalt | CI | pass | `check-branding.py`: `486 hits: 267 internal, 217 legal, 2 artwork, 0 unclassified`; `rebrand.py --check`: `344 files checked, 0 would change`; `screens-report` ok; screenshots looked at |
+| NoAgenda editing: unit tests (iCalendar patch keeps what it does not know, CalDAV writer with `If-Match` and `If-None-Match: *`, NoGantt and Deck writers with the version check, edit queue with waiting, held, folded and Not sent states and undo, one Save with two changes, date-only to-dos, statuses, agent on a task, clashes and soft clashes, workload and free time, agents overbooked, days off and blocked, a description that was not read is never edited, delete checks again when sent, signed out holds the commands, read-only boards lock their cards) | CI | pass | run [41393142152](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41393142152), job "Build and unit tests": `"failedTests" : 0`, `"passedTests" : 629`; 27 suites `NoDrive NoAgenda ...` passed, among them "edit queue", "CalDAV writer", "NoGantt and Deck writers", "iCalendar patch", "edit draft", "clashes", "workload", "agent load", "waiting edits on the rows" |
+| NoAgenda edit requests on a real Nextcloud 35.0.2 with nc_gantt 2.4.1 and Deck 1.19.1: the app's own request bytes (17 scenarios exported by the unit test) change what they should and nothing else (the unknown property, the alarm and the UID stay; an all-day event stays all-day; a date-only to-do stays a date; Gantt move with the follower task, undo, percent, status, agent to Self and back; Deck due date and agent label; a second create of the same name is refused with 412; the only DELETE is the event delete) | CI | pass (throwaway server) | job "NoAgenda replay", `agenda-replay.md`: 158 PASS, 0 FAIL; `agenda replay: 158 rows, 0 failed`; `ok the only DELETE of the job is the event delete - 1`; the stand-in answers like the real server (status and answer shape of every scenario) |
+| NoAgenda editing in the simulator, light and dark (6 tests each): clashes marked on Day (two timed Self items of mine; a tentative one is soft; an agent item never clashes), the Conflicts chip, the workload bar of the day and of the week, change the agent of a Gantt task to Self and back, create an event with Self preselected, a task of a project I may only view is locked with its reason, a repeating event is locked with "Open in NoCalendar", tick a to-do done | CI | pass (stand-in) | shards `agenda-edit` and `agenda-edit-dark`: `edits: xcodebuild exit 0, passed tests 6 of 6` in each; 14 screenshots per colour mode (`agenda-edit-light/`, `agenda-edit-dark/`) |
+| NoAgenda: another change somewhere else wins and is never overwritten (conflict, in two parts with an app restart between), and a change made without a connection waits, survives the restart and is sent afterwards (waiting, in two parts) | CI | pass (stand-in) | same shards: `conflict-a`, `conflict-b`, `waiting-a`, `waiting-b` each `passed tests 1 of 1`, light and dark; `agenda-edit-check.py`: `0 problem(s)` (the stand-in log shows the right method, `If-Match` and version checks on every write) |
+| NoAgenda editing deletes only what the person deletes: no Gantt task or card is ever deleted; the only DELETE in the code is the event delete (calendar or to-do list), sent with `If-Match` after a fresh read, and refused for a series, an object with several components and an invitation | CI | pass | review 3: `git grep "\.delete"` in `iOSClient/NoAgendaEdit` and `iOSClient/NoAgenda` finds one DELETE (`NCAgendaCalDAVWriter.swift`); unit test `deleteRefuses` asserts that no DELETE request was sent; replay: `event-delete` 204 then 404 |
+| NoAgenda editing sends only to the account's own server with its existing app password and creates no new credential; no new host, no new transport | CI | pass | review 3: no new `https://` in `iOSClient/`, no `URLSession` or `URLRequest(` in the new files (every write goes through `NCAgendaHTTP.makeRequest`: same origin, no redirects); a scan of the added lines for secrets finds none |
+| No Nextcloud text in the NoAgenda editing screens; the accent is cobalt; the workload bar follows the accent | CI | pass | `check-branding.py`: `486 hits: 267 internal, 217 legal, 2 artwork, 0 unclassified`; `screens-report` ok (no Nextcloud blue on the agenda-edit screens); screenshots looked at |
 | Auto upload with photos already on the Drive: the same photo is not uploaded again, a different photo with the same name is kept as `name 1.ext`, in the app (simulator or iPhone) | owner | pending | see the owner steps below; CI covers the decision logic, the size the app reads on a real server and the screen, not an upload from the simulator's Photos library |
 | Sign in with "Log in with Nourax" on the real drive.nourax.org | owner | pending | Mac simulator at home (WAF) |
 | File list after sign-in | owner | pending | |
@@ -146,7 +159,19 @@ on `main` (commit `b03563c3c9`), all 3 jobs green. Xcode 27.1 (build 27A9275), r
 | NoAgenda offline: switch on flight mode and open NoAgenda; the last data is there, marked with the time it was saved | owner | pending |  |
 | NoAgenda Sources: set a calendar to Hidden and back to Personal; its events leave and come back in Day. Change an event in NoCalendar on the web: the row follows after you come back to the app | owner | pending |  |
 | NoAgenda: open a row and tap "Open in NoCalendar" (or NoTasks, NoGantt, NoBoard): the signed-in page of that item opens | owner | pending | the real pages are not tested in CI |
-| NoAgenda changes nothing and deletes nothing, anywhere | owner | pending | after a day of use look at NoCalendar, NoTasks, NoGantt and NoBoard on the web: nothing was changed by the app |
+| NoAgenda (reading only, step 1) changes nothing and deletes nothing | owner | superseded | the editing rows below replace this row: now the app changes only what you save and deletes only an event or to-do you delete |
+| NoAgenda editing: open a to-do or an event of yours, tap Edit, change the title or the time, tap Save: the row changes at once, and the same change is there in NoCalendar or NoTasks on the web, with the rest of the item (reminders, notes, attendees) untouched | owner | pending | the real server, your own account |
+| NoAgenda: tick a to-do as done in the app; it shows done in NoTasks on the web | owner | pending | |
+| NoAgenda: tap + and make a new event in your Personal or Work calendar; it is in NoCalendar on the web, and your agents' calendars are not offered unless you pick an agent | owner | pending | |
+| NoAgenda: delete an event you made yourself; it is gone from NoCalendar (it moves to the calendar's trash bin). An event you were invited to, and a repeating one, cannot be deleted from the app | owner | pending | only try it on a test event |
+| NoAgenda: on a NoGantt task, change who does it (you or one of your agents) and the dates; NoGantt on the web shows the same, and Undo right after a date move puts the dates back | owner | pending | a project you manage, a test task |
+| NoAgenda: on a NoBoard card, change the due date and who does it; NoBoard on the web shows the same | owner | pending | a board you may edit |
+| NoAgenda: a task of a project you may only view, a card on a board you may only read, a repeating event and a meeting you were invited to are locked, with a short reason and the "Open in ..." button for the signed-in page | owner | pending | |
+| NoAgenda Day: two events of yours at the same time show a red mark and the Conflicts chip lists only those; the bar at the top shows planned hours and free hours and turns orange when the day is too full; an agent's item never counts as a clash with yours | owner | pending | make two events at the same time to see it |
+| NoAgenda: switch on flight mode, change an event, tap Save: the row says the change is waiting and the banner shows "Waiting to send"; switch the network back on: it is sent and the row is normal again. Close the app while a change waits and open it again: it is still waiting | owner | pending | |
+| NoAgenda: change an event in the app while someone changes the same event on the web: the app does not overwrite the other change; the item shows under "Not sent" with "Apply my change again", "Keep the other change" and "Open in NoCalendar" | owner | pending | needs two devices, or the app and the web page |
+| NoAgenda: an event or to-do whose description the app has not read yet shows "This description is not loaded yet" instead of an empty field; it fills after the next refresh | owner | pending | right after updating the app from the reading-only version |
+| NoAgenda: after a change made in the app, edit the same item on the web: an agent's tag and id are still there (Calendar keeps both; Tasks keeps the tag and drops the id, see `docs/noagenda.md`) | owner | pending | the real Calendar and Tasks pages; the CI proof is the desktop and Android jobs |
 | Dark mode and German after sign-in | owner | pending | |
 | Device name under Settings → Security on drive.nourax.org | owner | pending | read it back for the Workspace session |
 | Sync works away from home (mobile data), after one sign-in at home | owner | pending | iPhone only |
@@ -282,6 +307,27 @@ colours and links: none; the accent is cobalt.
 | NoBoard refused, banner with "Open in NoBoard" (light only) | [agenda-state-refuse-deck](screenshots/ios/agenda-light/agenda-state-refuse-deck.png) |  |
 | Deck 1.20.0, read only (light only) | [agenda-state-deck-version-1.20.0](screenshots/ios/agenda-light/agenda-state-deck-version-1.20.0.png) |  |
 
+NoAgenda editing (step 2): screenshots (light and dark) are in `docs/screenshots/ios/agenda-edit-light/` and
+`docs/screenshots/ios/agenda-edit-dark/` (1200 px copies from run [41393142152](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41393142152), commit `ab1cda20d5`; the tests
+`NoDriveAgendaEditUITests`).
+
+| Screen | Light | Dark |
+|---|---|---|
+| Day with clashes marked and the workload bar | [agenda-day-conflicts](screenshots/ios/agenda-edit-light/agenda-day-conflicts.png) | [agenda-day-conflicts](screenshots/ios/agenda-edit-dark/agenda-day-conflicts.png) |
+| The Conflicts chip | [agenda-conflicts-chip](screenshots/ios/agenda-edit-light/agenda-conflicts-chip.png) | [agenda-conflicts-chip](screenshots/ios/agenda-edit-dark/agenda-conflicts-chip.png) |
+| Week with the workload bar per day | [agenda-week-workload](screenshots/ios/agenda-edit-light/agenda-week-workload.png) | [agenda-week-workload](screenshots/ios/agenda-edit-dark/agenda-week-workload.png) |
+| Editing the agent of a Gantt task (the picker) | [agenda-edit-agent](screenshots/ios/agenda-edit-light/agenda-edit-agent.png) | [agenda-edit-agent](screenshots/ios/agenda-edit-dark/agenda-edit-agent.png) |
+| After Save, the task is done by the agent again | [agenda-edit-agent-saved](screenshots/ios/agenda-edit-light/agenda-edit-agent-saved.png) | [agenda-edit-agent-saved](screenshots/ios/agenda-edit-dark/agenda-edit-agent-saved.png) |
+| New event (Self preselected) | [agenda-create](screenshots/ios/agenda-edit-light/agenda-create.png) | [agenda-create](screenshots/ios/agenda-edit-dark/agenda-create.png) |
+| The new event in the Day list | [agenda-created](screenshots/ios/agenda-edit-light/agenda-created.png) | [agenda-created](screenshots/ios/agenda-edit-dark/agenda-created.png) |
+| A task of a project I may only view (locked, with the reason) | [agenda-locked](screenshots/ios/agenda-edit-light/agenda-locked.png) | [agenda-locked](screenshots/ios/agenda-edit-dark/agenda-locked.png) |
+| A repeating event (locked, "Open in NoCalendar") | [agenda-repeating](screenshots/ios/agenda-edit-light/agenda-repeating.png) | [agenda-repeating](screenshots/ios/agenda-edit-dark/agenda-repeating.png) |
+| A to-do ticked done | [agenda-todo-done](screenshots/ios/agenda-edit-light/agenda-todo-done.png) | [agenda-todo-done](screenshots/ios/agenda-edit-dark/agenda-todo-done.png) |
+| A change waiting for the connection | [agenda-waiting](screenshots/ios/agenda-edit-light/agenda-waiting.png) | [agenda-waiting](screenshots/ios/agenda-edit-dark/agenda-waiting.png) |
+| The change sent after the connection came back | [agenda-sent-after-waiting](screenshots/ios/agenda-edit-light/agenda-sent-after-waiting.png) | [agenda-sent-after-waiting](screenshots/ios/agenda-edit-dark/agenda-sent-after-waiting.png) |
+| Not sent: the other change was kept | [agenda-not-sent](screenshots/ios/agenda-edit-light/agenda-not-sent.png) | [agenda-not-sent](screenshots/ios/agenda-edit-dark/agenda-not-sent.png) |
+| "Apply my change again" done | [agenda-applied-again](screenshots/ios/agenda-edit-light/agenda-applied-again.png) | [agenda-applied-again](screenshots/ios/agenda-edit-dark/agenda-applied-again.png) |
+
 The tests check: Day (the meeting in two calendars once, the task once, the agent-without-person problem, no tasks of
 other people), Sources (the hidden board calendar with its reason, the project and board defaults), the team problems
 as manager (not assigned, not linked, not shared, "belongs to X, not Y") and the switch "Show all team tasks"
@@ -340,7 +386,21 @@ the Files root while a finder looked for the list); the finders now scroll by a 
       change an event in NoCalendar on the web, come back to the app with NoAgenda open: the row follows.
    8. Open a row and tap "Open in NoCalendar" / "NoTasks" / "NoGantt" / "NoBoard": the signed-in page of that item
       opens (the real pages are not tested in CI, see `docs/noagenda.md`, open points).
-9. Go through the "owner" rows above, then read back the device name shown under
+9. NoAgenda editing (same app, same account; use test items, not your real meetings):
+   1. Open a to-do or an event of yours, tap Edit, change the title, tap Save. The row changes at once. Look at NoCalendar or
+      NoTasks on the web: the same change is there and nothing else about the item changed.
+   2. Tap + and make a new event. It is in your Personal or Work calendar on the web. Delete it again from the app (it moves to the calendar's trash bin).
+   3. On a NoGantt task of a project you manage, change the agent (you, or one of your agents) and the dates; then Undo the date
+      move. Do the same for the due date and the agent of a NoBoard card.
+   4. Make two events at the same time: a red mark appears, the Conflicts chip lists them, and the bar at the top shows planned
+      and free hours.
+   5. Switch the phone to flight mode, change an event and Save: it waits (banner "Waiting to send"). Close the app, open it,
+      switch the network on: it is sent.
+   6. Change an event in the app and on the web at nearly the same time: the app keeps the other change and shows it under
+      "Not sent" with three choices.
+   7. Check that a project or board you may only view, a repeating event and an invitation are locked with a reason, and that
+      "Open in ..." opens the signed-in page.
+10. Go through the "owner" rows above, then read back the device name shown under
    Settings → Security on drive.nourax.org.
 
 Building and the iPhone steps: [build.md](build.md).
