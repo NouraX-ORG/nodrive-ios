@@ -96,3 +96,7 @@ stand-in that replays the recorded answers of NoGantt 2.4.1, Deck and Calendar).
 NoAgenda editing (`agenda-edit-light/`, `agenda-edit-dark/`): from run [41393142152](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41393142152) on
 `feature/noagenda-edit` (commit `ab1cda20d5`, the UI tests `NoDriveAgendaEditUITests`). The names are in `docs/testing.md`, section
 "NoAgenda editing (step 2)".
+
+NoAgenda Timeline (`agenda-timeline-light/`, `agenda-timeline-dark/`): from run [41497689323](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41497689323) on
+`feature/noagenda-timeline` (commit `a0e2e25f07`, the UI tests `NoDriveAgendaTimelineUITests`). The names are in `docs/testing.md`, section
+"NoAgenda Timeline (step 3)".

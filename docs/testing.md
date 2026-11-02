@@ -37,6 +37,8 @@ NoAgenda server, NoAgenda replay, Server login, the 9 Simulator screens shards, 
 finders and on test strings that later commits repaired (`41392069569`: a test text held a literal line break, fixed by `ab1cda20d5`). The
 merge to `main` adds only documents on top of that commit; the same checks run again on the docs commit and on `main`.
 
+NoAgenda Timeline (feature `feature/noagenda-timeline`): run [41497689323](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41497689323), commit `a0e2e25f07` (on top of `main` at `ead7f3d791`, so no merge was needed), all 18 jobs green (Branding gate, Build and unit tests, NoAgenda server, NoAgenda replay, Server login, the 11 Simulator screens shards, Simulator screens report). Earlier runs of the branch failed on a missing switch case (`41475201488`), on the seed check (NoGantt answers `EA` for a finish-to-start, `41475201488`), on two arithmetic expectations of the new unit tests, on the replay check that expected the old scenario count (`41487370522`), and in the screenshot the name column did not follow the scroll (fixed with `onScrollGeometryChange`, `f0548541a7`). The merge to `main` adds only documents on top of the code commit.
+
 Reference run: **[40206804804](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/40206804804)**
 on `main` (commit `b03563c3c9`), all 3 jobs green. Xcode 27.1 (build 27A9275), runner image
 `xcode-27-arm64`, iPhone 17 simulator with iOS 27.0, unsigned (`CODE_SIGNING_ALLOWED=NO`).
@@ -334,6 +336,34 @@ as manager (not assigned, not linked, not shared, "belongs to X, not Y") and the
 (scrolled to), and the three states of the homes. The shard `agenda` was flaky in earlier runs (the Browse tab showed
 the Files root while a finder looked for the list); the finders now scroll by a drag on the screen and save
 `finder-failed-<text>.png` when they give up. Watch it when a run of `main` turns red.
+
+## NoAgenda Timeline (step 3)
+
+See `docs/noagenda.md` ("Timeline"). Screenshots in `docs/screenshots/ios/agenda-timeline-light/` and `agenda-timeline-dark/` (1200 px copies from run
+[41497689323](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41497689323), commit `a0e2e25f07`, iPhone 17, iOS 27.0, Ali against the CI stand-in that replays the real server's answers). Looked at for
+Nextcloud's name, logo, colours and links: none; the accent is cobalt.
+
+| Screen | light | dark |
+|---|---|---|
+| Timeline: project, phase, bars with % done, agent, arrow, diamonds, shaded today | [agenda-timeline](screenshots/ios/agenda-timeline-light/agenda-timeline.png) | [agenda-timeline](screenshots/ios/agenda-timeline-dark/agenda-timeline.png) |
+| Top of the Timeline | [agenda-timeline-top](screenshots/ios/agenda-timeline-light/agenda-timeline-top.png) | [agenda-timeline-top](screenshots/ios/agenda-timeline-dark/agenda-timeline-top.png) |
+| A stub tapped: "After: Publish banners (Sara)" | [agenda-timeline-stub](screenshots/ios/agenda-timeline-light/agenda-timeline-stub.png) | [agenda-timeline-stub](screenshots/ios/agenda-timeline-dark/agenda-timeline-stub.png) |
+| Days zoom | [agenda-timeline-days](screenshots/ios/agenda-timeline-light/agenda-timeline-days.png) | [agenda-timeline-days](screenshots/ios/agenda-timeline-dark/agenda-timeline-days.png) |
+| Legend | [agenda-timeline-legend](screenshots/ios/agenda-timeline-light/agenda-timeline-legend.png) | [agenda-timeline-legend](screenshots/ios/agenda-timeline-dark/agenda-timeline-legend.png) |
+| Locked task (viewer project) with its reason | [agenda-timeline-locked](screenshots/ios/agenda-timeline-light/agenda-timeline-locked.png) | [agenda-timeline-locked](screenshots/ios/agenda-timeline-dark/agenda-timeline-locked.png) |
+| Editor with the two dates and Move by | [agenda-timeline-move-by](screenshots/ios/agenda-timeline-light/agenda-timeline-move-by.png) | [agenda-timeline-move-by](screenshots/ios/agenda-timeline-dark/agenda-timeline-move-by.png) |
+| A move saved (toast "Moved to ...") | [agenda-timeline-moved](screenshots/ios/agenda-timeline-light/agenda-timeline-moved.png) | [agenda-timeline-moved](screenshots/ios/agenda-timeline-dark/agenda-timeline-moved.png) |
+
+| Feature | Who | Result | Evidence |
+|---|---|---|---|
+| Timeline unit tests: date and x at both zooms, range, group and row order, what is drawn, shapes, the four arrow types with lags and routes, stubs, shading shares, hatch days, Move by (same command as the sheet, summer time, to-do, locked), spoken labels, strings and symbols, the person on a predecessor | CI | pass | run 41497689323, job "Build and unit tests": 6 suites `NoDrive NoAgenda Timeline ...` passed |
+| Timeline in the simulator, light and dark (6 tests each): groups and phase, the 40 % bar done by Writer-Bot, the arrow, the stub with its text, milestone, dated card and to-do bar, a to-do without a start is not drawn; Days zoom; a viewer task is locked with its reason and the Team chip is dimmed; legend and range arrows; the editor with Move by -7, -1, +1, +7; a move saved with the "Moved to" toast | CI | pass (stand-in) | shards `agenda-timeline`, `agenda-timeline-dark`: `timeline: xcodebuild exit 0, passed tests 6 of 6`; 9 screenshots per colour mode |
+| The Timeline move asks NoGantt to move the followers (`adjust_lag`) and writes nothing else | CI | pass | `agenda-edit-check.py --timeline`: `0 problem(s)` on the stand-in log (a NoGantt `PUT` with `moves_dates` and `adjust_lag`) |
+| A Timeline move (+7 days) and its Undo on a real Nextcloud 35.0.2 with nc_gantt 2.4.1: start a week later, the end a week later or the working day before, the dependent task moved, Undo puts all back | CI | pass (throwaway server) | job "NoAgenda replay": `timeline-move`, `timeline-undo` rows PASS; the stand-in answers like the real server |
+| The seed has the Timeline data on the real server: "Review banners" follows two tasks, a task in a phase, a dated milestone, a to-do with start and due | CI | pass (throwaway server) | job "NoAgenda server", `agenda-server.md`: the four `timeline seed` rows PASS |
+| No Nextcloud text in the Timeline screens; the accent is cobalt | CI | pass | `check-branding.py` 0 unclassified; `screens-report` ok; screenshots looked at |
+| Timeline on the real account: side menu, NoAgenda, Timeline: your tasks as bars under their project and phase with the % filled, to-dos with two dates, milestones and dated cards as diamonds, an arrow where one task follows another, your busy time shaded | owner | pending | drive.nourax.org, your own account; compare with NoGantt on the web |
+| Timeline: tap a task, Edit, Move by +1 day, Save: NoGantt on the web shows the new dates and the tasks that follow moved; Undo in the toast puts them back | owner | pending | a project you manage, a test task |
 
 ## Owner test steps (Mac)
 

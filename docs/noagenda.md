@@ -237,3 +237,52 @@ parts with a restart between), and `tools/ci/agenda-edit-check.py` over the stan
   when neither page could be edited (a page that was not driven is a warning in the job summary). The proof that the id and the tag survive
   a web edit is the desktop job (Calendar: both survive; Tasks: the id is dropped, the tag survives) and the Android job (both survive in
   both pages). The row for the owner stays open.
+
+## Timeline (step 3, `feature/noagenda-timeline`)
+
+Binding spec: `plans/noagenda-decisions.md` section 8 (Timeline) and 9. Platform plan: `plans/noagenda-ios-plan.md` section 4. Code: `iOSClient/NoAgendaTimeline/`
+(all new logic; strings in `en.lproj/NoAgendaTimeline.strings`, translations are a to-do). No upstream file is touched and `tools/rebrand.py` gets no hook,
+only the new folder and the two new test files. Small marked changes in NoDrive's own files of steps 1 and 2: the view picker has **Timeline**
+(`AgendaViewKind`), the editor sheet has "Move by", a dependency remembers the person on its predecessor, and the Team chip is dimmed on the Timeline.
+
+### What the user gets
+
+- **A fourth view, Timeline**, next to Day, Week and Month, with the chips Me and My agents, the All/Work/Personal switch and the Conflicts chip. My team is dimmed:
+  team work is not drawn here. The range is seven days before the shown date to eight weeks after it; the arrows move it by four weeks, Today scrolls back. Zoom
+  **Weeks** (12 points a day) or **Days** (40); the name column (120 points on a phone) and the scale (months, weeks, days) stay in place while the rest scrolls.
+- **Bars** for my NoGantt tasks, grouped under the project and the phase (items without a phase first, by start; then the phases by their first start), with the
+  **% done filling the bar**. My to-dos with a start and a due date (not repeating) are thin dashed bars under "NoTasks > list". **Diamonds** for the milestones of
+  the projects where I have tasks and for my dated cards ("NoBoard > board"). **The agent** ("🤖 Writer-Bot", "👤 Self") and the marks (late, blocked, locked,
+  waiting, not sent) follow every bar.
+- **Dependency arrows**, read only, for finish-to-start, start-to-start, finish-to-finish and start-to-finish (NoGantt 2.4.1 answers them as `EA`, `AA`, `EE` and `AE`;
+  `FS`, `SS`, `FF`, `SF` are read the same). A predecessor that is not on the screen is a short **stub**; tapping it says "After: Publish banners (Sara)".
+- **My busy time** shades the day behind the bars (0 to 35 % of the accent colour, by the share of my working hours my own busy events take; an agent's event and a
+  free event never shade). Days off are hatched (not a working day, a holiday, an all-day busy event). A line marks today.
+- **Tap** a bar or diamond for the detail sheet. Its editor has the two date pickers and **Move by** -7, -1, +1, +7 days. There is **no drag on phones**. A move is the
+  same command as setting the two dates by hand: a NoGantt `PUT` with `start_date`, `end_date` and `adjust_lag: true` (the followers move; Undo in the toast) or, for a to-do,
+  a CalDAV change that keeps the times of day. Queue, conflicts and locks are those of step 2. A task with only an end date is a one-day bar with a lock ("This task has no
+  dates to move."); the date pickers of such a task are off. A locked bar (viewer project, repeating, waiting change, refused home) has no Edit button, so no date editor.
+- **ⓘ** opens the legend. Every bar and diamond has a spoken label ("Gantt task, Write homepage copy, 27 Oct to 30 Oct, 40 % done, Writer-Bot"), and the arrows are read
+  as "Review banners comes after Write homepage copy".
+
+### Tests
+
+Unit tests (`NoDriveAgendaTimelineTests`, 6 suites): date and x at both zooms, the range, group order and one row per item, what is drawn, shapes and the cut at the
+range, the four arrow types with lags and the routes round a gap, stubs, shading shares and hatch days, Move by (same command as the sheet, summer time, to-do, nothing for
+a milestone, a card or a locked item), spoken labels, strings, symbols, the person on a predecessor. UI tests (`NoDriveAgendaTimelineUITests`, shards `agenda-timeline`
+and `agenda-timeline-dark`, 6 tests each, as Ali against the stand-in): the Timeline with its groups, the 40 % bar done by Writer-Bot, the arrow and the stub, the
+diamonds and the to-do bar; the Days zoom; the locked task and the dimmed Team chip; the legend and the range arrows; the editor with the four Move by buttons; and a
+move through the editor with the "Moved to" toast. `agenda-edit-check.py --timeline` reads the stand-in log and requires a NoGantt move with `adjust_lag`. The replay job
+sends a Timeline move (+7 days) and its Undo to the real throwaway server (`timeline-move`, `timeline-undo`).
+
+### Choices
+
+- **No Swift Charts.** Arrows and a tap target for every bar are simpler with views and `Canvas` (plan 4.6).
+- **Own shards.** The Timeline runs in two shards of its own (`agenda-timeline`, `agenda-timeline-dark`) beside the editing shards, so a flake in one does not hide the other and the
+  wall time does not grow; the plan had put it into the `agenda` shard.
+- **Name column and scale.** A horizontal scroll view holds the scale above a vertical one; the name cells follow the scroll offset (`onScrollGeometryChange` from iOS 18,
+  a preference before that), so a name never scrolls away.
+- **Arrow drawing.** All arrows are drawn in one `Canvas` (a project has few); the rows are in a lazy stack. If a project with hundreds of dependencies turns up, the canvas
+  should draw only the visible rows (plan risk T1).
+- **Seed.** The CI server got "Review banners" for Ali (follows his own "Write homepage copy" and Sara's "Publish banners") and the to-do "Prepare launch notes" (start and
+  due date), so the arrow, the stub and the to-do bar are tested on the real server's answers.
