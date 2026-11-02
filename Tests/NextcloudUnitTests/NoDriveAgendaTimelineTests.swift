@@ -143,17 +143,17 @@ struct NoDriveAgendaTimelineScaleTests {
         let first = weeks.range.firstDay
         #expect(weeks.pointsPerDay == 12)
         #expect(weeks.x(forDay: first) == 120)
-        #expect(weeks.x(forDay: first + 7) == 120 + 84)
+        #expect(weeks.x(forDay: first + 7) == 204)
         #expect(weeks.x(forDayCenter: first) == 126)
-        #expect(weeks.chartWidth == 64 * 12)
-        #expect(weeks.totalWidth == 120 + 64 * 12 + 160)
+        #expect(weeks.chartWidth == 768)
+        #expect(weeks.totalWidth == 1048)
         #expect(weeks.day(atX: 120 + 84 + 5) == first + 7)
         #expect(weeks.day(atX: 120 + 84 - 1) == first + 6)
         let days = S.scale(.days)
         #expect(days.pointsPerDay == 40)
-        #expect(days.x(forDay: first + 3) == 120 + 120)
-        #expect(days.x(forDayCenter: first + 3) == 120 + 120 + 20)
-        #expect(days.chartWidth == 64 * 40)
+        #expect(days.x(forDay: first + 3) == 240)
+        #expect(days.x(forDayCenter: first + 3) == 260)
+        #expect(days.chartWidth == 2560)
         for offset in [0, 1, 17, 63] {
             #expect(days.day(atX: days.x(forDay: first + offset)) == first + offset)
             #expect(weeks.day(atX: weeks.x(forDayCenter: first + offset)) == first + offset)
@@ -369,9 +369,9 @@ struct NoDriveAgendaTimelineArrowTests {
         #expect(layout.stubs.isEmpty)
     }
 
-    @Test("Finish to start on the next day (12 points at the Weeks zoom): the line turns half way, still with two corners")
-    func nextDay() throws {
-        let layout = pair(type: "FS", successor: ("2026-11-05", "2026-11-06"))
+    @Test("Finish to start with one empty day between (12 points at the Weeks zoom): the line turns half way, still with two corners")
+    func oneDayBetween() throws {
+        let layout = pair(type: "FS", successor: ("2026-11-06", "2026-11-07"))
         let arrow = try #require(layout.arrows.first)
         let pred = try #require(layout.shapes["gantt:1"])
         let succ = try #require(layout.shapes["gantt:2"])
@@ -379,12 +379,22 @@ struct NoDriveAgendaTimelineArrowTests {
         #expect(arrow.points.count == 4)
         #expect(arrow.points[1] == CGPoint(x: pred.endPoint.x + 6, y: pred.centerY))
         #expect(arrow.points.last == succ.startPoint)
-        // Starting before the predecessor ends (no room for a corner): round through the gap between the rows
-        let touching = S.build([
-            S.task(1, "Pred", start: "2026-11-02", end: "2026-11-04"),
-            S.task(2, "Succ", start: "2026-11-04", end: "2026-11-06", deps: [S.dependency("t-1", "Pred")])
-        ])
-        #expect(touching.arrows.first?.points.count == 6)
+    }
+
+    @Test("Finish to start on the very next day (no space between the bars) or with an overlap: the line goes round through the gap between the rows")
+    func noRoom() throws {
+        for start in ["2026-11-05", "2026-11-04"] {
+            let layout = S.build([
+                S.task(1, "Pred", start: "2026-11-02", end: "2026-11-04"),
+                S.task(2, "Succ", start: start, end: "2026-11-06", deps: [S.dependency("t-1", "Pred")])
+            ])
+            let arrow = try #require(layout.arrows.first)
+            let pred = try #require(layout.shapes["gantt:1"])
+            let succ = try #require(layout.shapes["gantt:2"])
+            #expect(arrow.points.count == 6)
+            #expect(arrow.points.first == pred.endPoint && arrow.points.last == succ.startPoint)
+            #expect(arrow.points[4] == CGPoint(x: succ.startPoint.x - 8, y: succ.centerY))
+        }
     }
 
     @Test("Finish to start with a lag keeps its end points and its lag; with a negative lag the bars overlap and the line goes round through the gap between the rows")

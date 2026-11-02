@@ -21,6 +21,24 @@ private struct TimelineScrollXKey: PreferenceKey {
     }
 }
 
+/// Tells the name cells how far the chart is scrolled. From iOS 18 the scroll view says so itself; before that the content
+/// reports its own position through a preference (set in `chart`).
+private struct TimelineScrollTracker: ViewModifier {
+    let scroll: NCAgendaTimelineScroll
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentOffset.x
+            } action: { _, newValue in
+                scroll.x = newValue
+            }
+        } else {
+            content
+        }
+    }
+}
+
 /// The months, the weeks and (at the Days zoom) the days, pinned above the bars.
 struct NCAgendaTimelineScaleView: View {
     let scale: TimelineScale
@@ -42,7 +60,7 @@ struct NCAgendaTimelineScaleView: View {
                     if number == todayDay, scale.zoom == .days {
                         context.fill(Path(CGRect(x: left, y: size.height - 30, width: ppd, height: 30)), with: .color(accent.opacity(0.2)))
                     }
-                    if offset == 0 || day == 1 {
+                    if day == 1 || (offset == 0 && day <= 20) {
                         var line = Path()
                         line.move(to: CGPoint(x: left, y: 0))
                         line.addLine(to: CGPoint(x: left, y: 18))
@@ -208,6 +226,7 @@ struct NCAgendaTimelineView: View {
                 )
             }
             .coordinateSpace(.named(spaceName))
+            .modifier(TimelineScrollTracker(scroll: scroll))
             .onPreferenceChange(TimelineScrollXKey.self) { value in
                 scroll.x = value
             }
