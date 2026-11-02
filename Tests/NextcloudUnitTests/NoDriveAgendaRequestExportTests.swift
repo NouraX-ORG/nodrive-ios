@@ -157,12 +157,11 @@ struct NoDriveAgendaRequestExportTests {
         #expect(await Self.writer(Self.calendarHTTP(recorder, text: draft)).patch(path: personal + "draft-report.ics", seenEtag: nil, change: done) == .plainSaved)
         recorder.finish("todo-done")
 
-        // An all-day event (days, with the exclusive DTEND): its title and day change and it stays all-day, with the alarm and the
+        // An all-day event (days, with the exclusive DTEND): its title and day change and it stays all-day, with the
         // unknown property
         let allDayText = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Nourax//NoAgenda CI//EN", "BEGIN:VEVENT", "UID:ci-replay-allday", "DTSTAMP:20261030T090000Z",
                           "SUMMARY:Open day", "DTSTART;VALUE=DATE:20261029", "DTEND;VALUE=DATE:20261030", "X-CI-UNKNOWN:keep-me",
-                          "END:VEVENT", "END:VCALENDAR", ""].joined(separator: "
-")
+                          "END:VEVENT", "END:VCALENDAR", ""].joined(separator: "\r\n")
         var allDay = CalendarChange()
         allDay.title = "Open day (moved)"
         allDay.allDay = true
