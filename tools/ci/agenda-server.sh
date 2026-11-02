@@ -131,7 +131,12 @@ case "${1:-}" in
     check) python3 tools/ci/server_agenda_check.py --container "$NAME" --out "$OUT" ;;
     snapshot) python3 tools/ci/agenda-snapshot.py --out "$OUT" ;;
     facts) python3 tools/ci/server_agenda_edit_facts.py --seed "$OUT/seed.json" --out "$OUT" ;;
-    webedit) python3 tools/ci/agenda-webedit.py --out "$OUT" ;;
+    webedit)
+        # The report (with its WARNING lines) goes to the job summary, so a page that was not driven is seen, not buried in the log.
+        status=0
+        python3 tools/ci/agenda-webedit.py --out "$OUT" || status=$?
+        if [ -n "${GITHUB_STEP_SUMMARY:-}" ] && [ -f "$OUT/agenda-webedit.md" ]; then cat "$OUT/agenda-webedit.md" >> "$GITHUB_STEP_SUMMARY"; fi
+        exit "$status" ;;
     replay) python3 tools/ci/agenda-replay.py --requests "${AGENDA_REQUESTS:?AGENDA_REQUESTS is not set}" --snapshot "$OUT/agenda-snapshot.json" --seed "$OUT/seed.json" --out "$OUT" ;;
     stop) docker rm -f "$NAME" > /dev/null 2>&1 || true ;;
     *) echo "usage: $0 start|apps|discover|seed|check|snapshot|facts|webedit|replay|stop"; exit 2 ;;

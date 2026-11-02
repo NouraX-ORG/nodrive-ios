@@ -18,6 +18,8 @@ struct ICalComponent: Codable, Equatable, Sendable {
     var end: Date?
     var endAllDay = false
     var due: Date?
+    /// DUE is a date only (`VALUE=DATE`); nil when there is no DUE or the object was cached before this was read.
+    var dueAllDay: Bool?
     var durationSeconds: Int?
     var status: String?
     var transparency: String?
@@ -300,6 +302,7 @@ enum NCAgendaICal {
         case "DUE":
             if let parsed = parseDate(line.value, params: line.params, deviceZone: deviceZone) {
                 component.due = parsed.date
+                component.dueAllDay = parsed.allDay
                 component.unknownZone = component.unknownZone ?? parsed.unknownZone
             }
         case "DURATION":

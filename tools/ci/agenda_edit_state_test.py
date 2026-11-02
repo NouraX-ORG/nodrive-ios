@@ -124,6 +124,13 @@ def main():
     assert st.dispatch('PUT', card + '/removeLabel', {}, json.dumps({'labelId': 7}).encode(), True)[0] == 200
     assert json.loads(st.dispatch('GET', card, {}, b'', True)[1])['labels'] == []
     assert st.dispatch('POST', d + 'boards/1/labels', {}, json.dumps({'title': 'N'}).encode(), True)[0] == 403
+    # A to-do must not mix DATE and DATE-TIME in DTSTART and DUE (the real CalDAV plugin answers 415)
+    todo_path = '/remote.php/dav/calendars/ali/work/t.ics'
+    both_dates = TODO.replace('SUMMARY:Draft', 'SUMMARY:Draft\r\nDTSTART;VALUE=DATE:20261029\r\nDUE;VALUE=DATE:20261030')
+    mixed = both_dates.replace('DUE;VALUE=DATE:20261030', 'DUE:20261030T150000Z')
+    assert s.mixed_todo_dates(mixed) and not s.mixed_todo_dates(both_dates) and not s.mixed_todo_dates(TODO)
+    assert st.dispatch('PUT', todo_path, {'If-Match': '"t1"'}, mixed.encode(), True)[0] == 415
+    assert st.dispatch('PUT', todo_path, {'If-Match': '"t1"'}, both_dates.encode(), True)[0] == 204
     print('agenda_edit_state_test: ok')
 
 

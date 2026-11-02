@@ -31,7 +31,7 @@ struct NCAgendaCalDAVWriter {
         } catch let error as NCAgendaHTTPError {
             switch error {
             case .network: return (nil, .offline)
-            default: return (nil, .refused(NCAgendaEditText.f("_nodrive_agenda_edit_refused_generic_", 0)))
+            default: return (nil, .refused(NCAgendaEditText.t("_nodrive_agenda_edit_refused_local_")))
             }
         } catch {
             return (nil, .offline)
@@ -64,10 +64,11 @@ struct NCAgendaCalDAVWriter {
             return .refused(NCAgendaEditText.t("_nodrive_agenda_edit_invited_"))
         }
         guard let patched = NCAgendaICalPatch.apply(change, to: text, agentTags: agentTags, now: now(), zone: zone) else {
-            return .refused(NCAgendaEditText.f("_nodrive_agenda_edit_refused_generic_", 0))
+            return .refused(NCAgendaEditText.t("_nodrive_agenda_edit_refused_local_"))
         }
-        var headers = ["Content-Type": "text/calendar; charset=utf-8"]
-        if let etag = fresh.etag { headers["If-Match"] = etag }
+        // No ETag, no write: a PUT without If-Match could overwrite a change made meanwhile (as delete() does).
+        guard let etag = fresh.etag else { return .refused(NCAgendaEditText.t("_nodrive_agenda_edit_refused_local_")) }
+        let headers = ["Content-Type": "text/calendar; charset=utf-8", "If-Match": etag]
         let (answer, putFailure) = await send(.put, path: path, headers: headers, body: Data(patched.utf8))
         if let putFailure { return putFailure }
         guard let answer else { return .offline }
@@ -103,7 +104,7 @@ struct NCAgendaCalDAVWriter {
         guard let fresh else { return .offline }
         guard fresh.status == 200 else { return fresh.status == 404 ? .plainSaved : outcome(for: fresh.status) }
         if let seenEtag, !Self.sameVersion(seenEtag, fresh.etag) { return .conflict }
-        guard let etag = fresh.etag else { return .refused(NCAgendaEditText.f("_nodrive_agenda_edit_refused_generic_", 0)) }
+        guard let etag = fresh.etag else { return .refused(NCAgendaEditText.t("_nodrive_agenda_edit_refused_local_")) }
         let (answer, deleteFailure) = await send(.delete, path: path, headers: ["If-Match": etag])
         if let deleteFailure { return deleteFailure }
         guard let answer else { return .offline }

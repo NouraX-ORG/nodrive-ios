@@ -14,6 +14,10 @@ struct AgendaEditContext: Sendable {
     var settings = AgendaSettings()
     var ganttGuardOK = false
     var deckGuardOK = false
+    /// How the last read of NoGantt and Deck went. A home that is refused, read only or not installed takes no change (the
+    /// waiting ones go to Not sent); one that is offline or unreachable holds them until it is back.
+    var ganttState: AgendaHomeState = .unknown
+    var boardState: AgendaHomeState = .unknown
 
     var agentTags: Set<String> {
         Set((registry?.agents ?? []).compactMap { $0.calendarTag })
@@ -28,7 +32,7 @@ struct AgendaEditContext: Sendable {
         guard let me, let gantt else { return nil }
         let resources = Dictionary(gantt.resources.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return GanttAgentContext(myUid: me.userId, myName: me.displayName, myAgents: myAgents, resources: resources,
-                                 project: gantt.projects.first { $0.id == projectId })
+                                 project: gantt.projects.first { $0.id == projectId }, projectTasks: gantt.tasks[String(projectId)] ?? [])
     }
 }
 
@@ -159,6 +163,15 @@ actor NCAgendaEditQueue {
         guard !running, !forgotten else { return report }
         running = true
         defer { running = false }
+        // A home that refuses this app, is read only or is not installed takes no change: what waits for it is Not sent,
+        // with the reason and an Open in button, instead of waiting for good (design 5).
+        for index in items.indices where items[index].isWaiting {
+            if let reason = Self.blockedReason(items[index], context) {
+                items[index].state = .notSent(reason)
+                report.notSent += 1
+            }
+        }
+        if report.notSent > 0 { persist() }
         guard let http = makeHTTP(account) else { return report }
         var tried = Set<UUID>()
         while let command = items.first(where: { $0.isWaiting && !tried.contains($0.id) && !isHeld($0, context) }) {
@@ -174,9 +187,11 @@ actor NCAgendaEditQueue {
             guard let index = items.firstIndex(where: { $0.id == command.id }) else { continue }
             switch outcome {
             case let .saved(details):
-                report.saved.append(items[index])
+                let savedCommand = items[index]
+                report.saved.append(savedCommand)
                 report.savedDetails[command.id] = details
                 items.remove(at: index)
+                await passVersionOn(from: savedCommand, details: details, http: http)
             case .offline:
                 report.offline = true
                 persist()
@@ -192,6 +207,50 @@ actor NCAgendaEditQueue {
         return report
     }
 
+    /// Why a waiting command can never be sent to its home as things are: the home refuses this app, is read only here or is
+    /// not installed. Nil when it can be sent, or when it only has to wait (offline, unreachable, not read yet).
+    static func blockedReason(_ command: NCAgendaEditCommand, _ context: AgendaEditContext) -> NCAgendaNotSent? {
+        let state: AgendaHomeState
+        switch command.home {
+        case .gantt: state = context.ganttState
+        case .board: state = context.boardState
+        case .calendar, .tasks: return nil
+        }
+        let name = command.home.productName
+        switch state {
+        case .refused: return NCAgendaNotSent(kind: .refused, text: NCAgendaEditText.f("_nodrive_agenda_edit_held_refused_", name, name))
+        case .readOnly: return NCAgendaNotSent(kind: .refused, text: NCAgendaEditText.f("_nodrive_agenda_edit_held_read_only_", name, name))
+        case .notInstalled: return NCAgendaNotSent(kind: .refused, text: NCAgendaEditText.f("_nodrive_agenda_edit_held_not_installed_", name, name))
+        case .unknown, .fresh, .unreachable: return nil
+        }
+    }
+
+    /// One Save can make two commands for one item (the dates and the agent). The first one changed the item's version, so
+    /// the second must expect the new one, not the one the person saw: otherwise the person's own change would come back as
+    /// "changed somewhere else". The version is taken from the answer of the save, or read when the answer did not say.
+    /// When it can't be learned the second command no longer checks the version (its own save moved it).
+    private func passVersionOn(from saved: NCAgendaEditCommand, details: NCAgendaSaved, http: NCAgendaHTTP) async {
+        guard let key = saved.itemKey, saved.home == .gantt || saved.home == .board else { return }
+        func waiting() -> [Int] {
+            items.indices.filter { items[$0].isWaiting && items[$0].itemKey == key && items[$0].home == saved.home && items[$0].id != saved.id }
+        }
+        guard !waiting().isEmpty else { return }
+        switch saved.home {
+        case .gantt:
+            guard let project = saved.link.projectId, let task = saved.link.taskId else { return }
+            var version = details.newUpdatedAt
+            if version == nil { version = await NCAgendaGanttWriter(http: http).currentUpdatedAt(projectId: project, taskId: task) }
+            for index in waiting() where items[index].link.updatedAt == saved.link.updatedAt { items[index].link.updatedAt = version }
+        case .board:
+            guard let board = saved.link.boardId, let stack = saved.link.stackId, let card = saved.link.cardId else { return }
+            var version = details.newLastModified
+            if version == nil { version = await NCAgendaDeckWriter(http: http, now: clock).currentLastModified(board: board, stack: stack, card: card) }
+            for index in waiting() where items[index].link.lastModified == saved.link.lastModified { items[index].link.lastModified = version }
+        case .calendar, .tasks:
+            return
+        }
+    }
+
     /// A NoGantt or Deck command waits until the guard of its home has passed (the app is on a version it was tested with).
     func isHeld(_ command: NCAgendaEditCommand, _ context: AgendaEditContext) -> Bool {
         switch command.home {
@@ -202,7 +261,7 @@ actor NCAgendaEditQueue {
     }
 
     func send(_ command: NCAgendaEditCommand, http: NCAgendaHTTP, context: AgendaEditContext) async -> NCAgendaWriteOutcome {
-        let missing = NCAgendaWriteOutcome.refused(NCAgendaEditText.f("_nodrive_agenda_edit_refused_generic_", 0))
+        let missing = NCAgendaWriteOutcome.refused(NCAgendaEditText.t("_nodrive_agenda_edit_refused_local_"))
         switch command.kind {
         case .calendarPatch, .calendarCreate, .calendarDelete:
             let writer = NCAgendaCalDAVWriter(http: http, agentTags: context.agentTags, myAddresses: Set(context.me?.addresses ?? []),

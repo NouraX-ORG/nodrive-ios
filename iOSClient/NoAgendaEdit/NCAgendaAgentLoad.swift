@@ -10,17 +10,18 @@ enum NCAgendaAgentLoad {
     static let daysAhead = 28
 
     /// A planning person that stands for the agent: its NoGantt id is in the registry, or (placeholder phase) its name
-    /// is exactly "🤖 <agent name> (<person's display name>)".
-    static func isPlanningPerson(_ resource: GanttResource, of agent: RegistryAgent, personName: String?) -> Bool {
+    /// is exactly "🤖 <agent name> (<person's display name>)" **and** it sits on a task next to that person's linked
+    /// planning person (`personOnTask`; design 4.5 b, the same rule as the core assembler's `agentOf`).
+    static func isPlanningPerson(_ resource: GanttResource, of agent: RegistryAgent, personName: String?, personOnTask: Bool) -> Bool {
         guard resource.type == "person", resource.uid == nil else { return false }
         if agent.ganttResourceIds.contains(resource.id) { return true }
-        guard let personName else { return false }
+        guard personOnTask, let personName else { return false }
         return NCAgendaAssembler.normalised(resource.name) == NCAgendaAssembler.normalised("🤖 \(agent.name) (\(personName))")
     }
 
     /// The hours of the agent per day ("yyyy-MM-dd"), from the work on tasks of the projects the person can see plus the
     /// timed events and cards that name the agent.
-    static func load(of agent: RegistryAgent, personName: String?, gantt: RawGantt?, items: [AgendaItem], calendar: Calendar) -> [String: Double] {
+    static func load(of agent: RegistryAgent, personName: String?, personUid: String?, gantt: RawGantt?, items: [AgendaItem], calendar: Calendar) -> [String: Double] {
         var hours: [String: Double] = [:]
         let availability = agent.availability ?? AgentAvailability()
         let workDays = availability.workDays
@@ -32,8 +33,13 @@ enum NCAgendaAgentLoad {
             let resources = Dictionary(gantt.resources.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             for tasks in gantt.tasks.values {
                 for task in tasks where task.status != "done" {
+                    // A name match counts only next to my own linked planning person on the same task.
+                    let personOnTask = personUid.map { uid in
+                        task.resources.contains { resources[$0.resourceId]?.uid?.lowercased() == uid.lowercased() }
+                    } ?? false
                     for row in task.resources {
-                        guard let resource = resources[row.resourceId], isPlanningPerson(resource, of: agent, personName: personName),
+                        guard let resource = resources[row.resourceId],
+                              isPlanningPerson(resource, of: agent, personName: personName, personOnTask: personOnTask),
                               let work = row.work, work > 0 else { continue }
                         guard let start = NCAgendaAssembler.ganttDate(task.start ?? task.end, zone: zone),
                               let end = NCAgendaAssembler.ganttDate(task.end ?? task.start, zone: zone) else { continue }
@@ -71,18 +77,23 @@ enum NCAgendaAgentLoad {
             guard let capacity = availability.dailyCapacity else { continue }
             var agentCalendar = calendar
             if let zoneName = availability.timezone, let zone = TimeZone(identifier: zoneName) { agentCalendar.timeZone = zone }
-            let hours = load(of: agent, personName: me.displayName, gantt: gantt, items: items, calendar: calendar)
-            let first = calendar.startOfDay(for: now)
+            let hours = load(of: agent, personName: me.displayName, personUid: me.userId, gantt: gantt, items: items, calendar: calendar)
+            // One zone for the walk, the day keys and the weekday: the agent's own (its events are keyed in it; the days of a
+            // NoGantt task are dates, which read the same in any zone).
+            let first = agentCalendar.startOfDay(for: now)
             for offset in 0..<daysAhead {
-                guard let day = calendar.date(byAdding: .day, value: offset, to: first) else { continue }
+                guard let day = agentCalendar.date(byAdding: .day, value: offset, to: first) else { continue }
                 let key = NCAgendaDays.key(day, calendar: agentCalendar)
                 guard availability.workDays.contains(NCAgendaDays.weekday(day, calendar: agentCalendar)), !availability.daysOff.contains(key),
                       let load = hours[key], load > capacity + 0.05 else { continue }
-                let weekday = day.formatted(Date.FormatStyle(calendar: calendar, timeZone: calendar.timeZone).weekday(.wide))
+                // The row sits on that date in the person's own zone.
+                let parts = agentCalendar.dateComponents([.year, .month, .day], from: day)
+                let shown = calendar.date(from: parts) ?? day
+                let weekday = shown.formatted(Date.FormatStyle(calendar: calendar, timeZone: calendar.timeZone).weekday(.wide))
                 result.append(AgendaProblem(key: "mine:agent-over:\(agent.id):\(key)", kind: .overbooked, relation: .mine,
                                             title: agent.name, agentText: "🤖 " + agent.name,
                                             text: "⚠ 🤖 " + NCAgendaEditText.f("_nodrive_agenda_edit_agent_overbooked_", agent.name, weekday),
-                                            date: day, link: nil, home: .gantt))
+                                            date: shown, link: nil, home: .gantt))
             }
         }
         return result

@@ -211,6 +211,10 @@ struct NCAgendaSaved: Equatable, Sendable {
     /// The id of the change at NoGantt, for Undo.
     var opId: String?
     var datesAdjusted = false
+    /// The version the item has now, when the answer said (NoGantt `updated_at`, Deck `lastModified`). A change of the same
+    /// Save that still waits expects this one, not the version the person saw (the queue passes it on).
+    var newUpdatedAt: String?
+    var newLastModified: Int?
 }
 
 enum NCAgendaWriteOutcome: Equatable, Sendable {

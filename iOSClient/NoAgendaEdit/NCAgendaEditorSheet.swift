@@ -52,13 +52,15 @@ struct NCAgendaOptionalDate: View {
     @Binding var date: Date
     var canSwitch = true
     var identifier: String
+    /// A day only (a to-do whose dates are days, as Reminders writes them) or a day and a time.
+    var components: DatePickerComponents = [.date, .hourAndMinute]
 
     var body: some View {
         if canSwitch {
             Toggle(title, isOn: $isOn).accessibilityIdentifier(identifier + "Switch")
         }
         if isOn || !canSwitch {
-            DatePicker(canSwitch ? "" : title, selection: $date)
+            DatePicker(canSwitch ? "" : title, selection: $date, displayedComponents: components)
                 .hidingLabel(canSwitch)
                 .accessibilityIdentifier(identifier)
         }
@@ -91,6 +93,7 @@ struct NCAgendaEditorView: View {
     }
 
     private var changed: Bool { draft != original }
+    private var problem: String? { draft.validationMessage(original: original, calendar: model.calendar, ganttZone: model.ganttZone) }
     private var isCalendarItem: Bool { item.kind == .event || item.kind == .todo }
 
     var body: some View {
@@ -101,6 +104,13 @@ struct NCAgendaEditorView: View {
             case .ganttTask: ganttFields
             case .card: cardFields
             case .milestone: EmptyView()
+            }
+            if let problem {
+                Section {
+                    Label(problem, systemImage: "exclamationmark.triangle.fill").font(.footnote)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("agendaEditorProblem")
+                }
             }
             if isCalendarItem, item.descriptionLength > 2000 {
                 Section {
@@ -133,7 +143,7 @@ struct NCAgendaEditorView: View {
                     saving = true
                     Task { await model.save(draft: draft, for: item) }
                 }
-                .disabled(!changed || saving || (isCalendarItem && draft.title.trimmingCharacters(in: .whitespaces).isEmpty))
+                .disabled(!changed || saving || problem != nil || (isCalendarItem && draft.title.trimmingCharacters(in: .whitespaces).isEmpty))
                 .accessibilityIdentifier("agendaEditorSave")
             }
         }
@@ -183,9 +193,11 @@ struct NCAgendaEditorView: View {
             Toggle(NCAgendaEditText.t("_nodrive_agenda_edit_field_done_"), isOn: $draft.done)
                 .accessibilityIdentifier("agendaEditorDone")
             NCAgendaOptionalDate(title: NCAgendaEditText.t("_nodrive_agenda_edit_field_start_"), isOn: $draft.hasStart, date: $draft.start,
-                                 canSwitch: item.start == nil, identifier: "agendaEditorStart")
+                                 canSwitch: item.start == nil, identifier: "agendaEditorStart",
+                                 components: draft.dateOnly ? [.date] : [.date, .hourAndMinute])
             NCAgendaOptionalDate(title: NCAgendaEditText.t("_nodrive_agenda_edit_field_due_"), isOn: $draft.hasDue, date: $draft.due,
-                                 canSwitch: item.due == nil, identifier: "agendaEditorDue")
+                                 canSwitch: item.due == nil, identifier: "agendaEditorDue",
+                                 components: draft.dateOnly ? [.date] : [.date, .hourAndMinute])
         }
     }
 
@@ -214,8 +226,10 @@ struct NCAgendaEditorView: View {
         }
     }
 
+    /// The statuses NoGantt 2.4.1 accepts (its StatusValidator): not started, in progress, blocked and done. Done is the
+    /// switch below; any other status the task has already is shown but not offered again.
     private var statusChoices: [String] {
-        var values = ["not_started", "in_progress", "blocked", "on_hold", "cancelled"]
+        var values = NCAgendaEditDraft.ganttStatuses
         if !draft.status.isEmpty, !values.contains(draft.status) { values.insert(draft.status, at: 0) }
         return values
     }

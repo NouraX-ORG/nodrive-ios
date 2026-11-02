@@ -62,7 +62,8 @@ extension NCAgendaViewModel {
         pattern = NCAgendaEditPipeline.pattern(context: editContext)
     }
 
-    var waitingCount: Int { commands.filter { $0.isWaiting }.count }
+    var waitingCommands: [NCAgendaEditCommand] { commands.filter { $0.isWaiting } }
+    var waitingCount: Int { waitingCommands.count }
     var notSentCommands: [NCAgendaEditCommand] { commands.filter { !$0.isWaiting } }
 
     /// "Waiting to send 2 changes" and "1 change not sent": the person always sees what has not gone out.
@@ -70,7 +71,7 @@ extension NCAgendaViewModel {
         var list: [AgendaBanner] = []
         if waitingCount > 0 {
             let text = waitingCount == 1 ? NCAgendaEditText.t("_nodrive_agenda_edit_waiting_one_") : NCAgendaEditText.f("_nodrive_agenda_edit_waiting_", waitingCount)
-            list.append(AgendaBanner(id: "queueWaiting", text: text, openHome: nil, opensNotSent: false))
+            list.append(AgendaBanner(id: "queueWaiting", text: text, openHome: nil, opensNotSent: true))
         }
         if !notSentCommands.isEmpty {
             let text = notSentCommands.count == 1 ? NCAgendaEditText.t("_nodrive_agenda_edit_not_sent_one_") : NCAgendaEditText.f("_nodrive_agenda_edit_not_sent_", notSentCommands.count)
@@ -98,6 +99,9 @@ extension NCAgendaViewModel {
         if item.lock == .readOnlyCalendar { return .locked(NCAgendaText.t("_nodrive_agenda_lock_read_only_")) }
         if item.lock == .viewerProject { return .locked(NCAgendaText.t("_nodrive_agenda_lock_viewer_")) }
         if item.lock == .guardReadOnly { return .locked(NCAgendaText.t("_nodrive_agenda_lock_guard_")) }
+        // NoGantt or NoBoard that refuses this app, is read only or is not installed takes no change, so the row is locked
+        // (its saved copy is still shown); the sheet has "Open in ..." (design 5). Offline or unreachable only waits.
+        if let text = homeLock(of: item.home) { return .locked(text) }
         if item.home == .calendar || item.home == .tasks {
             if item.invited { return .locked(NCAgendaText.t("_nodrive_agenda_invited_")) }
             let source = display.sources.first { $0.key == item.sourceKey }
@@ -105,6 +109,21 @@ extension NCAgendaViewModel {
             if source?.setting == .info { return .locked(NCAgendaText.t("_nodrive_agenda_lock_read_only_")) }
         }
         return .editable
+    }
+
+    private func homeLock(of home: AgendaHome) -> String? {
+        let state: AgendaHomeState
+        switch home {
+        case .gantt: state = result.status.gantt
+        case .board: state = result.status.board
+        case .calendar, .tasks: return nil
+        }
+        switch state {
+        case .refused: return NCAgendaEditText.f("_nodrive_agenda_edit_lock_refused_", home.productName)
+        case .readOnly: return NCAgendaText.t("_nodrive_agenda_lock_guard_")
+        case .notInstalled: return NCAgendaEditText.f("_nodrive_agenda_edit_lock_not_installed_", home.productName)
+        case .unknown, .fresh, .unreachable: return nil
+        }
     }
 
     /// The choices of "Who does it?": Self and my agents (paused ones greyed, retired ones not offered), and the current
@@ -115,6 +134,7 @@ extension NCAgendaViewModel {
             guard item?.home == .gantt, let projectId = item?.link.projectId else { return nil }
             return editContext.ganttContext(projectId: projectId)
         }()
+        let currentTask = ganttContext?.projectTasks.first(where: { $0.id == item?.link.taskId })
         for agent in editContext.myAgents {
             let choice = AgentChoice(agent)
             switch agent.status {
@@ -123,7 +143,7 @@ extension NCAgendaViewModel {
             case .paused:
                 options.append(AgentOption(choice: choice, enabled: false, note: NCAgendaText.t("_nodrive_agenda_agent_status_paused_")))
             case .active:
-                if let ganttContext, !NCAgendaGanttAgentChange.isOffered(agent, context: ganttContext) {
+                if let ganttContext, !NCAgendaGanttAgentChange.isOffered(agent, context: ganttContext, task: currentTask) {
                     options.append(AgentOption(choice: choice, enabled: false,
                                                note: NCAgendaGanttAgentChange.text(.agentNotVisible(name: agent.name)), offersOpen: true))
                 } else {
@@ -189,9 +209,9 @@ extension NCAgendaViewModel {
     }
 
     private func toastFor(_ report: NCAgendaQueueReport) {
-        if let command = report.saved.last, let details = report.savedDetails[command.id], command.kind == .ganttUpdate,
-           command.gantt?.startDay != nil || command.gantt?.endDay != nil, let start = details.savedStart ?? details.savedEnd {
-            _ = start
+        // The last move of dates in this send (a Save with dates and an agent sends two commands; the move is the one to tell).
+        if let command = report.saved.last(where: { $0.kind == .ganttUpdate && ($0.gantt?.startDay != nil || $0.gantt?.endDay != nil) }),
+           let details = report.savedDetails[command.id], details.savedStart != nil || details.savedEnd != nil {
             var text = movedText(details)
             if !details.alsoMoved.isEmpty { text += " " + NCAgendaEditText.f("_nodrive_agenda_edit_also_moved_", details.alsoMoved.joined(separator: ", ")) }
             if details.datesAdjusted { text += " " + NCAgendaEditText.t("_nodrive_agenda_edit_adjusted_") }

@@ -172,6 +172,11 @@ enum NCAgendaICalPatch {
         func remove(_ name: String) {
             for index in properties[name] ?? [] { removals.insert(index) }
         }
+        /// Is the property there as a date only (`VALUE=DATE`)? Nil when it is not there at all.
+        func isDateOnly(_ name: String) -> Bool? {
+            guard let first = properties[name]?.first else { return nil }
+            return NCAgendaICal.parseLine(all[first].logical)?.params["VALUE"]?.uppercased() == "DATE"
+        }
 
         if let title = change.title { set("SUMMARY", property("SUMMARY", escape(title))) }
         if let text = change.descriptionText {
@@ -198,15 +203,19 @@ enum NCAgendaICalPatch {
                 remove("DURATION")
             }
         } else {
+            // DTSTART and DUE of a to-do must be of one value type (sabre refuses a mix with 415): the one that is there
+            // keeps its type (a date-only reminder stays date-only), and a new one is written in the type of the other.
+            let existingStart = isDateOnly("DTSTART")
+            let existingDue = isDateOnly("DUE")
             if let start = change.start {
-                if change.allDay == true || (change.allDay == nil && current?.startAllDay == true) {
+                if change.allDay ?? existingStart ?? existingDue ?? false {
                     set("DTSTART", property("DTSTART", params: ";VALUE=DATE", dayStamp(start, zone: zone)))
                 } else {
                     set("DTSTART", property("DTSTART", utcStamp(start)))
                 }
             }
             if let due = change.due {
-                if change.allDay == true {
+                if change.allDay ?? existingDue ?? existingStart ?? false {
                     set("DUE", property("DUE", params: ";VALUE=DATE", dayStamp(due, zone: zone)))
                 } else {
                     set("DUE", property("DUE", utcStamp(due)))

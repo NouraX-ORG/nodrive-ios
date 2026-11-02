@@ -5,20 +5,30 @@
 
 A browser (Playwright with the runner's Chrome) signs in as Ali, edits the title of a tagged event in the Calendar page and of a
 tagged to-do in the Tasks page, and the objects are read back through CalDAV. For each page the agent id
-(`X-NOURAX-AGENT-ID`) and the tag (`CATEGORIES` value `agent:AG-0001`) are reported as survived or dropped. The step fails only
-when both are dropped for one page (then the agent would be lost). When the page could not be driven (the page changed, a dialog
-got in the way) that is said in the report as "not driven"; it is not a pass of the design test, and the owner row stays open.
+(`X-NOURAX-AGENT-ID`) and the tag (`CATEGORIES` value `agent:AG-0001`) are reported as survived or dropped.
+
+The pages are driven the way the desktop job drives them (nodrive-desktop tools/ci/agenda-webedit.py, which edits both pages): the
+Calendar page through its edit route (the object path in base64) and the Edit button, the Tasks page by clicking the task and its
+title, a text field found by its current value, Save (Calendar) or Enter (Tasks), then a wait.
+
+The step FAILS when
+  - neither page could be edited (then the design test was not run on this branch: "not driven" is not a pass), or
+  - both properties are dropped for a page that was edited (then the agent would be lost there).
+When only one page could be driven the step passes with a visible WARNING line in the report and in the job log.
 Report: <out>/agenda-webedit.md
 """
 import argparse
+import base64
 import os
 import re
 import sys
+import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import agenda_common as c  # noqa: E402
 
 ROWS = []
+DRIVEN = []
 
 
 def row(name, ok, detail=''):
@@ -31,25 +41,31 @@ def info(name, detail):
     print('info ' + name + ' - ' + detail)
 
 
+def warn(name, detail):
+    ROWS.append((name, None, 'WARNING ' + detail))
+    print('WARNING ' + name + ' - ' + detail)
+
+
 def read(path):
     status, _, data = c.request_retry('ali', 'GET', path)
     return status, data.decode('utf-8', 'replace')
 
 
 def survival(name, path, expected_title):
+    """Reads the object back. True when the page edited it (the title changed), False when it did not."""
     status, text = read(path)
     if status != 200:
-        info(name, 'the object could not be read (status %s)' % status)
-        return None
+        warn(name, 'the object could not be read (status %s)' % status)
+        return False
     if expected_title not in text:
-        info(name, 'not driven: the title did not change in the page (the object was not edited)')
-        return None
+        warn(name, 'not driven: the title did not change in the page (the object was not edited)')
+        return False
     kept_id = 'X-NOURAX-AGENT-ID:AG-0001' in text
     kept_tag = bool(re.search(r'^CATEGORIES:.*agent:AG-0001', text, re.M))
     info(name + ': the agent id', 'survived' if kept_id else 'dropped')
     info(name + ': the tag in CATEGORIES', 'survived' if kept_tag else 'dropped')
     row(name + ': the agent is not lost (the id or the tag survived)', kept_id or kept_tag)
-    return kept_id, kept_tag
+    return True
 
 
 def diag(page, label, out):
@@ -65,59 +81,126 @@ def diag(page, label, out):
 
 
 def login(page, base, user, password):
-    page.goto(base + '/login', wait_until='networkidle', timeout=90000)
+    page.goto(base + '/login', wait_until='domcontentloaded')
+    page.wait_for_selector('input[name="user"]', timeout=60000)
     page.fill('input[name="user"]', user)
     page.fill('input[name="password"]', password)
-    page.click('button[type="submit"]')
-    page.wait_for_url(re.compile(r'.*/apps/.*'), timeout=90000)
-    for label in ('Skip', 'Close', 'Dismiss'):
+    page.locator('button[type="submit"]').first.click()
+    page.wait_for_url(re.compile(r'/(apps|index\.php/apps)/'), timeout=90000)
+
+
+def dismiss_first_run(page):
+    """The first-run wizard and the app tour, if they are shown."""
+    for label in ('Skip', 'Close', 'Got it', 'Finish', 'Next'):
         try:
-            page.get_by_role('button', name=label).first.click(timeout=2000)
+            button = page.get_by_role('button', name=label).first
+            if button.is_visible(timeout=1500):
+                button.click()
         except Exception:  # noqa: BLE001 - there may be no dialog
             pass
-
-
-def edit_task(page, base):
-    page.goto(base + '/index.php/apps/tasks/', wait_until='networkidle', timeout=90000)
-    page.wait_for_timeout(3000)
-    page.get_by_text('Draft report').first.click(timeout=30000)
-    page.wait_for_timeout(1500)
-    handle = page.evaluate_handle("""() => {
-        const all = [...document.querySelectorAll('input, textarea, [contenteditable="true"]')];
-        return all.find(e => (e.value || e.textContent || '').trim() === 'Draft report') || null;
-    }""").as_element()
-    if handle is None:
-        raise RuntimeError('no title field with the task title')
-    handle.click()
-    handle.fill('Draft report (web edit)')
-    page.keyboard.press('Tab')
-    page.wait_for_timeout(4000)
-
-
-def edit_event(page, base):
-    page.goto(base + '/index.php/apps/calendar/', wait_until='networkidle', timeout=90000)
-    page.wait_for_timeout(4000)
-    page.locator('.fc-event', has_text='Writer-Bot review').first.click(timeout=30000)
-    page.wait_for_timeout(1500)
     try:
-        page.get_by_role('button', name=re.compile('Edit', re.I)).first.click(timeout=10000)
-    except Exception:  # noqa: BLE001 - the editor may open directly
+        page.keyboard.press('Escape')
+    except Exception:  # noqa: BLE001
         pass
-    page.wait_for_timeout(1500)
-    field = page.locator('input[placeholder*="title" i], input[aria-label*="title" i]').first
-    field.click(timeout=15000)
-    field.fill('Writer-Bot review (web edit)')
-    page.get_by_role('button', name=re.compile('^Save', re.I)).first.click(timeout=15000)
-    page.wait_for_timeout(5000)
+
+
+def type_title(page, old, new):
+    """Finds the text field that holds the old title and writes the new one."""
+    for locator in (page.get_by_role('textbox'), page.locator('input[type=text]'), page.locator('textarea')):
+        for i in range(locator.count()):
+            field = locator.nth(i)
+            try:
+                if field.is_visible() and field.input_value() == old:
+                    field.fill(new)
+                    return True
+            except Exception:  # noqa: BLE001
+                continue
+    locator = page.locator('[contenteditable=true]')
+    for i in range(locator.count()):
+        field = locator.nth(i)
+        try:
+            if field.is_visible() and (field.inner_text() or '').strip() == old:
+                field.fill(new)
+                return True
+        except Exception:  # noqa: BLE001
+            continue
+    return False
+
+
+def click_save(page):
+    for name in ('Save', 'Update', 'Done'):
+        try:
+            button = page.get_by_role('button', name=re.compile(r'^\s*%s\s*$' % name, re.I)).first
+            if button.is_visible(timeout=2000):
+                button.click()
+                return True
+        except Exception:  # noqa: BLE001
+            continue
+    return False
+
+
+def open_calendar_editor(page, url, old):
+    """The route opens the event in a read-only popover: its Edit button opens the editor."""
+    page.goto(url, wait_until='domcontentloaded')
+    page.wait_for_timeout(6000)
+    for _ in range(3):
+        try:
+            edit = page.get_by_role('button', name=re.compile(r'^\s*Edit\s*$')).first
+            if edit.is_visible():
+                edit.click()
+                page.wait_for_timeout(3000)
+                return
+        except Exception:  # noqa: BLE001
+            pass
+        page.wait_for_timeout(2000)
+
+
+def open_task_details(page, url, old):
+    """The list of the Tasks app: a click on the task opens its details with the title field."""
+    page.goto(url, wait_until='domcontentloaded')
+    page.wait_for_timeout(6000)
+    try:
+        page.get_by_text(old, exact=True).first.click()
+    except Exception:  # noqa: BLE001
+        page.get_by_text(old).first.click()
+    page.wait_for_timeout(3000)
+    # The title in the header of the details (the right part of the page) is the field: a click makes it editable.
+    matches = page.get_by_text(old, exact=True)
+    for i in range(matches.count()):
+        try:
+            box = matches.nth(i).bounding_box()
+            if box and box['x'] > 900 and matches.nth(i).is_visible():
+                matches.nth(i).click()
+                page.wait_for_timeout(1500)
+                break
+        except Exception:  # noqa: BLE001
+            continue
+
+
+def drive(label, page, url, old, new, opener, saves_with_enter, out):
+    """Opens the item, changes the title, saves. Raises nothing: a page that can not be driven is reported."""
+    try:
+        opener(page, url, old)
+        if not type_title(page, old, new):
+            raise RuntimeError('no title field with the task title' if saves_with_enter else 'no title field with the event title')
+        if saves_with_enter:
+            page.keyboard.press('Enter')   # the Tasks app saves the title with Enter
+        elif not click_save(page):
+            raise RuntimeError('no Save button')
+        page.wait_for_timeout(5000)
+    except Exception as e:  # noqa: BLE001
+        warn(label, 'not driven: %s %s' % (type(e).__name__, str(e).splitlines()[0][:100] if str(e) else ''))
+        diag(page, label, out)
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--out', default='build/agenda-server')
     args = ap.parse_args()
+    os.makedirs(args.out, exist_ok=True)
     password = os.environ.get('NODRIVE_AGENDA_LOGIN_PW_ALI')
     if not password:
-        info('web edit', 'not driven: no login password of ali in the environment')
+        row('web edit: the sign-in password of ali is in the environment', False, 'the step needs it to drive the web pages')
     else:
         try:
             from playwright.sync_api import sync_playwright
@@ -131,8 +214,9 @@ def main():
                     browser = p.chromium.launch(channel='chrome')
                 except Exception:  # noqa: BLE001
                     browser = p.chromium.launch()
-                context = browser.new_context(viewport={'width': 1400, 'height': 1000})
+                context = browser.new_context(viewport={'width': 1400, 'height': 900}, locale='en-GB', timezone_id='Europe/Berlin')
                 page = context.new_page()
+                page.set_default_timeout(30000)
                 try:
                     login(page, base, 'ali', password)
                     info('web edit sign-in', 'signed in as ali')
@@ -140,16 +224,21 @@ def main():
                     info('web edit sign-in', 'not driven: ' + type(e).__name__)
                     page = None
                 if page is not None:
-                    for label, action in (('Tasks page', edit_task), ('Calendar page', edit_event)):
-                        try:
-                            action(page, base)
-                        except Exception as e:  # noqa: BLE001
-                            info(label, 'not driven: %s %s' % (type(e).__name__, str(e).splitlines()[0][:100] if str(e) else ''))
-                            diag(page, label, args.out)
-                    survival('Tasks page', '/remote.php/dav/calendars/ali/personal/draft-report.ics', 'Draft report (web edit)')
-                    survival('Calendar page', '/remote.php/dav/calendars/ali/work/writer-review.ics', 'Writer-Bot review (web edit)')
+                    dismiss_first_run(page)
+                    event_path = '/remote.php/dav/calendars/ali/work/writer-review.ics'
+                    encoded = urllib.parse.quote(base64.b64encode(event_path.encode()).decode(), safe='')
+                    drive('Calendar page', page, '%s/index.php/apps/calendar/edit/%s' % (base, encoded), 'Writer-Bot review',
+                          'Writer-Bot review (web edit)', open_calendar_editor, False, args.out)
+                    if survival('Calendar page', event_path, 'Writer-Bot review (web edit)'):
+                        DRIVEN.append('Calendar page')
+                    drive('Tasks page', page, base + '/index.php/apps/tasks/', 'Draft report', 'Draft report (web edit)', open_task_details, True, args.out)
+                    if survival('Tasks page', '/remote.php/dav/calendars/ali/personal/draft-report.ics', 'Draft report (web edit)'):
+                        DRIVEN.append('Tasks page')
                 browser.close()
-    os.makedirs(args.out, exist_ok=True)
+        # Design 4.2 needs the proof: at least one page edited. "Not driven" on both is a failure, never a pass.
+        row('web edit: at least one of the two pages was edited and read back', len(DRIVEN) >= 1, 'edited: %s' % (', '.join(DRIVEN) or 'none'))
+        if len(DRIVEN) == 1:
+            warn('web edit', 'only %s could be driven; the other page was not edited on this run (the desktop and Android jobs edit both)' % DRIVEN[0])
     with open(os.path.join(args.out, 'agenda-webedit.md'), 'w', encoding='utf-8') as fh:
         fh.write('# The agent after an edit in the web pages (design 4.2)\n\n')
         for name, ok, detail in ROWS:

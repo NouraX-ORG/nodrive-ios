@@ -21,7 +21,7 @@ struct NCAgendaGanttWriter {
             return (response, nil)
         } catch let error as NCAgendaHTTPError {
             if error == .network { return (nil, .offline) }
-            return (nil, .refused(NCAgendaEditText.f("_nodrive_agenda_edit_refused_generic_", 0)))
+            return (nil, .refused(NCAgendaEditText.t("_nodrive_agenda_edit_refused_local_")))
         } catch {
             return (nil, .offline)
         }
@@ -105,6 +105,7 @@ struct NCAgendaGanttWriter {
         if let task = data["task"] as? [String: Any] {
             result.savedStart = NCAgendaJSON.string(task["start_date"])
             result.savedEnd = NCAgendaJSON.string(task["end_date"])
+            result.newUpdatedAt = NCAgendaJSON.string(task["updated_at"])
         }
         result.opId = NCAgendaJSON.string(data["op_id"])
         for entry in data["propagated"] as? [Any] ?? [] {
@@ -142,11 +143,14 @@ struct NCAgendaGanttWriter {
     /// "My agent" (Self or one of my agents): the new `resources` list from the fresh task; the answer must hold exactly
     /// the list that was sent.
     func changeAgent(projectId: Int, taskId: Int, seenUpdatedAt: String?, choice: AgentChoice, context: GanttAgentContext) async -> NCAgendaWriteOutcome {
-        let (fresh, _, failure) = await freshTask(projectId: projectId, taskId: taskId)
+        let (fresh, tasks, failure) = await freshTask(projectId: projectId, taskId: taskId)
         if let failure { return failure }
         guard let fresh else { return .offline }
         if let seenUpdatedAt, fresh.updatedAt != seenUpdatedAt { return .conflict }
-        switch NCAgendaGanttAgentChange.plan(task: fresh, choice: choice, context: context) {
+        // The tasks of the project as they are now tell which planning person belongs to this project.
+        var planContext = context
+        planContext.projectTasks = tasks
+        switch NCAgendaGanttAgentChange.plan(task: fresh, choice: choice, context: planContext) {
         case let .refused(reason):
             return .refused(NCAgendaGanttAgentChange.text(reason))
         case let .rows(rows):
@@ -169,6 +173,12 @@ struct NCAgendaGanttWriter {
             }
             return .saved(saved(from: response, tasks: []))
         }
+    }
+
+    /// The `updated_at` the task has now (a fresh read), for the next change of the same Save when the answer did not say.
+    func currentUpdatedAt(projectId: Int, taskId: Int) async -> String? {
+        let (task, _, failure) = await freshTask(projectId: projectId, taskId: taskId)
+        return failure == nil ? task?.updatedAt : nil
     }
 
     /// Undo of a move: `POST changes/{op_id}/revert`.

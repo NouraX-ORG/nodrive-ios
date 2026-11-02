@@ -321,6 +321,38 @@ struct NoDriveAgendaAgentLoadTests {
         #expect(load?.planned == 1 && load?.isOver == false)
     }
 
+    @Test("A planning person known by its name only counts for the agent only next to my own planning person on the same task")
+    func nameNeedsMyPersonOnTheTask() {
+        var research = S.agent("AG-0003", "Research-Bot")
+        research.availability = AgentAvailability(timezone: nil, days: [0, 1, 2, 3, 4], capacityHoursPerWeek: 40, daysOff: [])
+        func gantt(withPerson: Bool) -> RawGantt {
+            var value = RawGantt()
+            value.timezone = "UTC"
+            value.resources = [GanttResource(id: 1, name: "Ali", type: "person", uid: "ali", uidDisplayName: "Ali"),
+                               GanttResource(id: 11, name: "🤖 Research-Bot (Ali)", type: "person", uid: nil, uidDisplayName: nil)]
+            var rows = [GanttResourceRow(resourceId: 11, work: 12)]
+            if withPerson { rows.insert(GanttResourceRow(resourceId: 1, work: 1), at: 0) }
+            value.tasks = ["1": [GanttTask(id: 1, projectId: 1, title: "Copy", start: "2026-11-04 09:00:00", end: "2026-11-04 17:00:00",
+                                           status: "in_progress", resources: rows)]]
+            return value
+        }
+        // Next to Ali: 12 h against 8 h a day, overbooked
+        #expect(problems(research, gantt(withPerson: true)).count == 1)
+        // A name-only row without Ali on the task is "agent with no person" for the core: it counts for nobody
+        #expect(problems(research, gantt(withPerson: false)).isEmpty)
+        // The registry id is enough on its own
+        var byId = research
+        byId.ganttResourceIds = [11]
+        #expect(problems(byId, gantt(withPerson: false)).count == 1)
+    }
+
+    @Test("The days are walked in the agent's own zone: Wednesday's work is reported on Wednesday for an agent behind the device's zone")
+    func oneZone() {
+        let found = problems(Self.agent(zone: "Pacific/Honolulu"), Self.gantt(work: 12))
+        #expect(found.count == 1)
+        #expect(found.first?.text.contains("Writer-Bot is overbooked on Wednesday") == true)
+    }
+
     @Test("Days are looked at from today for 28 days")
     func horizon() {
         let far = Self.gantt(work: 99, start: "2026-12-30 09:00:00", end: "2026-12-30 17:00:00")

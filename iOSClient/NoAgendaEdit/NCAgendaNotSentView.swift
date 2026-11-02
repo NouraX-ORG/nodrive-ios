@@ -11,8 +11,24 @@ struct NCAgendaNotSentView: View {
     var body: some View {
         NavigationStack {
             List {
-                if model.notSentCommands.isEmpty {
+                if model.notSentCommands.isEmpty, model.waitingCommands.isEmpty {
                     Text(NCAgendaEditText.t("_nodrive_agenda_edit_nothing_unsent_")).foregroundStyle(.secondary)
+                }
+                // What still waits to be sent (a person can look at it; a waiting change is sent by itself, or moves here).
+                if !model.waitingCommands.isEmpty {
+                    Section(NCAgendaEditText.t("_nodrive_agenda_edit_waiting_title_")) {
+                        ForEach(model.waitingCommands) { command in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(command.title.isEmpty ? " " : command.title).font(.headline)
+                                Text(command.summary + " · " + command.home.productName)
+                                    .font(.footnote).foregroundStyle(.secondary)
+                                Text(NCAgendaEditText.t("_nodrive_agenda_edit_waiting_row_")).font(.subheadline)
+                            }
+                            .padding(.vertical, 4)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityIdentifier("agendaWaiting-" + command.id.uuidString)
+                        }
+                    }
                 }
                 ForEach(model.notSentCommands) { command in
                     VStack(alignment: .leading, spacing: 8) {

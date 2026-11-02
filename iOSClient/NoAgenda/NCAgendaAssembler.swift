@@ -227,6 +227,7 @@ struct NCAgendaAssembler {
             item.start = component.start
             item.due = component.due ?? (component.durationSeconds.flatMap { seconds in component.start.map { $0.addingTimeInterval(TimeInterval(seconds)) } })
             item.allDay = component.startAllDay
+            item.dueAllDay = component.dueAllDay
             item.late = isLate(end: item.due, done: false)
         }
         return item

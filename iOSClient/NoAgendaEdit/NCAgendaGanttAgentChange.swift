@@ -11,6 +11,9 @@ struct GanttAgentContext: Sendable {
     /// The planning people visible to me (NoGantt drops a row it can't show me, silently).
     var resources: [Int: GanttResource]
     var project: GanttProject?
+    /// The tasks of the project (the cached ones in the editor, the fresh ones at send time). They show which planning
+    /// people belong to this project.
+    var projectTasks: [GanttTask] = []
 }
 
 /// "My agent" on a Gantt task: the new `resources` list, built from the **fresh** task, and the reasons to send nothing.
@@ -40,19 +43,36 @@ enum NCAgendaGanttAgentChange {
         }
     }
 
-    /// The registry agent of a planning person of mine (by id, or by the exact name next to my planning person).
-    static func agent(of resource: GanttResource, among agents: [RegistryAgent], personName: String) -> RegistryAgent? {
-        agents.first { NCAgendaAgentLoad.isPlanningPerson(resource, of: $0, personName: personName) }
+    /// The registry agent of a planning person of mine (by id, or by the exact name next to my planning person on the task).
+    static func agent(of resource: GanttResource, among agents: [RegistryAgent], personName: String, personOnTask: Bool) -> RegistryAgent? {
+        agents.first { NCAgendaAgentLoad.isPlanningPerson(resource, of: $0, personName: personName, personOnTask: personOnTask) }
     }
 
-    /// The planning person that stands for the chosen agent, when I can see it.
-    static func planningPerson(of agent: RegistryAgent, context: GanttAgentContext) -> GanttResource? {
-        context.resources.values.sorted { $0.id < $1.id }.first { NCAgendaAgentLoad.isPlanningPerson($0, of: agent, personName: context.myName) }
+    /// The planning person that stands for the chosen agent **in this project** (design 4.5, plan 3.4), in this order: the
+    /// one already on the task, one that sits on another task of the project, one in the pool of the project's owner.
+    /// A same-named person of another manager's pool is never taken: NoGantt would drop a row the manager can't see.
+    static func planningPerson(of agent: RegistryAgent, context: GanttAgentContext, task: GanttTask?) -> GanttResource? {
+        let mine = Set(context.resources.values.filter { $0.uid?.lowercased() == context.myUid.lowercased() }.map { $0.id })
+        func found(on other: GanttTask) -> GanttResource? {
+            let personOnTask = other.resources.contains { mine.contains($0.resourceId) }
+            return other.resources.compactMap { context.resources[$0.resourceId] }
+                .filter { NCAgendaAgentLoad.isPlanningPerson($0, of: agent, personName: context.myName, personOnTask: personOnTask) }
+                .min { $0.id < $1.id }
+        }
+        if let task, let onTask = found(on: task) { return onTask }
+        for other in context.projectTasks.sorted(by: { $0.id < $1.id }) where other.id != task?.id {
+            if let onProject = found(on: other) { return onProject }
+        }
+        guard let owner = context.project?.ownerId.lowercased(), !owner.isEmpty else { return nil }
+        return context.resources.values
+            .filter { $0.ownerId?.lowercased() == owner
+                && NCAgendaAgentLoad.isPlanningPerson($0, of: agent, personName: context.myName, personOnTask: true) }
+            .min { $0.id < $1.id }
     }
 
-    /// Can this agent be chosen on tasks of the project? Its planning person must be visible to me.
-    static func isOffered(_ agent: RegistryAgent, context: GanttAgentContext) -> Bool {
-        planningPerson(of: agent, context: context) != nil
+    /// Can this agent be chosen on tasks of the project? Its planning person must belong to the project.
+    static func isOffered(_ agent: RegistryAgent, context: GanttAgentContext, task: GanttTask? = nil) -> Bool {
+        planningPerson(of: agent, context: context, task: task) != nil
     }
 
     /// The new list for "my agent" = `choice` (nil id: Self) on the fresh `task`.
@@ -66,13 +86,12 @@ enum NCAgendaGanttAgentChange {
 
         var rows = old.filter { row in
             guard let resource = context.resources[row.resourceId] else { return true }
-            return agent(of: resource, among: context.myAgents, personName: context.myName) == nil
+            // I am on this task (checked above), so a name match next to my planning person counts.
+            return agent(of: resource, among: context.myAgents, personName: context.myName, personOnTask: true) == nil
         }
-        var chosenResourceId: Int?
         if let id = choice.id {
             guard let registryAgent = context.myAgents.first(where: { $0.id == id }) else { return .refused(.agentNotVisible(name: choice.name)) }
-            guard let planning = planningPerson(of: registryAgent, context: context) else { return .refused(.agentNotVisible(name: registryAgent.name)) }
-            chosenResourceId = planning.id
+            guard let planning = planningPerson(of: registryAgent, context: context, task: task) else { return .refused(.agentNotVisible(name: registryAgent.name)) }
             if !rows.contains(where: { $0.resourceId == planning.id }) {
                 if context.project?.rolesOnly == true { return .refused(.rolesOnly) }
                 rows.append(GanttResourceRow(resourceId: planning.id, work: nil))
@@ -86,7 +105,6 @@ enum NCAgendaGanttAgentChange {
         let newWork = rows.reduce(0.0) { $0 + ($1.work ?? 0) }
         if abs(oldWork - newWork) > 0.0001 { return .refused(.workWouldChange) }
         if let first = old.first, rows.first?.resourceId != first.resourceId { return .refused(.firstWouldChange) }
-        _ = chosenResourceId
         return .rows(rows)
     }
 

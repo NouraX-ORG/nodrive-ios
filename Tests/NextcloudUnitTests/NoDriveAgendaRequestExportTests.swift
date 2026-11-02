@@ -157,6 +157,14 @@ struct NoDriveAgendaRequestExportTests {
         #expect(await Self.writer(Self.calendarHTTP(recorder, text: draft)).patch(path: personal + "draft-report.ics", seenEtag: nil, change: done) == .plainSaved)
         recorder.finish("todo-done")
 
+        // A date-only to-do (as Reminders writes it): its due date moves and it stays date-only (a mix of DATE and DATE-TIME gives 415)
+        let reminder = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Nourax//NoAgenda CI//EN", "BEGIN:VTODO", "UID:ci-replay-todo", "DTSTAMP:20261030T090000Z",
+                        "SUMMARY:Pay rent", "DTSTART;VALUE=DATE:20261029", "DUE;VALUE=DATE:20261030", "END:VTODO", "END:VCALENDAR", ""].joined(separator: "\r\n")
+        var reminderDue = CalendarChange()
+        reminderDue.due = S.date("2026-11-01T10:00:00Z")
+        #expect(await Self.writer(Self.calendarHTTP(recorder, text: reminder)).patch(path: personal + "ci-replay-todo.ics", seenEtag: nil, change: reminderDue) == .plainSaved)
+        recorder.finish("todo-date-only")
+
         var created = CalendarChange()
         created.title = "Replay event"
         created.start = S.date("2026-10-30T13:00:00Z")
@@ -197,6 +205,11 @@ struct NoDriveAgendaRequestExportTests {
         percent.percent = 70
         _ = await NCAgendaGanttWriter(http: ganttHTTP("[{\"resource_id\":1,\"work\":4}]", answer: answer)).update(projectId: 5, taskId: 501, seenUpdatedAt: nil, change: percent)
         recorder.finish("gantt-percent")
+        // A status the editor offers (NoGantt accepts not_started, in_progress, blocked and done)
+        var status = GanttChange()
+        status.status = "in_progress"
+        _ = await NCAgendaGanttWriter(http: ganttHTTP("[{\"resource_id\":1,\"work\":4}]", answer: answer)).update(projectId: 5, taskId: 503, seenUpdatedAt: nil, change: status)
+        recorder.finish("gantt-status")
 
         // "My agent": Writer-Bot to Self, then Self to Writer-Bot. The answer echoes what was sent.
         let context = NoDriveAgendaGanttAgentTests.context()
@@ -237,11 +250,11 @@ struct NoDriveAgendaRequestExportTests {
 
         // What was built is what the replay expects
         let names = recorder.scenarios.compactMap { $0["name"] as? String }
-        #expect(names.count == 14)
+        #expect(names.count == 16)
         for scenario in recorder.scenarios {
             let requests = scenario["requests"] as? [[String: Any]] ?? []
             let name = scenario["name"] as? String ?? ""
-            if name == "gantt-agent-to-self" || name == "gantt-agent-to-writer" || name == "gantt-undo" || name.hasPrefix("event") || name.hasPrefix("todo") || name.hasPrefix("gantt") {
+            if name == "gantt-agent-to-self" || name == "gantt-agent-to-writer" || name == "gantt-undo" || name == "todo-date-only" || name == "gantt-status" || name.hasPrefix("event") || name.hasPrefix("todo") || name.hasPrefix("gantt") {
                 #expect(!requests.isEmpty, "\(name) built no request")
             }
         }

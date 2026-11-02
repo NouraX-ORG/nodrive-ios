@@ -43,12 +43,23 @@
 "_nodrive_agenda_edit_refused_forbidden_" = "You are not allowed to change this.";
 "_nodrive_agenda_edit_refused_locked_" = "This is being changed by someone else right now.";
 "_nodrive_agenda_edit_refused_generic_" = "The server did not accept this change (%d).";
+"_nodrive_agenda_edit_refused_local_" = "This change could not be sent from this device. Try again, or change it in the web app.";
 "_nodrive_agenda_edit_refused_repeating_" = "This repeats. Change it in NoCalendar or NoTasks.";
 "_nodrive_agenda_edit_sum_change_" = "Change";
 "_nodrive_agenda_edit_sum_new_event_" = "New event";
 "_nodrive_agenda_edit_sum_new_todo_" = "New to-do";
 "_nodrive_agenda_edit_sum_delete_" = "Delete";
 "_nodrive_agenda_edit_sum_agent_" = "Who does it: %@";
+
+"_nodrive_agenda_edit_lock_refused_" = "%@ didn't accept NoDrive's sign-in, so this is read only here.";
+"_nodrive_agenda_edit_lock_not_installed_" = "%@ isn't installed on your server, so this is read only here.";
+"_nodrive_agenda_edit_held_refused_" = "%1$@ didn't accept NoDrive's sign-in. Open %2$@ to make this change there.";
+"_nodrive_agenda_edit_held_read_only_" = "This version of %1$@ hasn't been checked with NoAgenda yet. Open %2$@ to make this change there.";
+"_nodrive_agenda_edit_held_not_installed_" = "%1$@ isn't installed on your server. Open %2$@ to make this change there.";
+"_nodrive_agenda_edit_invalid_end_" = "The end must be after the start.";
+"_nodrive_agenda_edit_invalid_due_" = "The start must not be after the due date.";
+"_nodrive_agenda_edit_waiting_title_" = "Waiting to be sent";
+"_nodrive_agenda_edit_waiting_row_" = "Waiting to be sent.";
 
 "_nodrive_agenda_edit_saved_" = "Saved.";
 "_nodrive_agenda_edit_moved_" = "Moved to %1$@ - %2$@.";

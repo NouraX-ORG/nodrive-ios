@@ -446,6 +446,27 @@ struct NoDriveAgendaStoreTests {
     }
 
     @MainActor
+    @Test("A NoBoard that refuses this app takes no change: its rows are locked with the reason (Open in NoBoard is in the sheet); calendar rows are not")
+    func refusedHomeLocksRows() async {
+        let root = R.tempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let server = R.server { _, path in path.contains("apps/deck") ? (403, "") : nil }
+        let model = NCAgendaViewModel(account: R.account, store: R.store(server, root: root), now: { R.now })
+        await model.refresh()
+        let card = AgendaItem(key: "board:1:21", home: .board, kind: .card, title: "Card", sourceKey: "s", sourceName: "S", sourceColor: "#2563EB",
+                              link: AgendaLink(home: .board, boardId: 1, stackId: 2, cardId: 21))
+        #expect(model.ability(of: card) == .locked("NoBoard didn't accept NoDrive's sign-in, so this is read only here."))
+        let event = AgendaItem(key: "cal:1", home: .calendar, kind: .event, title: "Event", sourceKey: "s", sourceName: "S", sourceColor: "#2563EB",
+                               link: AgendaLink(home: .calendar, path: "/remote.php/dav/calendars/ali/work/x.ics"))
+        #expect(model.ability(of: event) == .editable)
+        // What waits for a NoBoard that is only unreachable is not locked
+        model.result.status.board = .unreachable(savedAt: nil)
+        #expect(model.ability(of: card) == .editable)
+        model.result.status.board = .notInstalled
+        #expect(model.ability(of: card) == .locked("NoBoard isn't installed on your server, so this is read only here."))
+    }
+
+    @MainActor
     @Test("Answering the question makes the chosen calendars Personal and the others Work, once")
     func question() async {
         let root = R.tempRoot()

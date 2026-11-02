@@ -244,6 +244,8 @@ struct AgendaItem: Codable, Equatable, Identifiable, Sendable {
     var end: Date?
     var allDay: Bool = false
     var due: Date?
+    /// A to-do whose DUE is a date only (the editor then asks for a day, not a time).
+    var dueAllDay: Bool?
     var done: Bool = false
     var percent: Int?
     var sourceKey: String

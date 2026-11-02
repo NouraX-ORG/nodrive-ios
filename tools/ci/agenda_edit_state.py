@@ -39,6 +39,20 @@ def _ocs(data, status=200, message='OK'):
     return {'ocs': {'meta': {'status': 'ok' if status == 200 else 'failure', 'statuscode': status, 'message': message}, 'data': data}}
 
 
+def mixed_todo_dates(text):
+    """sabre/vobject VTodo::validate: DTSTART and DUE of a to-do must be of one value type (both dates, or both date-times);
+    the CalDAV plugin answers 415 to a mix. (The replay job proves the same on the real server.)"""
+    if 'BEGIN:VTODO' not in text:
+        return False
+    kinds = {}
+    for line in text.replace('\r\n ', '').replace('\r\n\t', '').splitlines():
+        head = line.split(':', 1)[0].upper()
+        name = head.split(';', 1)[0]
+        if name in ('DTSTART', 'DUE') and name not in kinds:
+            kinds[name] = 'VALUE=DATE' in head.split(';')
+    return len(kinds) == 2 and kinds['DTSTART'] != kinds['DUE']
+
+
 def _now():
     return datetime.datetime.now(datetime.timezone.utc)
 
@@ -176,6 +190,8 @@ class EditState:
                     return 412, '', 'text/plain', {}
             else:
                 return 400, '', 'text/plain', {}
+            if mixed_todo_dates(text):
+                return 415, '', 'text/plain', {}
             etag = self._etag(text)
             objs[path] = {'etag': etag, 'ics': text}
             self._changed(uri)

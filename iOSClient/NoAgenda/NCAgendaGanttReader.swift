@@ -78,6 +78,8 @@ struct GanttResource: Codable, Equatable, Sendable {
     var unit: String?
     /// The work calendar of this planning person (holidays belong to a calendar).
     var calendarId: Int?
+    /// Whose pool the planning person lives in (NoGantt `owner_id`). Nil when NoGantt did not say, or the copy is older.
+    var ownerId: String?
 }
 
 /// A planning person's working days (`work-schedules`): bit 0 = Monday ... bit 6 = Sunday.
@@ -445,7 +447,8 @@ struct NCAgendaGanttReader {
         let uid = NCAgendaJSON.string(row["uid"])
         return GanttResource(id: id, name: NCAgendaJSON.string(row["name"]) ?? "", type: NCAgendaJSON.string(row["type"]) ?? "",
                              uid: (uid?.isEmpty ?? true) ? nil : uid, uidDisplayName: NCAgendaJSON.string(row["uid_display_name"]),
-                             unit: NCAgendaJSON.string(row["unit"]), calendarId: NCAgendaJSON.int(row["calendar_id"]))
+                             unit: NCAgendaJSON.string(row["unit"]), calendarId: NCAgendaJSON.int(row["calendar_id"]),
+                             ownerId: NCAgendaJSON.string(row["owner_id"]))
     }
 
     static func decodeFinding(_ row: [String: Any]) -> GanttFinding? {

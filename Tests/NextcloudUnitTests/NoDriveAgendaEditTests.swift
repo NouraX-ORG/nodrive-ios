@@ -272,6 +272,42 @@ struct NoDriveAgendaICalPatchTests {
         #expect(written.filter { $0.hasPrefix("CATEGORIES") } == ["CATEGORIES:agent:AG-0001"])
     }
 
+    static let dateOnlyTodo = [
+        "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Test//EN",
+        "BEGIN:VTODO", "UID:todo-d", "DTSTAMP:20261001T080000Z", "SUMMARY:Pay rent", "DTSTART;VALUE=DATE:20261029", "DUE;VALUE=DATE:20261030",
+        "END:VTODO", "END:VCALENDAR", ""
+    ].joined(separator: "\r\n")
+
+    @Test("A date-only to-do (as Reminders writes it) stays date-only when its due date changes: no mix of DATE and DATE-TIME")
+    func dateOnlyTodoDue() throws {
+        var change = CalendarChange()
+        change.due = S.date("2026-11-02T10:00:00Z")
+        let lines = S.lines(S.patch(change, Self.dateOnlyTodo))
+        #expect(lines.contains("DUE;VALUE=DATE:20261102"))
+        #expect(lines.contains("DTSTART;VALUE=DATE:20261029"))
+        #expect(!lines.contains { $0.hasPrefix("DUE:") })
+        let parsed = try #require(NCAgendaICal.parse(S.patch(change, Self.dateOnlyTodo), deviceZone: S.zone).first)
+        #expect(parsed.dueAllDay == true && parsed.startAllDay)
+    }
+
+    @Test("A date-only due with no start: a new start is a date too; a timed to-do gets a timed start")
+    func startFollowsDue() {
+        let dueOnly = Self.dateOnlyTodo.replacingOccurrences(of: "DTSTART;VALUE=DATE:20261029\r\n", with: "")
+        var change = CalendarChange()
+        change.start = S.date("2026-10-28T09:00:00Z")
+        let dateOnly = S.lines(S.patch(change, dueOnly))
+        #expect(dateOnly.contains("DTSTART;VALUE=DATE:20261028") && dateOnly.contains("DUE;VALUE=DATE:20261030"))
+        // The to-do of the fixtures has a timed DUE: a new start is timed, and the due stays timed when it is changed
+        let timed = S.lines(S.patch(change, S.todoICS))
+        #expect(timed.contains("DTSTART:20261028T090000Z") && timed.contains("DUE:20261030T150000Z"))
+        var due = CalendarChange()
+        due.due = S.date("2026-11-04T08:00:00Z")
+        #expect(S.lines(S.patch(due, S.todoICS)).contains("DUE:20261104T080000Z"))
+        // Nothing to copy the type from: a timed due, as before
+        let bare = ["BEGIN:VCALENDAR", "VERSION:2.0", "BEGIN:VTODO", "UID:b", "SUMMARY:Bare", "END:VTODO", "END:VCALENDAR", ""].joined(separator: "\r\n")
+        #expect(S.lines(S.patch(due, bare)).contains("DUE:20261104T080000Z"))
+    }
+
     @Test("Changes fold into one: the later value wins")
     func merge() {
         var first = CalendarChange()
@@ -311,6 +347,18 @@ struct NoDriveAgendaCalDAVWriterTests {
                 return .init(status: 404)
             }
         }
+    }
+
+    @Test("An object that comes without an ETag is not written (a PUT without If-Match could overwrite a change made meanwhile)")
+    func noEtagNoPut() async {
+        let server = EditFakeServer { request, _ in request.httpMethod == "GET" ? .init(status: 200, body: S.eventICS) : .init(status: 204) }
+        var change = CalendarChange()
+        change.title = "Moved call"
+        let outcome = await Self.writer(server).patch(path: Self.path, seenEtag: nil, change: change)
+        #expect(outcome == .refused(NCAgendaEditText.t("_nodrive_agenda_edit_refused_local_")))
+        #expect(server.requests("PUT").isEmpty)
+        // A local failure is said in plain words, without a code
+        #expect(!NCAgendaEditText.t("_nodrive_agenda_edit_refused_local_").contains("("))
     }
 
     @Test("An edit reads the object fresh, patches it, and puts it with If-Match of the fresh version")
@@ -419,9 +467,10 @@ struct NoDriveAgendaCalDAVWriterTests {
 struct NoDriveAgendaGanttAgentTests {
     static let ali = GanttResource(id: 1, name: "Ali", type: "person", uid: "ali", uidDisplayName: "Ali")
     static let sara = GanttResource(id: 2, name: "Sara", type: "person", uid: "sara", uidDisplayName: "Sara")
-    static let writer = GanttResource(id: 10, name: "🤖 Writer-Bot (Ali)", type: "person", uid: nil, uidDisplayName: nil)
-    static let research = GanttResource(id: 11, name: "🤖 Research-Bot (Ali)", type: "person", uid: nil, uidDisplayName: nil)
-    static let design = GanttResource(id: 12, name: "🤖 Design-Bot (Sara)", type: "person", uid: nil, uidDisplayName: nil)
+    // The agents' planning people live in the pool of the project's owner (Mara), as the CI seed has them.
+    static let writer = GanttResource(id: 10, name: "🤖 Writer-Bot (Ali)", type: "person", uid: nil, uidDisplayName: nil, ownerId: "mara")
+    static let research = GanttResource(id: 11, name: "🤖 Research-Bot (Ali)", type: "person", uid: nil, uidDisplayName: nil, ownerId: "mara")
+    static let design = GanttResource(id: 12, name: "🤖 Design-Bot (Sara)", type: "person", uid: nil, uidDisplayName: nil, ownerId: "mara")
     static let role = GanttResource(id: 20, name: "Designer", type: "role", uid: nil, uidDisplayName: nil)
     static let agents = [AgendaEditSupport.agent("AG-0001", "Writer-Bot", resources: [10]), AgendaEditSupport.agent("AG-0003", "Research-Bot")]
 
@@ -477,6 +526,28 @@ struct NoDriveAgendaGanttAgentTests {
         let hidden = Self.context(resources: [Self.ali, Self.sara, Self.research])
         #expect(plan([(1, 4)], writerChoice, hidden) == .refused(.agentNotVisible(name: "Writer-Bot")))
         #expect(NCAgendaGanttAgentChange.text(.agentNotVisible(name: "Writer-Bot")) == "Ask your project manager to add 🤖 Writer-Bot to this project")
+    }
+
+    @Test("Two same-named planning people in two pools: the one of this project is taken, never the other manager's")
+    func twoPools() {
+        // Research-Bot is known by its exact name only; the same name exists in Zed's pool (lower id) and in Mara's.
+        let zedsResearch = GanttResource(id: 9, name: "🤖 Research-Bot (Ali)", type: "person", uid: nil, uidDisplayName: nil, ownerId: "zed")
+        let both = Self.context(resources: [Self.ali, Self.sara, Self.writer, zedsResearch, Self.research, Self.design])
+        let research = AgentChoice(Self.agents[1])
+        #expect(plan([(1, 4)], research, both) == .rows([GanttResourceRow(resourceId: 1, work: 4), GanttResourceRow(resourceId: 11, work: nil)]))
+        // The one already on the task wins over the pool
+        #expect(plan([(1, 4), (9, nil)], research, both) == .refused(.noChange))
+        // One that sits on another task of the project is taken before the owner's pool
+        var other = both
+        other.projectTasks = [GanttTask(id: 502, projectId: 5, title: "Other", status: "in_progress",
+                                        resources: [GanttResourceRow(resourceId: 1, work: 2), GanttResourceRow(resourceId: 9, work: nil)])]
+        #expect(plan([(1, 4)], research, other) == .rows([GanttResourceRow(resourceId: 1, work: 4), GanttResourceRow(resourceId: 9, work: nil)]))
+        // Only Zed's person exists: the manager of this project does not have it, so nothing is sent
+        let foreign = Self.context(resources: [Self.ali, Self.sara, zedsResearch])
+        #expect(plan([(1, 4)], research, foreign) == .refused(.agentNotVisible(name: "Research-Bot")))
+        // The picker offers an agent only when its planning person belongs to the project
+        #expect(NCAgendaGanttAgentChange.isOffered(Self.agents[1], context: both))
+        #expect(!NCAgendaGanttAgentChange.isOffered(Self.agents[1], context: foreign))
     }
 
     @Test("The row list that the server answered must be the one that was sent")
@@ -620,7 +691,9 @@ struct NoDriveAgendaGanttDeckWriterTests {
         }
         var change = DeckChange()
         change.due = AgendaEditSupport.date("2026-11-04T12:00:00Z")
-        #expect(await NCAgendaDeckWriter(http: server.http()).update(board: 1, stack: 2, card: 21, seenLastModified: 1_761_800_000, change: change) == .plainSaved)
+        // Deck answers with the saved card: its version is passed on to the next change of the same Save
+        #expect(await NCAgendaDeckWriter(http: server.http()).update(board: 1, stack: 2, card: 21, seenLastModified: 1_761_800_000, change: change)
+                == .saved(NCAgendaSaved(newLastModified: 1_761_800_000)))
         let put = try #require(server.requests("PUT").first)
         #expect(put.url?.path == Self.boardRoot)
         let body = try #require(try JSONSerialization.jsonObject(with: put.httpBody ?? Data()) as? [String: Any])
@@ -897,6 +970,164 @@ struct NoDriveAgendaEditQueueTests {
         #expect(left.count == 1 && left[0].isWaiting && left[0].kind == .ganttUpdate)
     }
 
+    // MARK: One Save, two commands
+
+    final class Counter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var number: Int
+        init(_ start: Int) { number = start }
+        var value: Int { lock.lock(); defer { lock.unlock() }; return number }
+        func next() -> Int { lock.lock(); defer { lock.unlock() }; number += 1; return number }
+    }
+
+    static var ganttContext: AgendaEditContext {
+        var value = context
+        var gantt = RawGantt()
+        gantt.projects = [GanttProject(id: 5, title: "Website", color: nil, ownerId: "mara", ownerName: nil, permission: "editor")]
+        gantt.resources = [NoDriveAgendaGanttAgentTests.ali, NoDriveAgendaGanttAgentTests.writer]
+        value.gantt = gantt
+        value.registry = NCAgendaRegistry(agents: [S.agent("AG-0001", "Writer-Bot", resources: [10], label: "🤖 Writer-Bot"),
+                                                   S.agent("AG-0003", "Research-Bot", label: "🤖 Research-Bot")])
+        return value
+    }
+
+    /// NoGantt as the writers see it: every PUT gives the task a new `updated_at`, and the answer holds it (or not).
+    static func ganttServer(_ version: Counter, answerHasVersion: Bool) -> EditFakeServer {
+        func stamp(_ number: Int) -> String { String(format: "2026-10-30 10:00:%02d", number) }
+        return EditFakeServer { request, path in
+            guard path.hasPrefix("/ocs/v2.php/apps/nc_gantt") else { return .init(status: 404) }
+            if request.httpMethod == "GET" {
+                return .init(status: 200, body: NoDriveAgendaGanttDeckWriterTests.tasksJSON(updatedAt: version.value == 0 ? "2026-10-30 08:00:00" : stamp(version.value)))
+            }
+            let sent = String(decoding: request.httpBody ?? Data(), as: UTF8.self)
+            let now = stamp(version.next())
+            let stampField = answerHasVersion ? ",\"updated_at\":\"\(now)\"" : ""
+            if sent.contains("\"resources\"") {
+                return .init(status: 200, body: "{\"ocs\":{\"data\":{\"task\":{\"id\":501\(stampField),\"resources\":[{\"resource_id\":1,\"work\":4},{\"resource_id\":10,\"work\":null}]},\"propagated\":[]}}}")
+            }
+            return .init(status: 200, body: "{\"ocs\":{\"data\":{\"task\":{\"id\":501,\"start_date\":\"2026-11-02 09:00:00\",\"end_date\":\"2026-11-04 17:00:00\"\(stampField)},\"propagated\":[],\"op_id\":\"op-1\"}}}")
+        }
+    }
+
+    static func ganttSave() -> [NCAgendaEditCommand] {
+        let link = AgendaLink(home: .gantt, projectId: 5, taskId: 501, updatedAt: "2026-10-30 08:00:00")
+        var dates = NCAgendaEditCommand(id: UUID(), kind: .ganttUpdate, createdAt: S.now, itemKey: "gantt:501", title: "Write homepage copy", sourceKey: nil, link: link)
+        dates.gantt = GanttChange(startDay: "2026-11-02", endDay: "2026-11-04")
+        var agent = NCAgendaEditCommand(id: UUID(), kind: .ganttAgent, createdAt: S.now, itemKey: "gantt:501", title: "Write homepage copy", sourceKey: nil, link: link)
+        agent.agent = AgentChoice(S.agent("AG-0001", "Writer-Bot", resources: [10], label: "🤖 Writer-Bot"))
+        return [dates, agent]
+    }
+
+    @Test("One Save that changes the dates and the agent of a Gantt task sends both: the second expects the version the first made")
+    func ganttSaveWithTwoChanges() async {
+        for answerHasVersion in [true, false] {
+            let root = Self.root()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let version = Counter(0)
+            let server = Self.ganttServer(version, answerHasVersion: answerHasVersion)
+            let queue = Self.queue(server, root: root)
+            for command in Self.ganttSave() { await queue.enqueue(command) }
+            let report = await queue.process(context: Self.ganttContext)
+            #expect(report.saved.count == 2 && report.notSent == 0, "answer has a version: \(answerHasVersion)")
+            #expect(await queue.commands().isEmpty)
+            let puts = server.requests("PUT")
+            #expect(puts.count == 2 && server.body(puts[0]).contains("start_date") && server.body(puts[1]).contains("\"resources\""))
+        }
+    }
+
+    @Test("One Save that changes the due date and the agent of a card sends both: the second expects the version the first made")
+    func cardSaveWithTwoChanges() async {
+        let root = Self.root()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let version = Counter(1_761_800_000)
+        let server = EditFakeServer { request, path in
+            func card() -> String {
+                NoDriveAgendaGanttDeckWriterTests.card.replacingOccurrences(of: "1761800000", with: String(version.value))
+            }
+            switch (request.httpMethod ?? "", path) {
+            case ("GET", NoDriveAgendaGanttDeckWriterTests.boardRoot): return .init(status: 200, body: card())
+            case ("PUT", NoDriveAgendaGanttDeckWriterTests.boardRoot):
+                _ = version.next()
+                return .init(status: 200, body: card())
+            case ("GET", "/index.php/apps/deck/api/v1.0/boards/1"):
+                return .init(status: 200, body: "{\"id\":1,\"labels\":[{\"id\":7,\"title\":\"🤖 Writer-Bot\"},{\"id\":8,\"title\":\"🤖 Research-Bot\"}],\"permissions\":{\"PERMISSION_MANAGE\":false}}")
+            case ("PUT", _):
+                _ = version.next()
+                return .init(status: 200, body: "{}")
+            default: return .init(status: 404)
+            }
+        }
+        let queue = Self.queue(server, root: root)
+        let link = AgendaLink(home: .board, boardId: 1, stackId: 2, cardId: 21, lastModified: 1_761_800_000)
+        var due = NCAgendaEditCommand(id: UUID(), kind: .deckUpdate, createdAt: S.now, itemKey: "board:21", title: "Review sitemap", sourceKey: nil, link: link)
+        due.deck = DeckChange(due: S.date("2026-11-04T12:00:00Z"))
+        var agent = NCAgendaEditCommand(id: UUID(), kind: .deckAgent, createdAt: S.now, itemKey: "board:21", title: "Review sitemap", sourceKey: nil, link: link)
+        agent.agent = AgentChoice(S.agent("AG-0003", "Research-Bot", label: "🤖 Research-Bot"))
+        await queue.enqueue(due)
+        await queue.enqueue(agent)
+        let report = await queue.process(context: Self.ganttContext)
+        #expect(report.saved.count == 2 && report.notSent == 0)
+        #expect(await queue.commands().isEmpty)
+        #expect(server.requests("PUT").compactMap { $0.url?.lastPathComponent }.contains("assignLabel"))
+    }
+
+    @Test("A task that really changed before the first save is still a conflict for both changes: only the version of our own save is passed on")
+    func conflictStaysAConflict() async {
+        let root = Self.root()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let server = EditFakeServer { request, path in
+            guard path.hasPrefix("/ocs/v2.php/apps/nc_gantt") else { return .init(status: 404) }
+            // Someone else changed the task: its updated_at is not the one the person saw
+            if request.httpMethod == "GET" { return .init(status: 200, body: NoDriveAgendaGanttDeckWriterTests.tasksJSON(updatedAt: "2026-10-30 09:30:00")) }
+            return .init(status: 200, body: "{\"ocs\":{\"data\":{\"task\":{\"id\":501},\"propagated\":[]}}}")
+        }
+        let queue = Self.queue(server, root: root)
+        for command in Self.ganttSave() { await queue.enqueue(command) }
+        let report = await queue.process(context: Self.ganttContext)
+        #expect(report.saved.isEmpty && report.notSent == 2 && server.requests("PUT").isEmpty)
+        #expect(await queue.commands().allSatisfy { $0.notSent?.kind == .changedElsewhere })
+    }
+
+    // MARK: A home that takes no change
+
+    @Test("A home that refuses this app, is read only or is not installed: what waits for it is Not sent with the reason; the calendar goes on")
+    func blockedHomes() async {
+        for (state, word) in [(AgendaHomeState.refused(403), "sign-in"), (.readOnly, "checked"), (.notInstalled, "installed")] {
+            let root = Self.root()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let server = Self.calendarServer()
+            let queue = Self.queue(server, root: root)
+            for command in Self.ganttSave() { await queue.enqueue(command) }
+            var deck = NCAgendaEditCommand(id: UUID(), kind: .deckUpdate, createdAt: S.now, itemKey: "board:21", title: "D", sourceKey: nil,
+                                           link: AgendaLink(home: .board, boardId: 1, stackId: 2, cardId: 21))
+            deck.deck = DeckChange(done: true)
+            await queue.enqueue(deck)
+            await queue.enqueue(Self.command("a", path: "/remote.php/dav/calendars/ali/work/a.ics"))
+            var blocked = Self.context
+            blocked.ganttState = state
+            blocked.boardState = state
+            let report = await queue.process(context: blocked)
+            #expect(report.saved.count == 1 && report.notSent == 3, "\(state)")
+            #expect(server.requests.allSatisfy { $0.url?.path.hasSuffix(".ics") == true })
+            let left = await queue.commands()
+            #expect(left.count == 3 && left.allSatisfy { $0.notSent?.kind == .refused && $0.notSent?.text.contains(word) == true && $0.notSent?.text.contains("Open") == true })
+        }
+    }
+
+    @Test("A home that is only offline or unreachable holds what waits for it, and nothing is moved to Not sent")
+    func unreachableHomesWait() async {
+        let root = Self.root()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let queue = Self.queue(Self.calendarServer(), root: root)
+        for command in Self.ganttSave() { await queue.enqueue(command) }
+        var waiting = Self.context
+        waiting.ganttGuardOK = false
+        waiting.ganttState = .unreachable(savedAt: S.now)
+        let report = await queue.process(context: waiting)
+        #expect(report.saved.isEmpty && report.notSent == 0)
+        #expect(await queue.commands().allSatisfy { $0.isWaiting })
+    }
+
     @Test("The log of a whole send holds no title, address or password")
     func logIsClean() async {
         let root = Self.root()
@@ -912,5 +1143,78 @@ struct NoDriveAgendaEditQueueTests {
         let text = lines.joined(separator: "\n")
         lock.unlock()
         #expect(!text.contains("SecretPlan") && !text.contains("mara@example.org") && !text.contains("a.ics"))
+    }
+}
+
+// MARK: - The editor's draft
+
+@Suite("NoDrive NoAgenda edit draft")
+struct NoDriveAgendaEditDraftTests {
+    typealias S = AgendaEditSupport
+
+    static func item(_ kind: AgendaKind, home: AgendaHome = .tasks) -> AgendaItem {
+        AgendaItem(key: "k", home: home, kind: kind, title: "Pay rent", sourceKey: "s", sourceName: "S", sourceColor: "#2563EB", link: AgendaLink(home: home))
+    }
+
+    static func validate(_ draft: NCAgendaEditDraft, _ original: NCAgendaEditDraft) -> String? {
+        draft.validationMessage(original: original, calendar: S.calendar, ganttZone: S.zone)
+    }
+
+    @Test("A to-do whose dates are days asks for days; an event or a to-do that ends before it starts is not saved")
+    func validation() {
+        var todo = Self.item(.todo)
+        todo.start = S.date("2026-10-29T00:00:00Z")
+        todo.due = S.date("2026-10-30T00:00:00Z")
+        todo.allDay = true
+        todo.dueAllDay = true
+        let original = NCAgendaEditDraft(item: todo, calendar: S.calendar)
+        #expect(original.dateOnly)
+        var draft = original
+        #expect(Self.validate(draft, original) == nil)
+        draft.due = S.date("2026-10-28T00:00:00Z")
+        #expect(Self.validate(draft, original) == NCAgendaEditText.t("_nodrive_agenda_edit_invalid_due_"))
+        // The same day is fine for a date-only to-do
+        draft.due = S.date("2026-10-29T18:00:00Z")
+        #expect(Self.validate(draft, original) == nil)
+        // An old item that is odd already can still get a new title
+        var odd = Self.item(.todo)
+        odd.start = S.date("2026-10-31T10:00:00Z")
+        odd.due = S.date("2026-10-30T10:00:00Z")
+        let oddOriginal = NCAgendaEditDraft(item: odd, calendar: S.calendar)
+        var retitled = oddOriginal
+        retitled.title = "New title"
+        #expect(Self.validate(retitled, oddOriginal) == nil)
+
+        var event = Self.item(.event, home: .calendar)
+        event.start = S.date("2026-10-30T10:00:00Z")
+        event.end = S.date("2026-10-30T11:00:00Z")
+        let eventOriginal = NCAgendaEditDraft(item: event, calendar: S.calendar)
+        var later = eventOriginal
+        later.end = S.date("2026-10-30T09:00:00Z")
+        #expect(Self.validate(later, eventOriginal) == NCAgendaEditText.t("_nodrive_agenda_edit_invalid_end_"))
+        later.end = S.date("2026-10-30T10:00:00Z")
+        #expect(Self.validate(later, eventOriginal) == NCAgendaEditText.t("_nodrive_agenda_edit_invalid_end_"))
+        later.end = S.date("2026-10-30T12:00:00Z")
+        #expect(Self.validate(later, eventOriginal) == nil)
+    }
+
+    @Test("A Gantt task offers only the statuses NoGantt 2.4.1 accepts; done is the Done switch")
+    func ganttStatuses() {
+        #expect(NCAgendaEditDraft.ganttStatuses == ["not_started", "in_progress", "blocked"])
+        #expect(!NCAgendaEditDraft.ganttStatuses.contains("on_hold") && !NCAgendaEditDraft.ganttStatuses.contains("cancelled"))
+        var task = Self.item(.ganttTask, home: .gantt)
+        task.link = AgendaLink(home: .gantt, projectId: 5, taskId: 501, updatedAt: "2026-10-30 08:00:00")
+        task.start = S.date("2026-10-29T09:00:00Z")
+        task.end = S.date("2026-10-31T17:00:00Z")
+        task.status = "in_progress"
+        var draft = NCAgendaEditDraft(item: task, calendar: S.calendar)
+        draft.status = "blocked"
+        draft.end = S.date("2026-11-03T17:00:00Z")
+        draft.agent = AgentChoice(S.agent("AG-0001", "Writer-Bot", resources: [10]))
+        let commands = draft.commands(for: task, calendar: S.calendar, ganttZone: S.zone, now: S.now)
+        // One Save with a change and an agent makes two commands, both for the version the person saw
+        #expect(commands.map(\.kind) == [.ganttUpdate, .ganttAgent])
+        #expect(commands.allSatisfy { $0.link.updatedAt == "2026-10-30 08:00:00" && $0.itemKey == "k" })
+        #expect(commands[0].gantt?.status == "blocked" && commands[0].gantt?.endDay == "2026-11-03")
     }
 }

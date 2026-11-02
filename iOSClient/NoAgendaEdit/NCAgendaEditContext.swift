@@ -18,6 +18,8 @@ extension NCAgendaStore {
         context.settings = settings()
         context.ganttGuardOK = status.gantt == .fresh
         context.deckGuardOK = status.board == .fresh
+        context.ganttState = status.gantt
+        context.boardState = status.board
         return context
     }
 }

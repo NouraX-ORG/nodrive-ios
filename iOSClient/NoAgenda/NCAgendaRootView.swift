@@ -191,7 +191,7 @@ struct NCAgendaRootView: View {
             if banner.opensNotSent {
                 Button(NCAgendaEditText.t("_nodrive_agenda_edit_review_")) { model.showNotSent = true }
                     .font(.subheadline.weight(.semibold))
-                    .accessibilityIdentifier("agendaBannerReview")
+                    .accessibilityIdentifier(banner.id == "queueWaiting" ? "agendaBannerReviewWaiting" : "agendaBannerReview")
             }
         }
         .accessibilityElement(children: .combine)

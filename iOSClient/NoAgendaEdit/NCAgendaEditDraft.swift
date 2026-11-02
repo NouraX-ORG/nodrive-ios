@@ -18,9 +18,18 @@ struct NCAgendaEditDraft: Equatable {
     var percent = 0
     var status = ""
     var agent: AgentChoice = .selfChoice
+    var kind: AgendaKind = .event
+    /// The statuses of a Gantt task NoGantt 2.4.1 accepts (its StatusValidator: not_started, in_progress, blocked, done).
+    /// Done is the Done switch; the others are what the picker offers.
+    static let ganttStatuses = ["not_started", "in_progress", "blocked"]
+    /// A to-do whose dates are days only (as Reminders writes them): the editor asks for a day, and the patcher keeps
+    /// the value type.
+    var dateOnly = false
 
     /// The editor starts from the row as it is.
     init(item: AgendaItem, calendar: Calendar) {
+        kind = item.kind
+        dateOnly = item.kind == .todo && (item.allDay || item.dueAllDay == true)
         title = item.title
         allDay = item.allDay
         descriptionText = item.descriptionText ?? ""
@@ -77,7 +86,6 @@ struct NCAgendaEditDraft: Equatable {
             if title != original.title { change.title = title }
             if descriptionText != original.descriptionText, item.descriptionLength <= 2000 { change.descriptionText = descriptionText }
             if item.kind == .event {
-                if allDay != original.allDay { change.allDay = allDay }
                 if allDay != original.allDay || start != original.start || end != original.end {
                     change.allDay = allDay
                     change.start = start
@@ -134,5 +142,24 @@ struct NCAgendaEditDraft: Equatable {
         return result
     }
 
-    var hasChanges: Bool { true }
+    /// Why Save is not offered: the end before the start, or a to-do that starts after it is due. Only what the person
+    /// changed is looked at (an old item that is odd already can still get a new title).
+    func validationMessage(original: NCAgendaEditDraft, calendar: Calendar, ganttZone: TimeZone) -> String? {
+        switch kind {
+        case .event:
+            guard start != original.start || end != original.end || allDay != original.allDay else { return nil }
+            let bad = allDay ? calendar.startOfDay(for: end) < calendar.startOfDay(for: start) : end <= start
+            return bad ? NCAgendaEditText.t("_nodrive_agenda_edit_invalid_end_") : nil
+        case .todo:
+            guard hasStart, hasDue, start != original.start || due != original.due || !original.hasStart || !original.hasDue else { return nil }
+            let bad = dateOnly ? calendar.startOfDay(for: start) > calendar.startOfDay(for: due) : start > due
+            return bad ? NCAgendaEditText.t("_nodrive_agenda_edit_invalid_due_") : nil
+        case .ganttTask:
+            guard start != original.start || end != original.end else { return nil }
+            return Self.dayText(end, zone: ganttZone, calendar: calendar) < Self.dayText(start, zone: ganttZone, calendar: calendar)
+                ? NCAgendaEditText.t("_nodrive_agenda_edit_invalid_end_") : nil
+        case .card, .milestone:
+            return nil
+        }
+    }
 }

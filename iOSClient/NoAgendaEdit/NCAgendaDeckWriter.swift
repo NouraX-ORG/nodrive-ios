@@ -22,7 +22,7 @@ struct NCAgendaDeckWriter {
             return (response, nil)
         } catch let error as NCAgendaHTTPError {
             if error == .network { return (nil, .offline) }
-            return (nil, .refused(NCAgendaEditText.f("_nodrive_agenda_edit_refused_generic_", 0)))
+            return (nil, .refused(NCAgendaEditText.t("_nodrive_agenda_edit_refused_local_")))
         } catch {
             return (nil, .offline)
         }
@@ -80,7 +80,8 @@ struct NCAgendaDeckWriter {
         } else if let text = NCAgendaJSON.string(fresh["done"]), !text.isEmpty, !(fresh["done"] is NSNull) {
             body["done"] = text
         } else if let flag = fresh["done"] as? Bool, flag {
-            body["done"] = true
+            // A boolean gives an error 500 on Deck: a card that is done stays done, with the date of this save.
+            body["done"] = isoDate(now)
         } else {
             body["done"] = NSNull()
         }
@@ -93,7 +94,7 @@ struct NCAgendaDeckWriter {
         guard let response else { return (nil, .offline) }
         guard response.status == 200 else { return (nil, map(status: response.status)) }
         guard let object = (try? JSONSerialization.jsonObject(with: response.data)) as? [String: Any] else {
-            return (nil, .refused(NCAgendaEditText.f("_nodrive_agenda_edit_refused_generic_", 0)))
+            return (nil, .refused(NCAgendaEditText.t("_nodrive_agenda_edit_refused_local_")))
         }
         return (object, nil)
     }
@@ -109,7 +110,18 @@ struct NCAgendaDeckWriter {
         if let putFailure { return putFailure }
         guard let response else { return .offline }
         guard response.status == 200 || response.status == 201 || response.status == 204 else { return map(status: response.status) }
-        return .plainSaved
+        // Deck answers with the saved card: its new version goes to the next change of the same Save.
+        var result = NCAgendaSaved()
+        if let card = (try? JSONSerialization.jsonObject(with: response.data)) as? [String: Any] {
+            result.newLastModified = NCAgendaJSON.int(card["lastModified"])
+        }
+        return .saved(result)
+    }
+
+    /// The `lastModified` the card has now (a fresh read), for the next change of the same Save when the answer did not say.
+    func currentLastModified(board: Int, stack: Int, card: Int) async -> Int? {
+        let (fresh, failure) = await freshCard(board: board, stack: stack, card: card)
+        return failure == nil ? fresh.flatMap { NCAgendaJSON.int($0["lastModified"]) } : nil
     }
 
     /// My agent label: the new one is put on first, then my other agents' labels come off.
@@ -151,7 +163,7 @@ struct NCAgendaDeckWriter {
                     }
                     labelId = id
                 }
-                guard let labelId else { return .refused(NCAgendaEditText.f("_nodrive_agenda_edit_refused_generic_", 0)) }
+                guard let labelId else { return .refused(NCAgendaEditText.t("_nodrive_agenda_edit_refused_local_")) }
                 let (assigned, assignFailure) = await send(.put, path: cardPath + "/assignLabel", body: ["labelId": labelId])
                 if let assignFailure { return assignFailure }
                 guard let assigned else { return .offline }

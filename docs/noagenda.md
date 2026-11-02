@@ -142,3 +142,35 @@ attempt; 474 unit tests, 44 PASS in `agenda-server`, 9 UI runs in the shard `age
   ("From NoGantt") comes with the editing step, which is where the hours are used.
 - Owner test rows on drive.nourax.org (the simulator never meets the real server): see "Owner test steps" in
   `docs/testing.md`.
+
+## Editing (`feature/noagenda-edit`): choices recorded after review 1
+
+The full description of the editing step comes with the docs stage. These are the decisions the independent review asked to be recorded
+(`plans/round3-ios-agenda-edit-review-1.md`):
+
+- **One Save, two commands.** A Gantt task or a card can make two commands from one Save (dates and agent, due date and agent). After the
+  first is saved, the queue gives the second the new version of the item (NoGantt `updated_at` or Deck `lastModified`, from the answer of
+  the save, or read when the answer does not say it). Only that version is passed on; a real change by someone else before the first
+  save is still a conflict for both.
+- **Date-only to-dos.** The patcher keeps the value type of `DTSTART` and `DUE` (a date stays `VALUE=DATE`) and writes a new one in the
+  type of the other. A start after the due date, and an end before the start, are refused in the editor.
+- **Statuses.** The status picker offers `not_started`, `in_progress` and `blocked`; done is the Done switch. This is the list NoGantt 2.4.1
+  accepts (`StatusValidator`, as read for desktop and Android). The replay job sends a status change to the real server.
+- **Agent on a Gantt task.** The planning person of an agent is the one already on the task, then one on another task of the project, then
+  one in the pool of the project's owner (`owner_id` of the resource). A same-named person of another manager's pool is never taken. The
+  agent's own load counts a name-only planning person only next to my linked planning person on the same task, as the core does.
+- **A home that takes no change.** Rows of NoGantt or NoBoard that is refused, read only or not installed are locked with the reason (the
+  sheet has "Open in ..."). What waited for it goes to Not sent with that reason. Only an offline or unreachable home holds changes.
+  The banner "Waiting to send ..." has a Review button that lists what waits.
+- **A waiting row is locked** ("This change is waiting to be sent."), so the folding of a second change into a waiting one (plan 3.5) cannot
+  happen from the screen. This is on purpose: it also rules out a change during a send. The queue still folds if two commands are added.
+- **Free time** subtracts the person's own busy events (design 7); timed cards are not subtracted. This follows the design; plan 3.6 also
+  names timed cards. A one-day Gantt task at NoGantt's working hours counts as timed and clashes with every Self event of that day. This is
+  noisy and is a question for all three apps.
+- **The toast** lives in `NCAgendaWorkloadBar.swift` (the plan names `NCAgendaToast.swift`; a new Swift file needs a project file change by
+  `tools/rebrand.py`, which was not worth it).
+- **A failed refresh after a save** shows the old cached row until the next refresh (the saved values are not kept drawn). Open nit.
+- **Web edit proof (design 4.2).** `tools/ci/agenda-webedit.py` drives the Calendar and Tasks pages as the desktop job does and now fails
+  when neither page could be edited (a page that was not driven is a warning in the job summary). The proof that the id and the tag survive
+  a web edit is the desktop job (Calendar: both survive; Tasks: the id is dropped, the tag survives) and the Android job (both survive in
+  both pages). The row for the owner stays open.

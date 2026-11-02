@@ -13,7 +13,7 @@ request they build to agenda-requests.json (method, path with symbolic ids, head
      property and the UID stayed; the agent on and off; a to-do done; a new event and its delete (404 after; the only DELETE
      of the job); the NoGantt move with "Publish banners" moved too and Undo putting it back; "my agent" Self and back with
      the other row and the total work unchanged; % done; the Deck due date changed with the description and the start date
-     kept; the agent label on and off;
+     kept; the agent label on and off; a date-only to-do whose due date moves and stays a date; a status change;
   3. runs the same scenarios against the stand-in's state (tools/ci/agenda_edit_state.py, built from a snapshot recorded
      before the replay) and compares the status of every step and the key paths of every JSON answer ("the stand-in answers
      like the real server").
@@ -35,6 +35,10 @@ GANTT = '/ocs/v2.php/apps/nc_gantt/api/v1/'
 DECK = '/index.php/apps/deck/api/v1.0/'
 TASK_KEYS = {'Write homepage copy': 'write', 'Banner design': 'banner', 'Publish banners': 'publish'}
 ROBOT = '\U0001F916'
+# The date-only to-do of the todo-date-only scenario (made by the replay; the request export has the same text and path)
+REMINDER_PATH = '/remote.php/dav/calendars/ali/personal/ci-replay-todo.ics'
+REMINDER = ('BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Nourax//NoAgenda CI//EN\r\nBEGIN:VTODO\r\nUID:ci-replay-todo\r\nDTSTAMP:20261030T090000Z\r\n'
+            'SUMMARY:Pay rent\r\nDTSTART;VALUE=DATE:20261029\r\nDUE;VALUE=DATE:20261030\r\nEND:VTODO\r\nEND:VCALENDAR\r\n')
 
 ROWS = []
 
@@ -197,6 +201,18 @@ def run(target, requests, seed, delta, mutate_seed_card):
     if path:
         _, text, _ = object_text(path)
         check('todo-done: completed', 'STATUS:COMPLETED' in text and 'PERCENT-COMPLETE:100' in text and 'COMPLETED:' in text)
+    # A date-only to-do (as iPhone Reminders writes it): made here, then the writer's request moves its due date. A mix of DATE and
+    # DATE-TIME in DTSTART and DUE would be refused with 415; the writer must keep the date-only type.
+    status, _, _ = target.send('todo-date-only setup', 'PUT', REMINDER_PATH, shift_dates(REMINDER, delta),
+                               {'Content-Type': 'text/calendar; charset=utf-8', 'If-None-Match': '*'})
+    check('todo-date-only: the date-only to-do was made', status == 201, 'status %s' % status)
+    path = calendar_put('todo-date-only', (204, 201))
+    if path:
+        _, text, _ = object_text(path)
+        wanted = re.search(r'DUE;VALUE=DATE:(\d{8})', body_of(requests_of('todo-date-only')[0]))
+        check('todo-date-only: the due date moved and is still a date', bool(wanted) and ('DUE;VALUE=DATE:' + wanted.group(1)) in text,
+              'wanted %s' % (wanted.group(1) if wanted else None))
+        check('todo-date-only: no DATE-TIME due and the start is still a date', re.search(r'^DUE:', text, re.M) is None and 'DTSTART;VALUE=DATE:' in text)
     path = calendar_put('event-create', (201,))
     if path:
         _, text, _ = object_text(path)
@@ -251,6 +267,14 @@ def run(target, requests, seed, delta, mutate_seed_card):
         status, data = target.json('gantt-percent', 'PUT', fill(percent[0]['path']), json.loads(body_of(percent[0])))
         check('gantt-percent: status', status == 200, 'status %s' % status)
         check('gantt-percent: 70 %', tasks_now().get(ids['write'], {}).get('manual_progress') == 70)
+
+    # A status the editor offers (NoGantt 2.4.1 accepts not_started, in_progress, blocked and done)
+    status_reqs = requests_of('gantt-status')
+    check('gantt-status: the writer built one PUT with only the status', len(status_reqs) == 1 and json.loads(status_reqs[0]['body']) == {'status': 'in_progress'})
+    if status_reqs:
+        status, data = target.json('gantt-status', 'PUT', fill(status_reqs[0]['path']), json.loads(body_of(status_reqs[0])))
+        check('gantt-status: status', status == 200, 'status %s %s' % (status, str(data)[:200]))
+        check('gantt-status: the task is in progress', tasks_now().get(ids['banner'], {}).get('status') == 'in_progress')
 
     def rows_of(task_id):
         return [(r['resource_id'], r.get('work')) for r in tasks_now().get(task_id, {}).get('resources', [])]
@@ -361,7 +385,7 @@ def main():
     snapshot = json.load(open(args.snapshot, encoding='utf-8'))
     delta = datetime.date.fromisoformat(seed['seed_day']) - datetime.date.fromisoformat(requests['base_day'])
     names = [s['name'] for s in requests['scenarios']]
-    row('the export holds the 14 scenarios', len(names) == 14, ','.join(names))
+    row('the export holds the 16 scenarios', len(names) == 16, ','.join(names))
 
     real = Target('real server')
     holder = {'seed': seed, 'target': real}
