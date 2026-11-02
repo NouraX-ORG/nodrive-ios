@@ -39,6 +39,10 @@ ROBOT = '\U0001F916'
 REMINDER_PATH = '/remote.php/dav/calendars/ali/personal/ci-replay-todo.ics'
 REMINDER = ('BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Nourax//NoAgenda CI//EN\r\nBEGIN:VTODO\r\nUID:ci-replay-todo\r\nDTSTAMP:20261030T090000Z\r\n'
             'SUMMARY:Pay rent\r\nDTSTART;VALUE=DATE:20261029\r\nDUE;VALUE=DATE:20261030\r\nEND:VTODO\r\nEND:VCALENDAR\r\n')
+# The all-day event of the event-all-day scenario (made by the replay; the request export has the same text and path)
+ALLDAY_PATH = '/remote.php/dav/calendars/ali/personal/ci-replay-allday.ics'
+ALLDAY = ('BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Nourax//NoAgenda CI//EN\r\nBEGIN:VEVENT\r\nUID:ci-replay-allday\r\nDTSTAMP:20261030T090000Z\r\n'
+          'SUMMARY:Open day\r\nDTSTART;VALUE=DATE:20261029\r\nDTEND;VALUE=DATE:20261030\r\nX-CI-UNKNOWN:keep-me\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n')
 
 ROWS = []
 
@@ -201,6 +205,24 @@ def run(target, requests, seed, delta, mutate_seed_card):
     if path:
         _, text, _ = object_text(path)
         check('todo-done: completed', 'STATUS:COMPLETED' in text and 'PERCENT-COMPLETE:100' in text and 'COMPLETED:' in text)
+    # An all-day event: made here, then the writer's request changes its title and day. It must stay all-day (dates, DTEND the day after the
+    # last day) and keep the unknown property.
+    status, _, _ = target.send('event-all-day setup', 'PUT', ALLDAY_PATH, shift_dates(ALLDAY, delta),
+                               {'Content-Type': 'text/calendar; charset=utf-8', 'If-None-Match': '*'})
+    check('event-all-day: the all-day event was made', status == 201, 'status %s' % status)
+    path = calendar_put('event-all-day', (204, 201))
+    if path:
+        _, text, _ = object_text(path)
+        sent = body_of(requests_of('event-all-day')[0])
+        start = re.search(r'DTSTART;VALUE=DATE:(\d{8})', sent)
+        finish = re.search(r'DTEND;VALUE=DATE:(\d{8})', sent)
+        day_after = (datetime.datetime.strptime(start.group(1), '%Y%m%d').date() + datetime.timedelta(days=1)).strftime('%Y%m%d') if start else None
+        check('event-all-day: the title changed', 'SUMMARY:Open day (moved)' in text)
+        check('event-all-day: the day moved and the end is the day after',
+              bool(start) and bool(finish) and finish.group(1) == day_after and ('DTSTART;VALUE=DATE:' + start.group(1)) in text
+              and ('DTEND;VALUE=DATE:' + finish.group(1)) in text, 'sent %s' % (start.group(1) if start else None))
+        check('event-all-day: still all-day (no DATE-TIME start or end) and the unknown property stayed',
+              re.search(r'^DT(START|END):', text, re.M) is None and 'X-CI-UNKNOWN:keep-me' in text)
     # A date-only to-do (as iPhone Reminders writes it): made here, then the writer's request moves its due date. A mix of DATE and
     # DATE-TIME in DTSTART and DUE would be refused with 415; the writer must keep the date-only type.
     status, _, _ = target.send('todo-date-only setup', 'PUT', REMINDER_PATH, shift_dates(REMINDER, delta),
@@ -385,7 +407,7 @@ def main():
     snapshot = json.load(open(args.snapshot, encoding='utf-8'))
     delta = datetime.date.fromisoformat(seed['seed_day']) - datetime.date.fromisoformat(requests['base_day'])
     names = [s['name'] for s in requests['scenarios']]
-    row('the export holds the 16 scenarios', len(names) == 16, ','.join(names))
+    row('the export holds the 17 scenarios', len(names) == 17, ','.join(names))
 
     real = Target('real server')
     holder = {'seed': seed, 'target': real}

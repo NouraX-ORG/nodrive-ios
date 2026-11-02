@@ -166,10 +166,24 @@ The full description of the editing step comes with the docs stage. These are th
   happen from the screen. This is on purpose: it also rules out a change during a send. The queue still folds if two commands are added.
 - **Free time** subtracts the person's own busy events (design 7); timed cards are not subtracted. This follows the design; plan 3.6 also
   names timed cards. A one-day Gantt task at NoGantt's working hours counts as timed and clashes with every Self event of that day. This is
-  noisy and is a question for all three apps.
-- **The toast** lives in `NCAgendaWorkloadBar.swift` (the plan names `NCAgendaToast.swift`; a new Swift file needs a project file change by
-  `tools/rebrand.py`, which was not worth it).
-- **A failed refresh after a save** shows the old cached row until the next refresh (the saved values are not kept drawn). Open nit.
+  noisy and is a question for all three apps. It is left as the design words it ("Gantt tasks and cards with set times"), the same on Android,
+  so the apps do not drift apart; a change needs one decision for all three.
+- **The toast** view lives in `NCAgendaWorkloadBar.swift` and its model in `NCAgendaViewModel+Edit.swift`; the plan names `NCAgendaToast.swift`.
+  It stays where it is, not because of the project file: `APP_SOURCE_FOLDERS` of `tools/rebrand.py` already adds every `.swift` file of
+  `iOSClient/NoAgendaEdit/`, so a separate file would cost nothing.
+- **A description that was not read is not editable (review 3).** An event or to-do cached by the core build knows the length of its
+  description but not the text. The editor then says "not loaded yet, Open in NoCalendar" like for a description over 2,000 characters, and a
+  draft never changes it. The store also reads such a calendar once more at the next refresh (`NCAgendaStore.isUnchanged` is false while a
+  cached description of 2,000 characters or less has no text), so the editor gets the text without waiting for the 1st of the month.
+- **Delete checks again when it is sent.** Like the change, a queued delete reads the object fresh and refuses a series, an object with
+  several components and an invitation (organised by someone else).
+- **Signed out holds the commands.** While the account is signed out (a read answered 401 or 403) no command is sent, and a CalDAV 401 on the
+  way is held like a lost connection, not moved to Not sent. They go out after the person signs in again.
+- **Cards on a board without edit rights are locked** up front (`PERMISSION_EDIT` of the board, read with the boards). A board that did not
+  say (cached before) is not locked; NoBoard's answer still ends in Not sent.
+- **Invitations**: the lock text says the organiser changes the meeting; the agent stays Self.
+- **A failed refresh after a save** shows the old cached row until the next refresh (the saved values are not kept drawn). Open nit; the
+  replay now also has an all-day event scenario (`event-all-day`, 17 scenarios).
 - **Web edit proof (design 4.2).** `tools/ci/agenda-webedit.py` drives the Calendar and Tasks pages as the desktop job does and now fails
   when neither page could be edited (a page that was not driven is a warning in the job summary). The proof that the id and the tag survive
   a web edit is the desktop job (Calendar: both survive; Tasks: the id is dropped, the tag survives) and the Android job (both survive in

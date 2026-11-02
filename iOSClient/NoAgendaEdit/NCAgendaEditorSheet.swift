@@ -112,9 +112,11 @@ struct NCAgendaEditorView: View {
                         .accessibilityIdentifier("agendaEditorProblem")
                 }
             }
-            if isCalendarItem, item.descriptionLength > 2000 {
+            if isCalendarItem, !item.descriptionEditable {
                 Section {
-                    Text(NCAgendaEditText.f("_nodrive_agenda_edit_description_long_", item.home.openTitle)).font(.footnote)
+                    // Too long, or not read yet (cached by an earlier build): either way it is not changed here.
+                    Text(NCAgendaEditText.f(item.descriptionLength > 2000 ? "_nodrive_agenda_edit_description_long_" : "_nodrive_agenda_edit_description_unread_",
+                                            item.home.openTitle)).font(.footnote)
                     Button(item.home.openTitle) { model.open(item.link, title: item.home.openTitle) }
                         .accessibilityIdentifier("agendaEditorOpenLong")
                 }

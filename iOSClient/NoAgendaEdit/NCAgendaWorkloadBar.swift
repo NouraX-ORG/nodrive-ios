@@ -16,7 +16,8 @@ struct NCAgendaWorkloadBar: View {
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.secondary.opacity(0.2))
                     Capsule()
-                        .fill(workload.isOver ? Color.orange : Color.accentColor)
+                        // .tint follows the NoDrive tint of the screen (Color.accentColor is the asset catalog's, system blue here)
+                        .fill(workload.isOver ? AnyShapeStyle(Color.orange) : AnyShapeStyle(TintShapeStyle()))
                         .frame(width: proxy.size.width * min(1, workload.planned / total))
                     Rectangle()
                         .fill(Color.primary.opacity(0.6))

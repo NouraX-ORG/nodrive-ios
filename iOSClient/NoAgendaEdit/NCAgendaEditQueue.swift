@@ -18,6 +18,8 @@ struct AgendaEditContext: Sendable {
     /// waiting ones go to Not sent); one that is offline or unreachable holds them until it is back.
     var ganttState: AgendaHomeState = .unknown
     var boardState: AgendaHomeState = .unknown
+    /// The account was signed out (a read answered 401 or 403): every command waits until the person signs in again.
+    var signedOut = false
 
     var agentTags: Set<String> {
         Set((registry?.agents ?? []).compactMap { $0.calendarTag })
@@ -253,6 +255,7 @@ actor NCAgendaEditQueue {
 
     /// A NoGantt or Deck command waits until the guard of its home has passed (the app is on a version it was tested with).
     func isHeld(_ command: NCAgendaEditCommand, _ context: AgendaEditContext) -> Bool {
+        if context.signedOut { return true }
         switch command.home {
         case .gantt: return !context.ganttGuardOK
         case .board: return !context.deckGuardOK

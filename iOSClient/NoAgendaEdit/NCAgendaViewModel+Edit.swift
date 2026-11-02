@@ -102,8 +102,13 @@ extension NCAgendaViewModel {
         // NoGantt or NoBoard that refuses this app, is read only or is not installed takes no change, so the row is locked
         // (its saved copy is still shown); the sheet has "Open in ..." (design 5). Offline or unreachable only waits.
         if let text = homeLock(of: item.home) { return .locked(text) }
+        // A card on a board I may only read: NoBoard would refuse the change, so say so up front.
+        if item.home == .board, let boardId = item.link.boardId,
+           editContext.deck?.boards.first(where: { $0.id == boardId })?.canEdit == false {
+            return .locked(NCAgendaEditText.f("_nodrive_agenda_edit_lock_board_", item.home.productName))
+        }
         if item.home == .calendar || item.home == .tasks {
-            if item.invited { return .locked(NCAgendaText.t("_nodrive_agenda_invited_")) }
+            if item.invited { return .locked(NCAgendaEditText.t("_nodrive_agenda_edit_lock_invited_")) }
             let source = display.sources.first { $0.key == item.sourceKey }
             if source?.setting == .team, !item.iAmOrganiser { return .locked(NCAgendaEditText.t("_nodrive_agenda_edit_lock_team_")) }
             if source?.setting == .info { return .locked(NCAgendaText.t("_nodrive_agenda_lock_read_only_")) }

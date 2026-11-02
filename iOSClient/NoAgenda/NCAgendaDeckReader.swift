@@ -19,6 +19,8 @@ struct DeckBoard: Codable, Equatable, Sendable {
     var color: String?
     var owner: DeckPerson?
     var canManage = false
+    /// PERMISSION_EDIT; nil when the server did not say (a board cached before it was read).
+    var canEdit: Bool?
     var labels: [DeckLabel] = []
     var archived = false
 }
@@ -117,6 +119,7 @@ struct NCAgendaDeckReader {
         }
         if let permissions = row["permissions"] as? [String: Any] {
             board.canManage = NCAgendaJSON.bool(permissions["PERMISSION_MANAGE"]) ?? false
+            board.canEdit = NCAgendaJSON.bool(permissions["PERMISSION_EDIT"])
         }
         board.labels = NCAgendaJSON.dictionaries(row["labels"]).compactMap { item in
             guard let labelId = NCAgendaJSON.int(item["id"]) else { return nil }

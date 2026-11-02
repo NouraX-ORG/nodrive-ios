@@ -157,6 +157,20 @@ struct NoDriveAgendaRequestExportTests {
         #expect(await Self.writer(Self.calendarHTTP(recorder, text: draft)).patch(path: personal + "draft-report.ics", seenEtag: nil, change: done) == .plainSaved)
         recorder.finish("todo-done")
 
+        // An all-day event (days, with the exclusive DTEND): its title and day change and it stays all-day, with the alarm and the
+        // unknown property
+        let allDayText = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Nourax//NoAgenda CI//EN", "BEGIN:VEVENT", "UID:ci-replay-allday", "DTSTAMP:20261030T090000Z",
+                          "SUMMARY:Open day", "DTSTART;VALUE=DATE:20261029", "DTEND;VALUE=DATE:20261030", "X-CI-UNKNOWN:keep-me",
+                          "END:VEVENT", "END:VCALENDAR", ""].joined(separator: "
+")
+        var allDay = CalendarChange()
+        allDay.title = "Open day (moved)"
+        allDay.allDay = true
+        allDay.start = S.date("2026-11-02T00:00:00Z")
+        allDay.end = S.date("2026-11-03T00:00:00Z")
+        #expect(await Self.writer(Self.calendarHTTP(recorder, text: allDayText)).patch(path: personal + "ci-replay-allday.ics", seenEtag: nil, change: allDay) == .plainSaved)
+        recorder.finish("event-all-day")
+
         // A date-only to-do (as Reminders writes it): its due date moves and it stays date-only (a mix of DATE and DATE-TIME gives 415)
         let reminder = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Nourax//NoAgenda CI//EN", "BEGIN:VTODO", "UID:ci-replay-todo", "DTSTAMP:20261030T090000Z",
                         "SUMMARY:Pay rent", "DTSTART;VALUE=DATE:20261029", "DUE;VALUE=DATE:20261030", "END:VTODO", "END:VCALENDAR", ""].joined(separator: "\r\n")
@@ -250,7 +264,7 @@ struct NoDriveAgendaRequestExportTests {
 
         // What was built is what the replay expects
         let names = recorder.scenarios.compactMap { $0["name"] as? String }
-        #expect(names.count == 16)
+        #expect(names.count == 17)
         for scenario in recorder.scenarios {
             let requests = scenario["requests"] as? [[String: Any]] ?? []
             let name = scenario["name"] as? String ?? ""

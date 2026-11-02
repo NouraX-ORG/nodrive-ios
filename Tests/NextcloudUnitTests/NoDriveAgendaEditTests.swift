@@ -459,6 +459,39 @@ struct NoDriveAgendaCalDAVWriterTests {
         #expect(await Self.writer(changed).delete(path: Self.path, seenEtag: "\"e1\"") == .conflict)
         #expect(changed.requests(("DELETE")).isEmpty)
     }
+
+    @Test("A delete sent later refuses what has become a series, an invitation or several components: nothing is deleted")
+    func deleteRefuses() async {
+        let repeating = S.eventICS.replacingOccurrences(of: "UID:ev-1", with: "UID:ev-1\r\nRRULE:FREQ=DAILY")
+        let invited = S.eventICS.replacingOccurrences(of: "UID:ev-1", with: "UID:ev-1\r\nORGANIZER:mailto:mara@example.org")
+        let two = S.eventICS.replacingOccurrences(of: "END:VCALENDAR", with: "BEGIN:VEVENT\r\nUID:ev-2\r\nDTSTART:20261031T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR")
+        let reasons: [(String, String)] = [(repeating, "_nodrive_agenda_edit_refused_repeating_"), (two, "_nodrive_agenda_edit_refused_repeating_"),
+                                           (invited, "_nodrive_agenda_edit_invited_")]
+        for (text, key) in reasons {
+            let server = Self.server(text: text)
+            #expect(await Self.writer(server).delete(path: Self.path, seenEtag: nil) == .refused(NCAgendaEditText.t(key)), "\(key)")
+            #expect(server.requests("DELETE").isEmpty)
+        }
+        // My own event, organised by me, is deleted as before
+        let mine = S.eventICS.replacingOccurrences(of: "UID:ev-1", with: "UID:ev-1\r\nORGANIZER:mailto:ali@example.org")
+        let own = Self.server(text: mine)
+        #expect(await Self.writer(own).delete(path: Self.path, seenEtag: nil) == .plainSaved)
+        #expect(own.requests("DELETE").count == 1)
+    }
+
+    @Test("A CalDAV 401 (signed out) is not a refusal: the command is held, on the read and on the write")
+    func signedOut() async {
+        var change = CalendarChange()
+        change.title = "X"
+        let unauthorised = EditFakeServer { _, _ in .init(status: 401) }
+        #expect(await Self.writer(unauthorised).patch(path: Self.path, seenEtag: nil, change: change) == .offline)
+        #expect(await Self.writer(unauthorised).delete(path: Self.path, seenEtag: nil) == .offline)
+        let onWrite = Self.server(putStatus: 401)
+        #expect(await Self.writer(onWrite).patch(path: Self.path, seenEtag: nil, change: change) == .offline)
+        // A 403 is still a refusal in words
+        let forbidden = EditFakeServer { _, _ in .init(status: 403) }
+        #expect(await Self.writer(forbidden).patch(path: Self.path, seenEtag: nil, change: change) == .refused(NCAgendaEditText.t("_nodrive_agenda_edit_refused_forbidden_")))
+    }
 }
 
 // MARK: - "My agent" on a Gantt task
@@ -1115,6 +1148,32 @@ struct NoDriveAgendaEditQueueTests {
         }
     }
 
+    @Test("Signed out: every command waits, none is sent or moved to Not sent; a 401 on the way is held too; after signing in they go")
+    func signedOutHolds() async {
+        let root = Self.root()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let server = Self.calendarServer()
+        let queue = Self.queue(server, root: root)
+        await queue.enqueue(Self.command("a", path: "/remote.php/dav/calendars/ali/work/a.ics"))
+        var signedOut = Self.context
+        signedOut.signedOut = true
+        let held = await queue.process(context: signedOut)
+        #expect(held.saved.isEmpty && held.notSent == 0 && server.requests.isEmpty)
+        #expect(await queue.commands().allSatisfy { $0.isWaiting })
+        // The server answers 401 although the app thought it was signed in: the command still waits
+        let expiredRoot = Self.root()
+        defer { try? FileManager.default.removeItem(at: expiredRoot) }
+        let expired = EditFakeServer { _, _ in .init(status: 401) }
+        let second = Self.queue(expired, root: expiredRoot)
+        await second.enqueue(Self.command("b", path: "/remote.php/dav/calendars/ali/work/b.ics"))
+        let report = await second.process(context: Self.context)
+        #expect(report.saved.isEmpty && report.notSent == 0 && report.offline)
+        #expect(await second.commands().allSatisfy { $0.isWaiting })
+        // Signed in again
+        let back = await queue.process(context: Self.context)
+        #expect(back.saved.count == 1 && server.requests("PUT").count == 1)
+    }
+
     @Test("A home that is only offline or unreachable holds what waits for it, and nothing is moved to Not sent")
     func unreachableHomesWait() async {
         let root = Self.root()
@@ -1197,6 +1256,70 @@ struct NoDriveAgendaEditDraftTests {
         #expect(Self.validate(later, eventOriginal) == NCAgendaEditText.t("_nodrive_agenda_edit_invalid_end_"))
         later.end = S.date("2026-10-30T12:00:00Z")
         #expect(Self.validate(later, eventOriginal) == nil)
+    }
+
+    @Test("A description the app has not read (cached by the core build: length known, text nil) is not editable and a draft makes no description change")
+    func unreadDescription() {
+        var event = Self.item(.event, home: .calendar)
+        event.start = S.date("2026-10-30T10:00:00Z")
+        event.end = S.date("2026-10-30T11:00:00Z")
+        event.descriptionLength = 120
+        event.descriptionText = nil
+        #expect(!event.descriptionEditable)
+        var draft = NCAgendaEditDraft(item: event, calendar: S.calendar)
+        draft.descriptionText = "Typed over a description nobody saw"
+        draft.title = "New title"
+        let commands = draft.commands(for: event, calendar: S.calendar, ganttZone: S.zone, now: S.now)
+        #expect(commands.count == 1 && commands[0].calendar?.title == "New title" && commands[0].calendar?.descriptionText == nil)
+        // Only the description typed: nothing to send at all
+        var only = NCAgendaEditDraft(item: event, calendar: S.calendar)
+        only.descriptionText = "x"
+        #expect(only.commands(for: event, calendar: S.calendar, ganttZone: S.zone, now: S.now).isEmpty)
+        // Read whole: editable, and a change goes out. No description at all: editable. Too long: not editable.
+        event.descriptionText = "Line one"
+        event.descriptionLength = 8
+        #expect(event.descriptionEditable)
+        var edited = NCAgendaEditDraft(item: event, calendar: S.calendar)
+        edited.descriptionText = "Line one and two"
+        #expect(edited.commands(for: event, calendar: S.calendar, ganttZone: S.zone, now: S.now).first?.calendar?.descriptionText == "Line one and two")
+        event.descriptionText = nil
+        event.descriptionLength = 0
+        #expect(event.descriptionEditable)
+        event.descriptionLength = 2_001
+        #expect(!event.descriptionEditable)
+    }
+
+    @Test("A calendar cached by the core build, with a description whose text was not kept, is read once more; others stay unchanged")
+    func unreadDescriptionRereads() {
+        let start = S.date("2026-10-01T00:00:00Z")
+        var calendar = RawCalendar(href: "/remote.php/dav/calendars/ali/work/", uri: "work", name: "Work", components: ["VEVENT"])
+        calendar.syncToken = "t1"
+        calendar.readAt = S.now
+        calendar.windowStart = start
+        var component = ICalComponent()
+        component.descriptionLength = 120
+        calendar.objects = [CalObject(href: "a.ics", etag: "\"e\"", components: [component])]
+        var fresh = calendar
+        fresh.objects = []
+        #expect(!NCAgendaStore.isUnchanged(known: calendar, item: fresh, windowStart: start))
+        component.descriptionText = String(repeating: "a", count: 120)
+        calendar.objects = [CalObject(href: "a.ics", etag: "\"e\"", components: [component])]
+        #expect(NCAgendaStore.isUnchanged(known: calendar, item: fresh, windowStart: start))
+        // A long description is never cached as text, so it must not make every refresh a full read
+        component.descriptionLength = 5_000
+        component.descriptionText = nil
+        calendar.objects = [CalObject(href: "a.ics", etag: "\"e\"", components: [component])]
+        #expect(NCAgendaStore.isUnchanged(known: calendar, item: fresh, windowStart: start))
+    }
+
+    @Test("A board the person may only read says so: PERMISSION_EDIT is read from the board; no answer means unknown")
+    func boardEditPermission() {
+        let readOnly = NCAgendaDeckReader.decodeBoard(["id": 3, "title": "B", "permissions": ["PERMISSION_READ": true, "PERMISSION_EDIT": false, "PERMISSION_MANAGE": false]])
+        #expect(readOnly?.canEdit == false)
+        let editor = NCAgendaDeckReader.decodeBoard(["id": 3, "title": "B", "permissions": ["PERMISSION_EDIT": true]])
+        #expect(editor?.canEdit == true)
+        let silent = NCAgendaDeckReader.decodeBoard(["id": 3, "title": "B"])
+        #expect(silent?.canEdit == nil)
     }
 
     @Test("A Gantt task offers only the statuses NoGantt 2.4.1 accepts; done is the Done switch")

@@ -20,6 +20,7 @@ extension NCAgendaStore {
         context.deckGuardOK = status.board == .fresh
         context.ganttState = status.gantt
         context.boardState = status.board
+        context.signedOut = status.signedOut
         return context
     }
 }

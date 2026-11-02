@@ -3,6 +3,15 @@
 
 import Foundation
 
+extension AgendaItem {
+    /// The editor offers the description only when it was read whole: at most 2,000 characters and the text is cached. An
+    /// object cached by the core build knows the length but not the text (`descriptionText` is nil): typing there would
+    /// replace a description the person never saw.
+    var descriptionEditable: Bool {
+        descriptionLength <= 2000 && (descriptionLength == 0 || descriptionText != nil)
+    }
+}
+
 /// What the person typed in the editor. It becomes the commands of the fields that really changed.
 struct NCAgendaEditDraft: Equatable {
     var title = ""
@@ -84,7 +93,7 @@ struct NCAgendaEditDraft: Equatable {
         case .event, .todo:
             var change = CalendarChange()
             if title != original.title { change.title = title }
-            if descriptionText != original.descriptionText, item.descriptionLength <= 2000 { change.descriptionText = descriptionText }
+            if descriptionText != original.descriptionText, item.descriptionEditable { change.descriptionText = descriptionText }
             if item.kind == .event {
                 if allDay != original.allDay || start != original.start || end != original.end {
                     change.allDay = allDay

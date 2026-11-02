@@ -188,6 +188,12 @@ actor NCAgendaStore {
     static func isUnchanged(known: RawCalendar?, item: RawCalendar, windowStart: Date) -> Bool {
         guard let known, known.failedAt == nil, known.readAt != nil, known.windowStart == windowStart else { return false }
         guard item.syncToken != nil || item.ctag != nil else { return false }
+        // An object cached by the core build has no description text (only its length): read it once more so that the
+        // editing step has the text (design 9: never offer a description that was not read).
+        let unreadDescription = known.objects.contains { object in
+            object.components.contains { $0.descriptionLength > 0 && $0.descriptionLength <= 2000 && $0.descriptionText == nil }
+        }
+        if unreadDescription { return false }
         return known.syncToken == item.syncToken && known.ctag == item.ctag
     }
 

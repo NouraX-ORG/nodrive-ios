@@ -40,6 +40,8 @@ struct NCAgendaCalDAVWriter {
 
     private func outcome(for status: Int) -> NCAgendaWriteOutcome {
         switch status {
+        // Signed out: the command waits (nothing is lost) and goes out after the person signs in again.
+        case 401: return .offline
         case 412, 404, 410: return .conflict
         case 500..<600: return .serverError
         default: return .refused(NCAgendaWriteTexts.refused(status: status))
@@ -104,6 +106,14 @@ struct NCAgendaCalDAVWriter {
         guard let fresh else { return .offline }
         guard fresh.status == 200 else { return fresh.status == 404 ? .plainSaved : outcome(for: fresh.status) }
         if let seenEtag, !Self.sameVersion(seenEtag, fresh.etag) { return .conflict }
+        // Like patch(): the object may have become a series, or an invitation, since the person saw it (design 9).
+        let components = NCAgendaICal.parse(String(decoding: fresh.data, as: UTF8.self), deviceZone: zone)
+        guard components.count == 1, let component = components.first, !component.isRepeating else {
+            return .refused(NCAgendaEditText.t("_nodrive_agenda_edit_refused_repeating_"))
+        }
+        if component.kind == "VEVENT", let organiser = component.organizer, !myAddresses.contains(organiser) {
+            return .refused(NCAgendaEditText.t("_nodrive_agenda_edit_invited_"))
+        }
         guard let etag = fresh.etag else { return .refused(NCAgendaEditText.t("_nodrive_agenda_edit_refused_local_")) }
         let (answer, deleteFailure) = await send(.delete, path: path, headers: ["If-Match": etag])
         if let deleteFailure { return deleteFailure }

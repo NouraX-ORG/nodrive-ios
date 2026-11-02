@@ -26,6 +26,9 @@
 "_nodrive_agenda_edit_field_percent_" = "Done:";
 "_nodrive_agenda_edit_description_" = "Description";
 "_nodrive_agenda_edit_description_long_" = "This description is too long to change here. Open in %@.";
+"_nodrive_agenda_edit_description_unread_" = "This description is not loaded yet, so it can't be changed here. Open in %@.";
+"_nodrive_agenda_edit_lock_invited_" = "You were invited, so the organiser changes this meeting. For your agents it stays Self.";
+"_nodrive_agenda_edit_lock_board_" = "%@ lets you look at this board but not change its cards.";
 "_nodrive_agenda_edit_lock_pending_" = "This change is waiting to be sent.";
 "_nodrive_agenda_edit_lock_team_" = "This is someone else's meeting. You can only change meetings you organise.";
 
