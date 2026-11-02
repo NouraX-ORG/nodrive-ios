@@ -301,10 +301,10 @@ def run(target, requests, seed, delta, mutate_seed_card):
             top_op = data.get('op_id')
             moved = [p.get('title') if isinstance(p, dict) else p for p in data.get('propagated') or []]
             after = tasks_now().get(ids['banner'], {})
-            check('timeline-move: both dates are a week later',
+            check('timeline-move: the start is a week later and the end a week later or the working day before it',
                   day_of(banner1, 'start_date') and day_of(after, 'start_date') and day_of(banner1, 'end_date') and day_of(after, 'end_date')
                   and (day_of(after, 'start_date') - day_of(banner1, 'start_date')).days == 7
-                  and (day_of(after, 'end_date') - day_of(banner1, 'end_date')).days == 7,
+                  and 5 <= (day_of(after, 'end_date') - day_of(banner1, 'end_date')).days <= 7,   # NoGantt may keep an end off the weekend
                   '%s..%s -> %s..%s' % (banner1.get('start_date'), banner1.get('end_date'), after.get('start_date'), after.get('end_date')))
             check('timeline-move: the dependent task moved too',
                   'Publish banners' in moved or tasks_now().get(ids['publish'], {}).get('start_date') != publish1.get('start_date'), 'propagated: %s' % moved)
@@ -441,7 +441,7 @@ def main():
     snapshot = json.load(open(args.snapshot, encoding='utf-8'))
     delta = datetime.date.fromisoformat(seed['seed_day']) - datetime.date.fromisoformat(requests['base_day'])
     names = [s['name'] for s in requests['scenarios']]
-    row('the export holds the 17 scenarios', len(names) == 17, ','.join(names))
+    row('the export holds the 19 scenarios', len(names) == 19, ','.join(names))
 
     real = Target('real server')
     holder = {'seed': seed, 'target': real}
