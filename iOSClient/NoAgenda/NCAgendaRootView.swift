@@ -174,6 +174,9 @@ struct NCAgendaRootView: View {
                 Section { NCAgendaMonthGrid(model: model) }
                 workloadSection(model.day, compact: false)
                 daySections(model.plan(for: model.day), showEmpty: true)
+            case .timeline:
+                // NoDrive: the Timeline is drawn by `timeline`, not by this list
+                EmptyView()
             }
         }
         .listStyle(.insetGrouped)

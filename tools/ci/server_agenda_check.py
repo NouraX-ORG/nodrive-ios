@@ -172,7 +172,8 @@ def main():
     check_shape('project shares', shares, contract.get('share', {}))
     by_title = {t.get('title'): t for t in tasks}
     follows = (by_title.get('Review banners') or {}).get('dependencies') or []
-    row('timeline seed: "Review banners" follows two tasks (finish to start)', len(follows) == 2 and all(d.get('dependency_type') == 'FS' for d in follows),
+    # NoGantt 2.4.1 answers the type in its own letters: "EA" (Ende-Anfang) for the finish to start that was sent as "FS"
+    row('timeline seed: "Review banners" follows two tasks (finish to start)', len(follows) == 2 and all(d.get('dependency_type') in ('FS', 'EA') for d in follows),
         ','.join(sorted(str(d.get('predecessor_id')) for d in follows)))
     row('timeline seed: "Write homepage copy" is in a phase', (by_title.get('Write homepage copy') or {}).get('subproject_id') is not None)
     row('timeline seed: the milestone "Launch" has a date', any(m.get('title') == 'Launch' and m.get('milestone_date') for m in milestones))
