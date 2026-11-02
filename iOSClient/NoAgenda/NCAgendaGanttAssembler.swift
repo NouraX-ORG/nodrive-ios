@@ -109,6 +109,12 @@ extension NCAgendaAssembler {
                 if id.hasPrefix("m-"), let number = Int(id.dropFirst(2)), let milestone = milestoneById[number] { return milestone.title }
                 return id
             }
+            // NoDrive: the person on the predecessor task, for the Timeline's stub "After: ... (Sara)" (iOSClient/NoAgendaTimeline)
+            func predecessorPerson(_ id: String) -> String? {
+                guard id.hasPrefix("t-"), let number = Int(id.dropFirst(2)), let task = taskById[number] else { return nil }
+                let names = linkedPersons(task, resources).map { $0.uidDisplayName ?? displayName(of: $0.uid ?? "") ?? $0.name }
+                return names.isEmpty ? nil : names.joined(separator: ", ")
+            }
             func predecessorIsLate(_ id: String) -> Bool {
                 guard id.hasPrefix("t-"), let number = Int(id.dropFirst(2)), let task = taskById[number] else { return false }
                 let end = Self.ganttDate(task.end, zone: zone)
@@ -143,7 +149,8 @@ extension NCAgendaAssembler {
                     item.blocked = blocked
                     item.boardBadge = task.deckCardId != nil
                     item.dependencies = task.dependencies.map {
-                        AgendaDependency(predecessorKey: $0.predecessorId, predecessorTitle: predecessorTitle($0.predecessorId), type: $0.type, lagDays: $0.lagDays)
+                        AgendaDependency(predecessorKey: $0.predecessorId, predecessorTitle: predecessorTitle($0.predecessorId), type: $0.type, lagDays: $0.lagDays,
+                                         predecessorPerson: predecessorPerson($0.predecessorId))
                     }
                     if project.permission == "viewer" {
                         item.lock = .viewerProject

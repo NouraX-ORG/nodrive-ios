@@ -24,6 +24,14 @@ struct NCAgendaDetailSheet: View {
                             .accessibilityIdentifier("agendaDetailLock")
                     }
                 }
+                if item.kind == .ganttTask, item.start == nil {
+                    // NoDrive: a task with only an end date can't be moved (iOSClient/NoAgendaTimeline)
+                    Section {
+                        Label(NCAgendaTimelineText.t("_nodrive_agenda_timeline_no_dates_"), systemImage: "lock.fill").font(.footnote)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityIdentifier("agendaDetailNoDates")
+                    }
+                }
                 Section {
                     Label(item.title.isEmpty ? " " : item.title, systemImage: item.kind.symbolName)
                         .font(.headline)

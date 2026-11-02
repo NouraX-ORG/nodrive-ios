@@ -1,0 +1,41 @@
+/* SPDX-FileCopyrightText: 2026 Nourax */
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* NoAgenda: the Timeline (design 8). English; translations are a to-do. */
+
+"_nodrive_agenda_timeline_" = "Timeline";
+"_nodrive_agenda_timeline_weeks_" = "Weeks";
+"_nodrive_agenda_timeline_days_" = "Days";
+"_nodrive_agenda_timeline_zoom_" = "Zoom";
+"_nodrive_agenda_timeline_after_" = "After: %1$@ (%2$@)";
+"_nodrive_agenda_timeline_after_nobody_" = "After: %@";
+"_nodrive_agenda_timeline_empty_" = "No dated work in this range.";
+"_nodrive_agenda_timeline_no_dates_" = "This task has no dates to move.";
+"_nodrive_agenda_timeline_move_by_" = "Move by (days)";
+"_nodrive_agenda_timeline_earlier_" = "Earlier by %d days";
+"_nodrive_agenda_timeline_earlier_one_" = "Earlier by 1 day";
+"_nodrive_agenda_timeline_later_" = "Later by %d days";
+"_nodrive_agenda_timeline_later_one_" = "Later by 1 day";
+"_nodrive_agenda_timeline_group_tasks_" = "NoTasks > %@";
+"_nodrive_agenda_timeline_group_board_" = "NoBoard > %@";
+"_nodrive_agenda_timeline_kind_task_" = "Gantt task";
+"_nodrive_agenda_timeline_spoken_range_" = "%1$@ to %2$@";
+"_nodrive_agenda_timeline_spoken_percent_" = "%d %% done";
+"_nodrive_agenda_timeline_spoken_after_" = "%1$@ comes after %2$@";
+"_nodrive_agenda_timeline_spoken_not_sent_" = "change not sent";
+"_nodrive_agenda_timeline_spoken_stub_" = "Comes after a task that is not on the screen. Tap to see which one.";
+"_nodrive_agenda_timeline_dependencies_" = "Dependencies";
+"_nodrive_agenda_timeline_scale_" = "Timeline scale";
+"_nodrive_agenda_timeline_range_" = "%1$@ to %2$@";
+"_nodrive_agenda_timeline_legend_" = "What the Timeline shows";
+"_nodrive_agenda_timeline_legend_bar_" = "Bar: a NoGantt task. The filled part is how much is done.";
+"_nodrive_agenda_timeline_legend_todo_" = "Thin bar: a to-do with a start and a due date.";
+"_nodrive_agenda_timeline_legend_diamond_" = "Diamond: a milestone, or a card with a due date.";
+"_nodrive_agenda_timeline_legend_arrow_" = "Arrow: this follows that. You can't change arrows here.";
+"_nodrive_agenda_timeline_legend_stub_" = "Short arrow: it follows a task that is not on the screen. Tap it to see which.";
+"_nodrive_agenda_timeline_legend_shade_" = "Shading: the busier your own calendar, the darker the day.";
+"_nodrive_agenda_timeline_legend_hatch_" = "Hatching: a day off.";
+"_nodrive_agenda_timeline_legend_today_" = "The line: today.";
+"_nodrive_agenda_timeline_legend_agent_" = "After each bar: who does it, 👤 you or 🤖 one of your agents.";
+"_nodrive_agenda_timeline_legend_marks_" = "Marks: late, blocked, can't be changed, waiting to send, not sent.";
+"_nodrive_agenda_timeline_legend_phone_" = "Tap a bar to open it. To move a task, change its dates in the editor.";
+"_nodrive_agenda_timeline_legend_info_" = "Legend";

@@ -200,6 +200,10 @@ struct NCAgendaEditorView: View {
             NCAgendaOptionalDate(title: NCAgendaEditText.t("_nodrive_agenda_edit_field_due_"), isOn: $draft.hasDue, date: $draft.due,
                                  canSwitch: item.due == nil, identifier: "agendaEditorDue",
                                  components: draft.dateOnly ? [.date] : [.date, .hourAndMinute])
+            // NoDrive: "Move by" (iOSClient/NoAgendaTimeline)
+            if NCAgendaEditDraft.canMoveDates(item) {
+                NCAgendaMoveByView(draft: $draft, calendar: model.calendar, zone: model.calendar.timeZone)
+            }
         }
     }
 
@@ -209,10 +213,21 @@ struct NCAgendaEditorView: View {
             Text(item.title).font(.headline)
             DatePicker(NCAgendaEditText.t("_nodrive_agenda_edit_field_start_"), selection: $draft.start, displayedComponents: [.date])
                 .environment(\.timeZone, model.ganttZone)
+                .disabled(item.start == nil)
                 .accessibilityIdentifier("agendaEditorStart")
             DatePicker(NCAgendaEditText.t("_nodrive_agenda_edit_field_end_"), selection: $draft.end, displayedComponents: [.date])
                 .environment(\.timeZone, model.ganttZone)
+                .disabled(item.start == nil)
                 .accessibilityIdentifier("agendaEditorEnd")
+            // NoDrive: "Move by", or why there are no dates to move (iOSClient/NoAgendaTimeline)
+            if NCAgendaEditDraft.canMoveDates(item) {
+                NCAgendaMoveByView(draft: $draft, calendar: model.calendar, zone: model.ganttZone)
+            } else if item.start == nil {
+                Text(NCAgendaTimelineText.t("_nodrive_agenda_timeline_no_dates_"))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("agendaEditorNoDates")
+            }
             Stepper(value: $draft.percent, in: 0...100, step: 5) {
                 Text(NCAgendaEditText.t("_nodrive_agenda_edit_field_percent_") + " \(draft.percent) %")
             }

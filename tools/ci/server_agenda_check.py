@@ -145,6 +145,8 @@ def main():
     text = data.decode('utf-8', 'replace')
     row('to-dos: Draft report is there, the completed one is not', status == 207 and 'Draft report' in text and 'Done to-do' not in text)
     counts['todos'] = text.count('BEGIN:VTODO')
+    notes = re.search(r'BEGIN:VTODO(?:(?!END:VTODO).)*Prepare launch notes(?:(?!END:VTODO).)*END:VTODO', text, re.S)
+    row('timeline seed: the to-do "Prepare launch notes" has a start and a due date', bool(notes) and 'DTSTART' in notes.group(0) and 'DUE' in notes.group(0))
 
     # 3. The contract -------------------------------------------------------------
     _, my = c.ocs_json('ali', GANTT + 'my-tasks')
@@ -168,6 +170,12 @@ def main():
     check_shape('task resource rows', [r for t in tasks for r in t.get('resources', [])], contract.get('taskResource', {}))
     check_shape('milestones', milestones, contract.get('milestone', {}))
     check_shape('project shares', shares, contract.get('share', {}))
+    by_title = {t.get('title'): t for t in tasks}
+    follows = (by_title.get('Review banners') or {}).get('dependencies') or []
+    row('timeline seed: "Review banners" follows two tasks (finish to start)', len(follows) == 2 and all(d.get('dependency_type') == 'FS' for d in follows),
+        ','.join(sorted(str(d.get('predecessor_id')) for d in follows)))
+    row('timeline seed: "Write homepage copy" is in a phase', (by_title.get('Write homepage copy') or {}).get('subproject_id') is not None)
+    row('timeline seed: the milestone "Launch" has a date', any(m.get('title') == 'Launch' and m.get('milestone_date') for m in milestones))
     row('shares name the principal by principal_type and principal_id', bool(shares) and all(
         s.get('principal_type') == 'user' and s.get('principal_id') for s in shares),
         ','.join(sorted({'%s:%s' % (s.get('principal_type'), s.get('permission')) for s in shares})))

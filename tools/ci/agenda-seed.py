@@ -57,6 +57,9 @@ def seed_calendars(day):
         ('ali', 'personal', 'draft-report', c.todo('ci-draft', 'Draft report', c.utc(day, 15), agent)),
         ('ali', 'personal', 'late-todo', c.todo('ci-late', 'Late to-do', c.utc(d(-3), 9))),
         ('ali', 'personal', 'someday', c.todo('ci-someday', 'Someday to-do')),
+        # A to-do with a start and a due date: a bar on the Timeline
+        ('ali', 'personal', 'launch-notes', c.todo('ci-launch-notes', 'Prepare launch notes', c.utc(d(3), 17),
+                                                    ['DTSTART:' + c.ics_time(c.utc(d(1), 9))])),
         ('ali', 'personal', 'done-todo', c.todo('ci-done', 'Done to-do', c.utc(d(-1), 9),
                                                 ['STATUS:COMPLETED', 'COMPLETED:' + c.ics_time(c.utc(d(-1), 10))])),
     ]

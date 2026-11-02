@@ -284,6 +284,40 @@ def run(target, requests, seed, delta, mutate_seed_card):
         check('gantt-undo: the end date is back', after.get(ids['banner'], {}).get('end_date') == banner0.get('end_date'),
               '%s vs %s' % (after.get(ids['banner'], {}).get('end_date'), banner0.get('end_date')))
         check('gantt-undo: Publish banners is back', after.get(ids['publish'], {}).get('start_date') == publish0.get('start_date'))
+    # The Timeline's "Move by +7 days": one PUT with both dates a week later and adjust_lag; the follower moves; Undo puts all back
+    def day_of(task, key):
+        return datetime.date.fromisoformat((task.get(key) or '')[:10]) if task.get(key) else None
+    tmove = requests_of('timeline-move')
+    tbody = json.loads(tmove[0]['body']) if len(tmove) == 1 else {}
+    check('timeline-move: the writer built one PUT with the two dates, adjust_lag and deck_confirmed false',
+          len(tmove) == 1 and 'start_date' in tbody and 'end_date' in tbody and tbody.get('adjust_lag') is True and tbody.get('deck_confirmed') is False)
+    banner1 = tasks_now().get(ids['banner'], {})
+    publish1 = tasks_now().get(ids['publish'], {})
+    top_op = None
+    if len(tmove) == 1:
+        status, data = target.json('timeline-move', 'PUT', fill(tmove[0]['path']), json.loads(body_of(tmove[0])))
+        check('timeline-move: status', status == 200, 'status %s %s' % (status, str(data)[:200]))
+        if isinstance(data, dict):
+            top_op = data.get('op_id')
+            moved = [p.get('title') if isinstance(p, dict) else p for p in data.get('propagated') or []]
+            after = tasks_now().get(ids['banner'], {})
+            check('timeline-move: both dates are a week later',
+                  day_of(banner1, 'start_date') and day_of(after, 'start_date') and day_of(banner1, 'end_date') and day_of(after, 'end_date')
+                  and (day_of(after, 'start_date') - day_of(banner1, 'start_date')).days == 7
+                  and (day_of(after, 'end_date') - day_of(banner1, 'end_date')).days == 7,
+                  '%s..%s -> %s..%s' % (banner1.get('start_date'), banner1.get('end_date'), after.get('start_date'), after.get('end_date')))
+            check('timeline-move: the dependent task moved too',
+                  'Publish banners' in moved or tasks_now().get(ids['publish'], {}).get('start_date') != publish1.get('start_date'), 'propagated: %s' % moved)
+            check('timeline-move: the answer has an op_id', bool(top_op))
+    tundo = requests_of('timeline-undo')
+    check('timeline-undo: the writer built one POST', len(tundo) == 1 and tundo[0]['method'] == 'POST')
+    if len(tundo) == 1 and top_op:
+        status, data = target.json('timeline-undo', 'POST', fill(tundo[0]['path'], {'{op}': top_op}), {})
+        check('timeline-undo: status', status in (200, 201, 204), 'status %s %s' % (status, str(data)[:200]))
+        back = tasks_now()
+        check('timeline-undo: both dates of the task are back',
+              back.get(ids['banner'], {}).get('start_date') == banner1.get('start_date') and back.get(ids['banner'], {}).get('end_date') == banner1.get('end_date'))
+        check('timeline-undo: the dependent task is back', back.get(ids['publish'], {}).get('start_date') == publish1.get('start_date'))
     percent = requests_of('gantt-percent')
     if percent:
         status, data = target.json('gantt-percent', 'PUT', fill(percent[0]['path']), json.loads(body_of(percent[0])))

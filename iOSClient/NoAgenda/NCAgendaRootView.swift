@@ -11,7 +11,12 @@ struct NCAgendaRootView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            list
+            // NoDrive: the Timeline has its own screen instead of the list (iOSClient/NoAgendaTimeline)
+            if model.view == .timeline {
+                timeline
+            } else {
+                list
+            }
         }
         .background(Color(UIColor.systemBackground))
         .navigationTitle(NCAgendaEntry.title)
@@ -91,6 +96,9 @@ struct NCAgendaRootView: View {
                          isOn: Binding(get: { model.filter.agents }, set: { value in model.setFilter { $0.agents = value } }))
                     chip("👥 " + NCAgendaText.t("_nodrive_agenda_chip_team_"), id: "team",
                          isOn: Binding(get: { model.filter.team }, set: { value in model.setFilter { $0.team = value } }))
+                        // NoDrive: team work isn't drawn on the Timeline, so the chip is dimmed there
+                        .disabled(model.view == .timeline)
+                        .opacity(model.view == .timeline ? 0.4 : 1)
                     chip("⚠ " + NCAgendaEditText.t("_nodrive_agenda_edit_conflicts_"), id: "conflicts", isOn: $model.conflictsOnly)
                 }
             }
@@ -171,6 +179,27 @@ struct NCAgendaRootView: View {
         .listStyle(.insetGrouped)
         .refreshable { await model.refresh() }
         .accessibilityIdentifier("agendaList")
+    }
+
+    /// NoDrive: the Timeline under the banners of the data (offline, refused and so on), see iOSClient/NoAgendaTimeline.
+    private var timeline: some View {
+        VStack(spacing: 0) {
+            ForEach(model.banners) { banner in
+                bannerRow(banner)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    .background(Color.yellow.opacity(0.15))
+            }
+            if model.isLoading && !model.hasLoaded {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text(NCAgendaText.t("_nodrive_agenda_reading_"))
+                }
+                .padding(8)
+                .accessibilityIdentifier("agendaReading")
+            }
+            NCAgendaTimelineView(model: model)
+        }
     }
 
     @ViewBuilder

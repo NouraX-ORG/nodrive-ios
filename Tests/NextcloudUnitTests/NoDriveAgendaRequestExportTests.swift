@@ -214,6 +214,19 @@ struct NoDriveAgendaRequestExportTests {
         recorder.finish("gantt-move")
         _ = await NCAgendaGanttWriter(http: ganttHTTP("[{\"resource_id\":1,\"work\":4}]", answer: answer)).undo(opId: "{op}")
         recorder.finish("gantt-undo")
+        // The Timeline's "Move by +7 days" (iOSClient/NoAgendaTimeline): both dates a week later in one request; the followers move with it
+        var bannerRow = AgendaItem(key: "gantt:503", home: .gantt, kind: .ganttTask, title: "Banner design", sourceKey: "project:5", sourceName: "Website",
+                                   sourceColor: "#2563EB", link: AgendaLink(home: .gantt, projectId: 5, taskId: 503))
+        bannerRow.start = S.date("2026-10-26T09:00:00Z")
+        bannerRow.end = S.date("2026-10-28T17:00:00Z")
+        var weekLater = NCAgendaEditDraft(item: bannerRow, calendar: S.calendar)
+        weekLater.moveBy(days: 7, calendar: S.calendar, zone: S.zone)
+        let timelineChange = weekLater.commands(for: bannerRow, calendar: S.calendar, ganttZone: S.zone, now: S.now).first?.gantt ?? GanttChange()
+        #expect(timelineChange == GanttChange(startDay: "2026-11-02", endDay: "2026-11-04"))
+        _ = await NCAgendaGanttWriter(http: ganttHTTP("[{\"resource_id\":1,\"work\":4}]", answer: answer)).update(projectId: 5, taskId: 503, seenUpdatedAt: nil, change: timelineChange)
+        recorder.finish("timeline-move")
+        _ = await NCAgendaGanttWriter(http: ganttHTTP("[{\"resource_id\":1,\"work\":4}]", answer: answer)).undo(opId: "{op}")
+        recorder.finish("timeline-undo")
         var percent = GanttChange()
         percent.percent = 70
         _ = await NCAgendaGanttWriter(http: ganttHTTP("[{\"resource_id\":1,\"work\":4}]", answer: answer)).update(projectId: 5, taskId: 501, seenUpdatedAt: nil, change: percent)
@@ -263,11 +276,11 @@ struct NoDriveAgendaRequestExportTests {
 
         // What was built is what the replay expects
         let names = recorder.scenarios.compactMap { $0["name"] as? String }
-        #expect(names.count == 17)
+        #expect(names.count == 19)
         for scenario in recorder.scenarios {
             let requests = scenario["requests"] as? [[String: Any]] ?? []
             let name = scenario["name"] as? String ?? ""
-            if name == "gantt-agent-to-self" || name == "gantt-agent-to-writer" || name == "gantt-undo" || name == "todo-date-only" || name == "gantt-status" || name.hasPrefix("event") || name.hasPrefix("todo") || name.hasPrefix("gantt") {
+            if name == "gantt-agent-to-self" || name == "gantt-agent-to-writer" || name == "gantt-undo" || name == "todo-date-only" || name == "gantt-status" || name.hasPrefix("event") || name.hasPrefix("todo") || name.hasPrefix("gantt") || name.hasPrefix("timeline") {
                 #expect(!requests.isEmpty, "\(name) built no request")
             }
         }

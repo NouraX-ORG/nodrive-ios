@@ -6,6 +6,8 @@ import SwiftUI
 
 enum AgendaViewKind: String, CaseIterable, Identifiable {
     case day, week, month
+    // NoDrive: the Timeline (iOSClient/NoAgendaTimeline)
+    case timeline
     var id: String { rawValue }
 
     var title: String {
@@ -13,6 +15,7 @@ enum AgendaViewKind: String, CaseIterable, Identifiable {
         case .day: return NCAgendaText.t("_nodrive_agenda_day_")
         case .week: return NCAgendaText.t("_nodrive_agenda_week_")
         case .month: return NCAgendaText.t("_nodrive_agenda_month_")
+        case .timeline: return NCAgendaTimelineText.t("_nodrive_agenda_timeline_")
         }
     }
 }
@@ -107,6 +110,8 @@ final class NCAgendaViewModel {
     var showCreate = false
     var showNotSent = false
     var isSending = false
+    /// NoDrive: the Today button of the Timeline counts up, so that the Timeline scrolls back to today even when the shown date is today.
+    var timelineTodayTick = 0
     /// Opens a page of the server signed in (set by the screen that hosts NoAgenda).
     var openPage: (URL, String) -> Void = { _, _ in }
     private var now: () -> Date
@@ -181,11 +186,16 @@ final class NCAgendaViewModel {
         case .day: component = .day
         case .week: component = .weekOfYear
         case .month: component = .month
+        case .timeline:
+            // NoDrive: the Timeline moves four weeks
+            day = calendar.date(byAdding: .day, value: 28 * direction, to: day) ?? day
+            return
         }
         day = calendar.date(byAdding: component, value: direction, to: day) ?? day
     }
 
     func goToToday() {
+        timelineTodayTick += 1
         day = calendar.startOfDay(for: today)
     }
 
@@ -199,6 +209,8 @@ final class NCAgendaViewModel {
             return NCAgendaFormat.shortDay(first) + " - " + NCAgendaFormat.shortDay(last)
         case .month:
             return day.formatted(.dateTime.month(.wide).year())
+        case .timeline:
+            return NCAgendaTimelineHeader.title(shown: day, calendar: calendar)
         }
     }
 

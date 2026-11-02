@@ -550,9 +550,10 @@ agenda_mode() {   # agenda_mode <mode>: the stand-in's own control path
 }
 
 agenda_edit_tests() {   # agenda_edit_tests <udid> <variant> <label> <test>...: one xcodebuild run of some tests of ali
-  local udid=$1 variant=$2 label=$3 code passed failed only=() t
+  # (the test class is NoDriveAgendaEditUITests, or the one named in AGENDA_UI_CLASS)
+  local udid=$1 variant=$2 label=$3 code passed failed only=() t class="${AGENDA_UI_CLASS:-NoDriveAgendaEditUITests}"
   shift 3
-  for t in "$@"; do only+=("-only-testing:NextcloudUITests/NoDriveAgendaEditUITests/$t"); done
+  for t in "$@"; do only+=("-only-testing:NextcloudUITests/$class/$t"); done
   set +e
   TEST_RUNNER_NODRIVE_VARIANT="$variant" TEST_RUNNER_NODRIVE_SHOTS_DIR="$SHOTS" \
   TEST_RUNNER_NODRIVE_AGENDA_TODAY="$AGENDA_TODAY" \
@@ -601,6 +602,18 @@ agenda_edit() {   # agenda_edit <udid> <variant>: the editing tests, the conflic
   return $status
 }
 
+# NoAgenda Timeline (design 8): the same stand-in as the editing run (it takes the "Move by" write with the real server's rules).
+# One fresh stand-in, the six tests in the order of their numbers; the last one moves a task.
+agenda_timeline() {   # agenda_timeline <udid> <variant>
+  local udid=$1 variant=$2 status=0 log="$RESULTS/stand-in-timeline.jsonl"
+  mkdir -p "$SHOTS/$variant" "$RESULTS"
+  xcrun simctl install "$udid" "${AGENDA_APP:-app/NoDrive.app}"
+  agenda_standin ali "$log" || return 1
+  AGENDA_UI_CLASS=NoDriveAgendaTimelineUITests agenda_edit_tests "$udid" "$variant" timeline test1TimelineWeeks test2TimelineDays test3LockedAndTheTeamChip test4LegendAndTheArrows test5NoDragButAnEditor test6EditorMovesATask || status=1
+  echo "agenda $variant (Timeline): status $status; files: $(ls "$SHOTS/$variant" | tr '\n' ' ')"
+  return $status
+}
+
 case "$cmd" in
   check-tools) check_tools "$@" ;;
   make-certs) make_certs "$@" ;;
@@ -616,5 +629,6 @@ case "$cmd" in
   conflicts) conflicts "$@" ;;
   agenda) agenda "$@" ;;
   agenda-edit) agenda_edit "$@" ;;
+  agenda-timeline) agenda_timeline "$@" ;;
   *) echo "usage: see the header of $0" >&2; exit 2 ;;
 esac

@@ -102,6 +102,13 @@ def handle(h, method, path, body):
         if method in ('PUT', 'DELETE', 'POST'):
             facts.update(event='agenda-write', if_match=request_headers['If-Match'] is not None,
                          if_none_match=request_headers['If-None-Match'])
+            if method == 'PUT' and path.startswith(GANTT_PREFIX + 'tasks/'):
+                # Facts of a NoGantt task change, never its text: did it move dates, and did it ask NoGantt to move the followers
+                try:
+                    sent = json.loads(body.decode('utf-8') or '{}')
+                except ValueError:
+                    sent = {}
+                facts.update(moves_dates=('start_date' in sent or 'end_date' in sent), adjust_lag=sent.get('adjust_lag') is True)
         h._record(status, facts)
         h._send(status, text, ctype, headers)
         return True

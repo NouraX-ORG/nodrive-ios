@@ -214,6 +214,8 @@ struct AgendaDependency: Codable, Equatable, Sendable {
     var predecessorTitle: String
     var type: String
     var lagDays: Int
+    /// The person on the predecessor task ("Sara"), for the Timeline's "After: Banner design (Sara)"; nil when nobody is on it.
+    var predecessorPerson: String?
 }
 
 /// What is needed to open the item's page and (later) to write to it.

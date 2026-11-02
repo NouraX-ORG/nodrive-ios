@@ -12,7 +12,9 @@
   3. the runs did write: an edit with If-Match, a new object with If-None-Match, a NoGantt task, and a Deck card or label
      is not required here (the unit tests and the replay job cover Deck);
   4. connections that were dropped on purpose (the offline run) are the only requests without an answer.
-  python3 tools/ci/agenda-edit-check.py <stand-in-edit.jsonl> [--self-test]
+  5. with --timeline: the runs moved the dates of a NoGantt task and asked NoGantt to move the followers (adjust_lag), as
+     the Timeline's "Move by" does, and the other three writes of point 3 are not required.
+  python3 tools/ci/agenda-edit-check.py <stand-in-edit.jsonl> [--timeline] [--self-test]
 """
 import json
 import re
@@ -26,13 +28,13 @@ DECK_CARD = re.compile(r'^/index\.php/apps/deck/api/v1\.0/boards/\d+/stacks/\d+/
 DECK_LABEL = re.compile(r'^/index\.php/apps/deck/api/v1\.0/boards/\d+/labels$')
 
 
-def check(lines):
+def check(lines, timeline=False):
     entries = [json.loads(x) for x in lines if x.strip()]
     agenda = [e for e in entries if e.get('agenda')]
     problems = []
     if not agenda:
         problems.append('no NoAgenda request in the stand-in log')
-    seen = {'edit': False, 'create': False, 'gantt': False}
+    seen = {'edit': False, 'create': False, 'gantt': False, 'move': False}
     for e in agenda:
         host = (e.get('host') or '').split(':')[0].lower()
         if host != 'drive.nourax.org':
@@ -67,6 +69,7 @@ def check(lines):
                 problems.append('a %s on a calendar object: %s' % (method, path))
         elif GANTT_PUT.match(path) and method == 'PUT':
             seen['gantt'] = seen['gantt'] or status in (200, 201)
+            seen['move'] = seen['move'] or (status in (200, 201) and e.get('moves_dates') is True and e.get('adjust_lag') is True)
         elif GANTT_REVERT.match(path) and method == 'POST':
             pass
         elif DECK_CARD.match(path) and method == 'PUT':
@@ -75,7 +78,9 @@ def check(lines):
             pass
         else:
             problems.append('a write that is not one of design section 9: %s %s' % (method, path))
-    for name, text in (('edit', 'an edit with If-Match'), ('create', 'a new object with If-None-Match: *'), ('gantt', 'a NoGantt task')):
+    wanted = (('move', 'a NoGantt task move with adjust_lag'),) if timeline else (
+        ('edit', 'an edit with If-Match'), ('create', 'a new object with If-None-Match: *'), ('gantt', 'a NoGantt task'))
+    for name, text in wanted:
         if not seen[name]:
             problems.append('the runs never wrote ' + text)
     return problems
@@ -102,6 +107,12 @@ def self_test():
     bad(dict(base, host='evil.example', method='GET', path='/x'), 'evil.example')
     bad(dict(base, ocs_header=False, method='GET', path='/x'), 'OCS-APIRequest')
     assert any('never wrote' in p for p in check([json.dumps(good[0])]))
+    # The Timeline runs need the NoGantt move with adjust_lag, and nothing else of point 3
+    move = dict(base, method='PUT', path='/ocs/v2.php/apps/nc_gantt/api/v1/tasks/7', status=200, moves_dates=True, adjust_lag=True)
+    assert check([json.dumps(move)], timeline=True) == []
+    no_lag = dict(move, adjust_lag=False)
+    assert any('adjust_lag' in p for p in check([json.dumps(no_lag)], timeline=True))
+    assert any('adjust_lag' in p for p in check([json.dumps(dict(base, method='PUT', path=move['path'], status=200))], timeline=True))
     assert any('no NoAgenda request' in p for p in check([]))
     print('agenda-edit-check: self-test ok')
 
@@ -111,7 +122,7 @@ if __name__ == '__main__':
         self_test()
         sys.exit(0)
     with open(sys.argv[1], encoding='utf-8') as fh:
-        found = check(fh.readlines())
+        found = check(fh.readlines(), timeline='--timeline' in sys.argv[2:])
     for p in found:
         print('PROBLEM:', p)
     print('agenda-edit-check: %d problem(s)' % len(found))

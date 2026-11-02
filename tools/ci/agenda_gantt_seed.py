@@ -92,6 +92,10 @@ def seed(day, deck, step):
     task('website', 'banner', 'Banner design', -4, -2, [row('sara', 8), row('design')], work=8)
     task('website', 'publish', 'Publish banners', -1, 2, [row('sara', 4)], work=4,
          **({'dependencies': [{'predecessor_id': 't-%d' % made['banner'], 'dependency_type': 'FS', 'lag_days': 0}]} if 'banner' in made else {}))
+    # The Timeline (design 8): Ali's task follows his own "Write homepage copy" (an arrow) and Sara's "Publish banners" (a stub:
+    # that task is not Ali's, so it is not on his Timeline)
+    follows = [{'predecessor_id': 't-%d' % made[key], 'dependency_type': 'FS', 'lag_days': 0} for key in ('write', 'publish') if key in made]
+    task('website', 'review', 'Review banners', 2, 3, [row('ali', 2)], work=2, **({'dependencies': follows} if follows else {}))
     task('website', 'orphan', 'Orphan writing', 0, 2, [row('writer')])
     task('website', 'cross', 'Cross pairing', 0, 2, [row('ali', 2), row('design')], work=2)
     task('website', 'two', 'Two agents', 1, 3, [row('ali', 2), row('writer'), row('research')], work=2)
