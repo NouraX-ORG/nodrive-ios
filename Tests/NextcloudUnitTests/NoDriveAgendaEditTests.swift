@@ -1068,7 +1068,8 @@ struct NoDriveAgendaEditQueueTests {
         let report = await queue.process(context: Self.ganttContext)
         #expect(report.saved.count == 2 && report.notSent == 0)
         #expect(await queue.commands().isEmpty)
-        #expect(server.requests("PUT").compactMap { $0.url?.lastPathComponent }.contains("assignLabel"))
+        let verbs = server.requests("PUT").compactMap { $0.url?.lastPathComponent }
+        #expect(verbs.contains("assignLabel"))
     }
 
     @Test("A task that really changed before the first save is still a conflict for both changes: only the version of our own save is passed on")
