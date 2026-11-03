@@ -122,6 +122,11 @@ review 3 approved it with 4 nits (open points below). Rows for the owner: "NoAge
   - "Not linked to an account" does not name the planning person, so two unlinked people on one task give one sentence.
   - The docstring of `tools/ci/agenda_gantt_seed.py` still says Design-Bot is known by name only (it is known by registry id).
   - The root cause of the flaky agenda shard is not known.
+- Review nits of step 3 (Timeline) not fixed (`plans/round3-ios-agenda-timeline-review-2.md`):
+  - A hard clash and "not sent" use the same symbol on a bar (`exclamationmark.triangle.fill`, red against orange). Give "not sent" its own
+    symbol or show the symbols in the legend.
+  - The Arabic (right-to-left) Timeline has no screenshot check.
+  - The arrows canvas covers the full height (plan risk T1); draw only the visible rows if a project with hundreds of dependencies turns up.
 - A project whose tasks the server refuses (401 or 403) keeps its saved rows and is marked in Sources with the time
   it could not be read. Calendars that fail to read are only reported by the banner (not marked one by one).
 - The agenda UI shard is sometimes slow to come up. Every finder that gives up now keeps a screenshot

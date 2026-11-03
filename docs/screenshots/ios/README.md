@@ -97,6 +97,6 @@ NoAgenda editing (`agenda-edit-light/`, `agenda-edit-dark/`): from run [41393142
 `feature/noagenda-edit` (commit `ab1cda20d5`, the UI tests `NoDriveAgendaEditUITests`). The names are in `docs/testing.md`, section
 "NoAgenda editing (step 2)".
 
-NoAgenda Timeline (`agenda-timeline-light/`, `agenda-timeline-dark/`): from run [41497689323](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41497689323) on
-`feature/noagenda-timeline` (commit `a0e2e25f07`, the UI tests `NoDriveAgendaTimelineUITests`). The names are in `docs/testing.md`, section
+NoAgenda Timeline (`agenda-timeline-light/`, `agenda-timeline-dark/`): from run [41579821599](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41579821599) on
+`feature/noagenda-timeline` (commit `e90ceb88b0`; the light copy of "moved" is from this run, the others from the cancelled run 41562291822 of `067f488940`, the UI tests `NoDriveAgendaTimelineUITests`). The names are in `docs/testing.md`, section
 "NoAgenda Timeline (step 3)".
