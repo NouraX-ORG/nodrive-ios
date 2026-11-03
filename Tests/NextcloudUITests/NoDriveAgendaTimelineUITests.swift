@@ -82,7 +82,6 @@ final class NoDriveAgendaTimelineUITests: XCTestCase {
             XCTFail("no bar is on the screen at the end of the Timeline")
         }
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'agendaTimelineGroup-NoBoard'")).firstMatch.exists, "the board group is not in the lower rows")
-        save("agenda-timeline-bottom")
     }
 
     func test2TimelineDays() throws {
