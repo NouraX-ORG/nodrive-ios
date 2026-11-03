@@ -308,7 +308,8 @@ struct NoDriveDeviceSyncServerTests {
         let (wiped, wipedURL, secret) = try await start()
         defer { wiped.cancel() }
         secret.wipe()
-        let answer = try #require(await rawRequest(host: "127.0.0.1", port: UInt16(try #require(wipedURL.port)), path: wipedURL.path))
+        let wipedPort = UInt16(try #require(wipedURL.port))
+        let answer = try #require(await rawRequest(host: "127.0.0.1", port: wipedPort, path: wipedURL.path))
         #expect(split(answer).head.hasPrefix("HTTP/1.1 404"))
     }
 }
