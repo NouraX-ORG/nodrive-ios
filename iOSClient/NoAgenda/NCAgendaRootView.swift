@@ -187,12 +187,12 @@ struct NCAgendaRootView: View {
     /// NoDrive: the Timeline under the banners of the data (offline, refused and so on), see iOSClient/NoAgendaTimeline.
     private var timeline: some View {
         VStack(spacing: 0) {
-            ForEach(model.banners) { banner in
-                bannerRow(banner)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-                    .background(Color.yellow.opacity(0.15))
+            // Several banners at once must not eat the chart on a small phone: past 140 points they scroll
+            ViewThatFits(in: .vertical) {
+                timelineBanners
+                ScrollView { timelineBanners }
             }
+            .frame(maxHeight: 140)
             if model.isLoading && !model.hasLoaded {
                 HStack(spacing: 8) {
                     ProgressView()
@@ -202,6 +202,17 @@ struct NCAgendaRootView: View {
                 .accessibilityIdentifier("agendaReading")
             }
             NCAgendaTimelineView(model: model)
+        }
+    }
+
+    private var timelineBanners: some View {
+        VStack(spacing: 0) {
+            ForEach(model.banners) { banner in
+                bannerRow(banner)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    .background(Color.yellow.opacity(0.15))
+            }
         }
     }
 

@@ -23,7 +23,6 @@
 "_nodrive_agenda_timeline_spoken_after_" = "%1$@ comes after %2$@";
 "_nodrive_agenda_timeline_spoken_not_sent_" = "change not sent";
 "_nodrive_agenda_timeline_spoken_stub_" = "Comes after a task that is not on the screen. Tap to see which one.";
-"_nodrive_agenda_timeline_dependencies_" = "Dependencies";
 "_nodrive_agenda_timeline_scale_" = "Timeline scale";
 "_nodrive_agenda_timeline_range_" = "%1$@ to %2$@";
 "_nodrive_agenda_timeline_legend_" = "What the Timeline shows";
@@ -36,6 +35,6 @@
 "_nodrive_agenda_timeline_legend_hatch_" = "Hatching: a day off.";
 "_nodrive_agenda_timeline_legend_today_" = "The line: today.";
 "_nodrive_agenda_timeline_legend_agent_" = "After each bar: who does it, 👤 you or 🤖 one of your agents.";
-"_nodrive_agenda_timeline_legend_marks_" = "Marks: late, blocked, can't be changed, waiting to send, not sent.";
+"_nodrive_agenda_timeline_legend_marks_" = "Marks: late, blocked, clash, day off, can't be changed, waiting to send, not sent.";
 "_nodrive_agenda_timeline_legend_phone_" = "Tap a bar to open it. To move a task, change its dates in the editor.";
 "_nodrive_agenda_timeline_legend_info_" = "Legend";

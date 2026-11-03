@@ -122,6 +122,7 @@ struct NCAgendaTimelineView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     private let anchorId = "agendaTimelineAnchor"
+    private static let bottomRoom: CGFloat = 96
     private let spaceName = "agendaTimelineH"
 
     private var nameWidth: CGFloat { sizeClass == .compact ? 120 : 160 }
@@ -186,27 +187,29 @@ struct NCAgendaTimelineView: View {
             ScrollView(.horizontal, showsIndicators: true) {
                 ZStack(alignment: .topLeading) {
                     VStack(spacing: 0) {
-                    ZStack(alignment: .topLeading) {
-                        NCAgendaTimelineScaleView(scale: scale, todayDay: todayDay, calendar: model.calendar, accent: model.accentColor)
-                        NCAgendaTimelineCorner(scale: scale, scroll: scroll)
-                    }
-                    .frame(width: scale.totalWidth, height: scaleHeight, alignment: .topLeading)
-                    ScrollView(.vertical, showsIndicators: true) {
                         ZStack(alignment: .topLeading) {
-                            NCAgendaTimelineShadingView(scale: scale, shades: shades, todayDay: todayDay, height: contentHeight,
-                                                        calendar: model.calendar, accent: model.accentColor)
-                            NCAgendaTimelineArrowsView(layout: layout, height: contentHeight)
-                            LazyVStack(spacing: 0) {
-                                ForEach(layout.rows) { row in
-                                    rowView(row, layout: layout)
-                                }
-                            }
-                            .frame(width: scale.totalWidth, alignment: .topLeading)
+                            NCAgendaTimelineScaleView(scale: scale, todayDay: todayDay, calendar: model.calendar, accent: model.accentColor)
+                            NCAgendaTimelineCorner(scale: scale, scroll: scroll)
                         }
-                        .frame(width: scale.totalWidth, height: contentHeight, alignment: .topLeading)
-                    }
-                    .frame(width: scale.totalWidth, height: bodyHeight)
-                    .refreshable { await model.refresh() }
+                        .frame(width: scale.totalWidth, height: scaleHeight, alignment: .topLeading)
+                        ScrollView(.vertical, showsIndicators: true) {
+                            ZStack(alignment: .topLeading) {
+                                NCAgendaTimelineShadingView(scale: scale, shades: shades, todayDay: todayDay, height: contentHeight,
+                                                            calendar: model.calendar, accent: model.accentColor)
+                                NCAgendaTimelineArrowsView(layout: layout, height: contentHeight)
+                                LazyVStack(spacing: 0) {
+                                    ForEach(layout.rows) { row in
+                                        rowView(row, layout: layout)
+                                    }
+                                }
+                                .frame(width: scale.totalWidth, alignment: .topLeading)
+                            }
+                            .frame(width: scale.totalWidth, height: contentHeight, alignment: .topLeading)
+                        }
+                        // Room under the last row, so that it can be scrolled clear of the floating tab bar (only when the rows need to scroll)
+                        .contentMargins(.bottom, layout.contentHeight + Self.bottomRoom > bodyHeight ? Self.bottomRoom : 0, for: .scrollContent)
+                        .frame(width: scale.totalWidth, height: bodyHeight)
+                        .refreshable { await model.refresh() }
                     }
                     // Where the shown date is: the scroll target (real layout, not an offset)
                     HStack(spacing: 0) {
@@ -244,7 +247,7 @@ struct NCAgendaTimelineView: View {
             }
         }
         .overlay {
-            if !layout.hasItems {
+            if !layout.hasItems && model.hasLoaded {
                 Text(NCAgendaTimelineText.t("_nodrive_agenda_timeline_empty_"))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -253,6 +256,9 @@ struct NCAgendaTimelineView: View {
                     .accessibilityIdentifier("agendaTimelineEmpty")
             }
         }
+        // A time line runs from the left to the right in every language: the bars (placed by offset), the scale, the shading
+        // and the arrows (drawn on a canvas) must not mirror differently in Arabic
+        .environment(\.layoutDirection, .leftToRight)
     }
 
     @ViewBuilder

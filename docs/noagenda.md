@@ -253,15 +253,16 @@ only the new folder and the two new test files. Small marked changes in NoDrive'
 - **Bars** for my NoGantt tasks, grouped under the project and the phase (items without a phase first, by start; then the phases by their first start), with the
   **% done filling the bar**. My to-dos with a start and a due date (not repeating) are thin dashed bars under "NoTasks > list". **Diamonds** for the milestones of
   the projects where I have tasks and for my dated cards ("NoBoard > board"). **The agent** ("🤖 Writer-Bot", "👤 Self") and the marks (late, blocked, locked,
-  waiting, not sent) follow every bar.
+  clash, day off, waiting, not sent) follow every bar; a milestone has no agent (NoGantt milestones have no assignee). Phases are grouped by the phase id, so two
+  phases of one project with the same name stay two groups.
 - **Dependency arrows**, read only, for finish-to-start, start-to-start, finish-to-finish and start-to-finish (NoGantt 2.4.1 answers them as `EA`, `AA`, `EE` and `AE`;
   `FS`, `SS`, `FF`, `SF` are read the same). A predecessor that is not on the screen is a short **stub**; tapping it says "After: Publish banners (Sara)".
 - **My busy time** shades the day behind the bars (0 to 35 % of the accent colour, by the share of my working hours my own busy events take; an agent's event and a
   free event never shade). Days off are hatched (not a working day, a holiday, an all-day busy event). A line marks today.
 - **Tap** a bar or diamond for the detail sheet. Its editor has the two date pickers and **Move by** -7, -1, +1, +7 days. There is **no drag on phones**. A move is the
   same command as setting the two dates by hand: a NoGantt `PUT` with `start_date`, `end_date` and `adjust_lag: true` (the followers move; Undo in the toast) or, for a to-do,
-  a CalDAV change that keeps the times of day. Queue, conflicts and locks are those of step 2. A task with only an end date is a one-day bar with a lock ("This task has no
-  dates to move."); the date pickers of such a task are off. A locked bar (viewer project, repeating, waiting change, refused home) has no Edit button, so no date editor.
+  a CalDAV change that keeps the times of day. Queue, conflicts and locks are those of step 2. A task without a start date is a one-day bar with a lock ("This task has no
+  dates to move."); the date pickers of such a task are off (a task with a start and no end can be moved: the editor has the start). A locked bar (viewer project, repeating, waiting change, refused home) has no Edit button, so no date editor.
 - **ⓘ** opens the legend. Every bar and diamond has a spoken label ("Gantt task, Write homepage copy, 27 Oct to 30 Oct, 40 % done, Writer-Bot"), and the arrows are read
   as "Review banners comes after Write homepage copy".
 
@@ -282,6 +283,10 @@ sends a Timeline move (+7 days) and its Undo to the real throwaway server (`time
   wall time does not grow; the plan had put it into the `agenda` shard.
 - **Name column and scale.** A horizontal scroll view holds the scale above a vertical one; the name cells follow the scroll offset (`onScrollGeometryChange` from iOS 18,
   a preference before that), so a name never scrolls away.
+- **Left to right in every language.** The chart is forced to a left-to-right layout (also in Arabic): the bars are placed by offset and the scale, shading and
+  arrows are drawn on canvases, and the two must not mirror differently. The controls above the chart and the sheets follow the language; the names inside the chart are left-aligned (RTL is not yet checked by a screenshot).
+- **Banners.** On the Timeline the banners of the data take at most 140 points and scroll past that, so a small phone keeps its chart. The empty text ("No dated work in
+  this range.") shows only after the first read. The last row can be scrolled 96 points clear of the floating tab bar.
 - **Arrow drawing.** All arrows are drawn in one `Canvas` (a project has few); the rows are in a lazy stack. If a project with hundreds of dependencies turns up, the canvas
   should draw only the visible rows (plan risk T1).
 - **Seed.** The CI server got "Review banners" for Ali (follows his own "Write homepage copy" and Sara's "Publish banners") and the to-do "Prepare launch notes" (start and

@@ -146,13 +146,19 @@ struct NCAgendaTimelineItemRow: View {
 
     private func trailing(locked: Bool, notSent: Bool) -> some View {
         HStack(spacing: 4) {
-            Text(item.agent.displayText)
-                .font(.caption2)
-                .foregroundStyle(item.agent.isPaused ? Color.secondary.opacity(0.6) : Color.secondary)
-                .lineLimit(1)
+            // NoGantt milestones have no assignee
+            if item.kind != .milestone {
+                Text(item.agent.displayText)
+                    .font(.caption2)
+                    .foregroundStyle(item.agent.isPaused ? Color.secondary.opacity(0.6) : Color.secondary)
+                    .lineLimit(1)
+            }
             if item.late { mark("alarm", .red) }
             if item.blocked { mark("nosign", .orange) }
             if locked { mark("lock.fill", .secondary) }
+            if item.clash == .hard { mark("exclamationmark.triangle.fill", .red) }
+            if item.clash == .soft { mark("exclamationmark.triangle", .orange) }
+            if item.dayOff { mark("calendar.badge.exclamationmark", .orange) }
             if item.pending { mark("clock", .orange) }
             if notSent { mark("exclamationmark.triangle.fill", .orange) }
         }

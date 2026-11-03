@@ -149,7 +149,7 @@ struct TimelineShape: Equatable, Sendable {
     var centerY: CGFloat
     /// 0 to 1, the part of the bar the % done fills.
     var fill: Double
-    /// A Gantt task that has only an end date: a one-day bar that can't be moved.
+    /// A Gantt task without a start date: a one-day bar that can't be moved.
     var noDates: Bool
 
     var isDiamond: Bool { kind == .diamond }
@@ -237,9 +237,10 @@ enum NCAgendaTimelineLayout {
                 let last = NCAgendaTimelineDays.number(end, calendar: zoned)
                 return (min(first, last), max(first, last), .bar, false)
             }
+            // One date only: a one-day bar. It can't be moved when the start is the missing date (the same rule as the sheet's editor)
             guard let only = item.end ?? item.start else { return nil }
             let day = NCAgendaTimelineDays.number(only, calendar: zoned)
-            return (day, day, .bar, true)
+            return (day, day, .bar, item.start == nil)
         case .todo:
             guard let start = item.start, let due = item.due else { return nil }
             let first = NCAgendaTimelineDays.number(start, calendar: calendar)
@@ -343,15 +344,17 @@ enum NCAgendaTimelineLayout {
             addGroup("group:" + key, group.title, level: 0)
             // No phase first (by start), then the phases by their first start
             for entry in ordered(group.entries.filter { $0.item.phase == nil }) { addItem(entry) }
-            let phases = Dictionary(grouping: group.entries.filter { $0.item.phase != nil }, by: { $0.item.phase ?? "" })
-            let phaseNames = phases.keys.sorted { lhs, rhs in
+            // By the phase's id (two phases of one project may have the same name); an item without an id falls back to its name
+            let phases = Dictionary(grouping: group.entries.filter { $0.item.phase != nil }, by: { phaseKey(of: $0.item) })
+            let phaseKeys = phases.keys.sorted { lhs, rhs in
                 let left = phases[lhs]!.map { $0.first }.min() ?? 0
                 let right = phases[rhs]!.map { $0.first }.min() ?? 0
                 return left == right ? lhs < rhs : left < right
             }
-            for name in phaseNames {
-                addGroup("phase:" + key + ":" + name, name, level: 1)
-                for entry in ordered(phases[name] ?? []) { addItem(entry) }
+            for phase in phaseKeys {
+                let entries = phases[phase] ?? []
+                addGroup("phase:" + key + ":" + phase, entries.first?.item.phase ?? "", level: 1)
+                for entry in ordered(entries) { addItem(entry) }
             }
         }
         for (prefix, groups) in [("list:", lists), ("board:", boards)] {
@@ -382,6 +385,12 @@ enum NCAgendaTimelineLayout {
             }
         }
         return TimelineLayout(scale: scale, rows: rows, shapes: shapes, arrows: arrows, stubs: stubs, contentHeight: y)
+    }
+
+    /// What makes two items one phase: its id, or its name when the id is not known.
+    static func phaseKey(of item: AgendaItem) -> String {
+        if let id = item.phaseId { return "id-\(id)" }
+        return "name-" + (item.phase ?? "")
     }
 
     /// NoGantt names a predecessor "t-<task id>" or "m-<milestone id>"; the rows of NoAgenda are "gantt:<id>" and
@@ -477,10 +486,13 @@ enum NCAgendaTimelineLayout {
         if item.kind == .ganttTask, let percent = item.percent {
             parts.append(NCAgendaTimelineText.f("_nodrive_agenda_timeline_spoken_percent_", percent))
         }
-        parts.append(agentName(item.agent))
+        // NoGantt milestones have no assignee
+        if item.kind != .milestone { parts.append(agentName(item.agent)) }
         if item.late { parts.append(NCAgendaText.t("_nodrive_agenda_late_")) }
         if item.blocked { parts.append(NCAgendaText.t("_nodrive_agenda_blocked_")) }
         if locked { parts.append(NCAgendaText.t("_nodrive_agenda_spoken_locked_")) }
+        if item.clash != nil { parts.append(NCAgendaEditText.t("_nodrive_agenda_edit_clash_")) }
+        if item.dayOff { parts.append(NCAgendaEditText.t("_nodrive_agenda_edit_day_off_")) }
         if item.pending { parts.append(NCAgendaEditText.t("_nodrive_agenda_edit_waiting_spoken_")) }
         if notSent { parts.append(NCAgendaTimelineText.t("_nodrive_agenda_timeline_spoken_not_sent_")) }
         return parts.joined(separator: ", ")

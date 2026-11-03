@@ -267,6 +267,8 @@ struct AgendaItem: Codable, Equatable, Identifiable, Sendable {
     var repeating: Bool = false
     var projectName: String?
     var phase: String?
+    /// NoDrive: the id of the phase (NoGantt subproject), so that two phases with one name stay apart on the Timeline.
+    var phaseId: Int?
     var status: String?
     var dependencies: [AgendaDependency] = []
     var late: Bool = false

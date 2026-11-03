@@ -33,7 +33,7 @@ enum AgendaTimelineSupport {
         TimelineScale(range: TimelineRange.around(shown, calendar: calendar), zoom: zoom, nameWidth: nameWidth)
     }
 
-    static func task(_ id: Int, _ title: String, start: String?, end: String?, project: String = "Website", projectId: Int = 1, phase: String? = nil,
+    static func task(_ id: Int, _ title: String, start: String?, end: String?, project: String = "Website", projectId: Int = 1, phase: String? = nil, phaseId: Int? = nil,
                      percent: Int? = nil, agent: AgentRef = .selfAgent, deps: [AgendaDependency] = []) -> AgendaItem {
         var item = AgendaItem(key: "gantt:\(id)", home: .gantt, kind: .ganttTask, title: title, sourceKey: "project:\(projectId)", sourceName: project,
                               sourceColor: "#2563EB", link: AgendaLink(home: .gantt, projectId: projectId, taskId: id))
@@ -42,6 +42,7 @@ enum AgendaTimelineSupport {
         item.percent = percent
         item.projectName = project
         item.phase = phase
+        item.phaseId = phaseId
         item.agent = agent
         item.dependencies = deps
         return item
@@ -313,6 +314,25 @@ struct NoDriveAgendaTimelineRowsTests {
         #expect(bar.x == layout.scale.x(forDay: first))
         #expect(bar.width == CGFloat(S.number("2026-11-03") - first + 1) * 12)
         #expect(bar.firstDay == S.number("2026-10-01"))
+    }
+
+    @Test("A Gantt task with a start but no end is a one-day bar that can still be moved (the sheet's editor has the start)")
+    func startOnly() throws {
+        let layout = S.build([S.task(1, "Begin", start: "2026-11-05", end: nil)])
+        let bar = try #require(layout.shapes["gantt:1"])
+        #expect(!bar.noDates)
+        #expect(bar.width == 12)
+        #expect(bar.x == layout.scale.x(forDay: S.number("2026-11-05")))
+    }
+
+    @Test("Two phases of one project with the same name stay two groups (grouped by the phase id)")
+    func phasesById() {
+        let items = [
+            S.task(1, "A1", start: "2026-11-03", end: "2026-11-04", phase: "Build", phaseId: 7),
+            S.task(2, "B1", start: "2026-11-10", end: "2026-11-11", phase: "Build", phaseId: 8),
+            S.task(3, "A2", start: "2026-11-05", end: "2026-11-06", phase: "Build", phaseId: 7)
+        ]
+        #expect(S.titles(S.build(items)) == ["# Website", "## Build", "A1", "A2", "## Build", "B1"])
     }
 
     @Test("A Gantt task with only an end date is a one-day bar that can't be moved")
@@ -692,7 +712,23 @@ struct NoDriveAgendaTimelineWordsTests {
         let diamond = S.milestone(1, "Launch", day: "2026-11-07")
         let shapeD = try #require(S.build([diamond]).shapes["milestone:1"])
         let day = NCAgendaFormat.shortDay(NCAgendaTimelineDays.date(S.number("2026-11-07"), calendar: S.calendar))
-        #expect(NCAgendaTimelineLayout.spoken(diamond, shape: shapeD, calendar: S.calendar, locked: false, notSent: false) == "Milestone, Launch, \(day), Self")
+        #expect(NCAgendaTimelineLayout.spoken(diamond, shape: shapeD, calendar: S.calendar, locked: false, notSent: false) == "Milestone, Launch, \(day)")
+    }
+
+    @Test("A clash and a deadline on a day off are read aloud, like in the Day view; a milestone has no agent")
+    func clashAndDayOffAreSpoken() throws {
+        var item = S.task(1, "Write", start: "2026-11-03", end: "2026-11-04")
+        item.clash = .hard
+        item.dayOff = true
+        let shape = try #require(S.build([item]).shapes["gantt:1"])
+        let text = NCAgendaTimelineLayout.spoken(item, shape: shape, calendar: S.calendar, locked: false, notSent: false)
+        #expect(text.hasSuffix(", Self, " + NCAgendaEditText.t("_nodrive_agenda_edit_clash_") + ", " + NCAgendaEditText.t("_nodrive_agenda_edit_day_off_")), "\(text)")
+        var milestone = S.milestone(1, "Launch", day: "2026-11-07")
+        milestone.clash = .soft
+        let diamond = try #require(S.build([milestone]).shapes["milestone:1"])
+        let spoken = NCAgendaTimelineLayout.spoken(milestone, shape: diamond, calendar: S.calendar, locked: false, notSent: false)
+        #expect(!spoken.contains("Self"), "\(spoken)")
+        #expect(spoken.hasSuffix(", " + NCAgendaEditText.t("_nodrive_agenda_edit_clash_")), "\(spoken)")
     }
 
     @Test("The agent without its emoji: Self, a name, a retired agent, an unknown one")

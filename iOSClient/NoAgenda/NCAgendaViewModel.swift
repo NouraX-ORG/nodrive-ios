@@ -71,7 +71,10 @@ enum NCAgendaFormat {
         var parts = [item.kind.spokenName, item.title]
         if let when = whenText(item, calendar: calendar) { parts.append(when) }
         parts.append(item.sourceName)
-        parts.append(item.agent.isSelf ? NCAgendaText.t("_nodrive_agenda_spoken_by_you_") : NCAgendaText.f("_nodrive_agenda_spoken_by_agent_", item.agent.displayText))
+        // NoDrive: NoGantt milestones have no assignee
+        if item.kind != .milestone {
+            parts.append(item.agent.isSelf ? NCAgendaText.t("_nodrive_agenda_spoken_by_you_") : NCAgendaText.f("_nodrive_agenda_spoken_by_agent_", item.agent.displayText))
+        }
         if let person = item.personName { parts.append(person) }
         if item.late { parts.append(NCAgendaText.t("_nodrive_agenda_late_")) }
         if item.blocked { parts.append(NCAgendaText.t("_nodrive_agenda_blocked_")) }

@@ -28,7 +28,8 @@ final class NoDriveAgendaTimelineUITests: XCTestCase {
         // The groups: the project, its phase, the list of to-dos and the board
         XCTAssertNotNil(findElement(app, id: "agendaTimelineGroup-Website"), "the project group is missing")
         // My Gantt task in its phase: 40 % filled, done by Writer-Bot
-        guard let write = findBar(app, "Write homepage copy") else { XCTFail("Write homepage copy is not on the Timeline"); return }
+        let write = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'agendaTimelineBar-' AND label CONTAINS 'Write homepage copy'")).firstMatch
+        guard findBar(app, "Write homepage copy") != nil else { XCTFail("Write homepage copy is not on the Timeline"); return }
         XCTAssertTrue(write.label.hasPrefix("Gantt task, Write homepage copy"), "the bar says: \(write.label)")
         XCTAssertTrue(write.label.contains("40 % done"), "the bar says: \(write.label)")
         XCTAssertTrue(write.label.contains("Writer-Bot"), "the bar says: \(write.label)")
@@ -59,8 +60,28 @@ final class NoDriveAgendaTimelineUITests: XCTestCase {
         XCTAssertNil(findBar(app, "Draft report", timeout: 3, absent: true), "a to-do without a start is drawn")
         // The agent after the bar: a task done by Self has no robot
         XCTAssertTrue(findBar(app, "Big push")?.label.contains("Self") == true, "the agent of a task done by hand is not Self")
+        // The lower rows, clear of the floating tab bar: the phase "Copy" with the 40 % bar, the to-do bar, the board and its diamond
         scrollChart(app, up: false, times: 6)
+        let tabTop = tabBarTop(app)
+        var lowerRowsShown = false
+        for _ in 0..<8 where !lowerRowsShown {
+            scrollChart(app, up: true, times: 1)
+            lowerRowsShown = write.exists && write.isHittable && write.frame.maxY < tabTop - 4 && element(app, "agendaTimelineGroup-Copy").exists
+        }
+        XCTAssertTrue(lowerRowsShown, "the bar of Write homepage copy never came clear of the tab bar")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'agendaTimelineBar-' AND label CONTAINS 'Prepare launch notes'")).firstMatch.exists, "the to-do bar is not in the lower rows")
         save("agenda-timeline")
+        // The very last row can be scrolled clear of the tab bar and tapped
+        scrollChart(app, up: true, times: 6)
+        let bars = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'agendaTimelineBar-'")).allElementsBoundByIndex.filter { $0.exists }
+        if let last = bars.max(by: { $0.frame.maxY < $1.frame.maxY }) {
+            XCTAssertTrue(last.isHittable, "the last row is under the tab bar: \(last.label)")
+            XCTAssertLessThan(last.frame.maxY, tabTop, "the last row is not clear of the tab bar: \(last.label)")
+        } else {
+            XCTFail("no bar is on the screen at the end of the Timeline")
+        }
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'agendaTimelineGroup-NoBoard'")).firstMatch.exists, "the board group is not in the lower rows")
+        save("agenda-timeline-bottom")
     }
 
     func test2TimelineDays() throws {
@@ -129,7 +150,7 @@ final class NoDriveAgendaTimelineUITests: XCTestCase {
         app.buttons["agendaMoveByPlus1"].tap()
         XCTAssertTrue(app.buttons["agendaEditorSave"].isEnabled, "Save is off after Move by +1")
         app.buttons["agendaMoveByMinus1"].tap()
-        XCTAssertFalse(app.buttons["agendaEditorSave"].isEnabled, "+1 and -1 is a change")
+        XCTAssertFalse(app.buttons["agendaEditorSave"].isEnabled, "+1 then -1 should be no change, but Save is on")
         save("agenda-timeline-move-by")
     }
 
@@ -259,6 +280,12 @@ final class NoDriveAgendaTimelineUITests: XCTestCase {
         } while Date() < deadline
         if !absent { saveFailure(app, looking: text) }
         return nil
+    }
+
+    /// The top edge of the floating tab bar (a fixed distance from the bottom when the bar is not in the accessibility tree).
+    private func tabBarTop(_ app: XCUIApplication) -> CGFloat {
+        let bar = app.tabBars.firstMatch
+        return bar.exists ? bar.frame.minY : app.frame.maxY - 100
     }
 
     /// Drags the chart. `up` moves the rows up (shows what is further down); otherwise back to the top.

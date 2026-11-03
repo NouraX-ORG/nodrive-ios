@@ -35,9 +35,12 @@ struct NCAgendaRowView: View {
                         Text(item.sourceName)
                             .font(.footnote)
                             .foregroundStyle(NCAgendaColors.color(item.sourceColor))
-                        Text(item.relation == .team ? teamText : item.agent.displayText)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                        // NoDrive: NoGantt milestones have no assignee
+                        if item.relation == .team || item.kind != .milestone {
+                            Text(item.relation == .team ? teamText : item.agent.displayText)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     if let note = item.timeZoneNote {
                         Text(note).font(.caption).foregroundStyle(.secondary)

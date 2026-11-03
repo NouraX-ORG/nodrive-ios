@@ -144,6 +144,7 @@ extension NCAgendaAssembler {
                     item.flags = flags
                     item.projectName = project.title
                     item.phase = task.subprojectId.flatMap { phases[$0] }
+                    item.phaseId = item.phase == nil ? nil : task.subprojectId
                     item.status = task.status
                     item.late = late
                     item.blocked = blocked
