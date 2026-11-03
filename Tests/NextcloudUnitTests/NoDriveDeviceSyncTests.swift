@@ -722,7 +722,10 @@ extension NoDriveDeviceSyncFlowTests {
         // the served copy for the test run is redacted
         let built = try #require(fixture.built.first)
         #expect(String(decoding: built, as: UTF8.self).contains(planted))
-        #expect(String(decoding: try #require(NCDeviceSyncProfile.redacted(built)), as: UTF8.self).contains("<redacted>"))
+        let copy = try #require(NCDeviceSyncProfile.redacted(built))
+        let content = try #require(try plist(copy)["PayloadContent"] as? [[String: Any]])
+        #expect(content[0]["CalDAVPassword"] as? String == "<redacted>")
+        #expect(content[1]["CardDAVPassword"] as? String == "<redacted>")
     }
 
     @Test("The log helper takes fixed words and numbers only")
