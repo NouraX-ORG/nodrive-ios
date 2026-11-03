@@ -188,11 +188,13 @@ struct NCAgendaRootView: View {
     private var timeline: some View {
         VStack(spacing: 0) {
             // Several banners at once must not eat the chart on a small phone: past 140 points they scroll
-            ViewThatFits(in: .vertical) {
-                timelineBanners
-                ScrollView { timelineBanners }
+            if !model.banners.isEmpty {
+                ViewThatFits(in: .vertical) {
+                    timelineBanners
+                    ScrollView { timelineBanners }
+                }
+                .frame(maxHeight: 140)
             }
-            .frame(maxHeight: 140)
             if model.isLoading && !model.hasLoaded {
                 HStack(spacing: 8) {
                     ProgressView()

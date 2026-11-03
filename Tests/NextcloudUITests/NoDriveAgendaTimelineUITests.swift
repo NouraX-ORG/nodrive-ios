@@ -63,10 +63,11 @@ final class NoDriveAgendaTimelineUITests: XCTestCase {
         // The lower rows, clear of the floating tab bar: the phase "Copy" with the 40 % bar, the to-do bar, the board and its diamond
         scrollChart(app, up: false, times: 6)
         let tabTop = tabBarTop(app)
+        let chartTop = element(app, "agendaTimelineScale").frame.maxY
         var lowerRowsShown = false
         for _ in 0..<8 where !lowerRowsShown {
             scrollChart(app, up: true, times: 1)
-            lowerRowsShown = write.exists && write.isHittable && write.frame.maxY < tabTop - 4 && element(app, "agendaTimelineGroup-Copy").exists
+            lowerRowsShown = write.exists && write.frame.maxY < tabTop - 4 && write.frame.minY > chartTop && element(app, "agendaTimelineGroup-Copy").exists
         }
         XCTAssertTrue(lowerRowsShown, "the bar of Write homepage copy never came clear of the tab bar")
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'agendaTimelineBar-' AND label CONTAINS 'Prepare launch notes'")).firstMatch.exists, "the to-do bar is not in the lower rows")
@@ -75,7 +76,7 @@ final class NoDriveAgendaTimelineUITests: XCTestCase {
         scrollChart(app, up: true, times: 6)
         let bars = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'agendaTimelineBar-'")).allElementsBoundByIndex.filter { $0.exists }
         if let last = bars.max(by: { $0.frame.maxY < $1.frame.maxY }) {
-            XCTAssertTrue(last.isHittable, "the last row is under the tab bar: \(last.label)")
+            XCTAssertGreaterThan(last.frame.minY, chartTop, "the last row is not on the chart: \(last.label)")
             XCTAssertLessThan(last.frame.maxY, tabTop, "the last row is not clear of the tab bar: \(last.label)")
         } else {
             XCTFail("no bar is on the screen at the end of the Timeline")
