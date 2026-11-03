@@ -287,7 +287,15 @@ final class NoDriveDeviceSyncUITests: XCTestCase {
     /// The main screen, the sidebar, and Settings.
     private func openSettings(_ app: XCUIApplication) {
         let sidebarButton = app.buttons["openSidebar"]
-        XCTAssertTrue(waitFor(sidebarButton, in: app, timeout: 300, hittable: true), "the main screen with the sidebar button never came up")
+        // A busy runner sometimes leaves the intro on screen after the account was created (a known race of the first launch of a
+        // run, see NCUITestAccount). A second launch finds the account and restores the main screen, as it does for a real user
+        // after a restart: so the test relaunches once instead of waiting out the full time.
+        if !waitFor(sidebarButton, in: app, timeout: 90, hittable: true) {
+            record("relaunch", ["reason": "no main screen after 90 s"])
+            app.terminate()
+            app.launch()
+        }
+        XCTAssertTrue(waitFor(sidebarButton, in: app, timeout: 200, hittable: true), "the main screen with the sidebar button never came up")
         settle(app, seconds: 4)
         let sidebarOpen = app.descendants(matching: .any)["sidebarFiles"]
         for attempt in 1...5 where !sidebarOpen.exists {

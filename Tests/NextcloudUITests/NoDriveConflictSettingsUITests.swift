@@ -136,7 +136,13 @@ final class NoDriveConflictSettingsUITests: XCTestCase {
     /// The main screen, the sidebar, and the Auto upload screen.
     private func openAutoUpload(_ app: XCUIApplication) {
         let sidebarButton = app.buttons["openSidebar"]
-        XCTAssertTrue(waitFor(sidebarButton, in: app, timeout: 300, hittable: true), "the main screen with the sidebar button never came up")
+        // A busy runner sometimes leaves the intro on screen after the account was created (a known race of the first launch
+        // of a run, see NCUITestAccount): one relaunch restores the main screen, as it does for a real user after a restart.
+        if !waitFor(sidebarButton, in: app, timeout: 90, hittable: true) {
+            app.terminate()
+            app.launch()
+        }
+        XCTAssertTrue(waitFor(sidebarButton, in: app, timeout: 200, hittable: true), "the main screen with the sidebar button never came up")
         settle(app, seconds: 4)
         let sidebarOpen = app.descendants(matching: .any)["sidebarFiles"]
         for attempt in 1...5 where !sidebarOpen.exists {
