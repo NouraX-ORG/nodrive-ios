@@ -27,6 +27,8 @@ struct NCAgendaSourcesView: View {
                     Text(NCAgendaText.t("_nodrive_agenda_background_off_")).font(.footnote).foregroundStyle(.secondary)
                 }
             }
+            // The iPhone's own Calendar, Reminders and Contacts (iOSClient/DeviceSync)
+            NCDeviceSyncSourcesSection(account: model.account)
         }
         .navigationTitle(NCAgendaText.t("_nodrive_agenda_sources_"))
         .navigationBarTitleDisplayMode(.inline)

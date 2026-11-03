@@ -128,6 +128,8 @@ TEST_FILES = [
     ('NextcloudUITests', 'NextcloudUITests', 'NoDriveAgendaEditUITests.swift'),
     ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveAgendaTimelineTests.swift'),
     ('NextcloudUITests', 'NextcloudUITests', 'NoDriveAgendaTimelineUITests.swift'),
+    ('NextcloudUnitTests', 'NextcloudUnitTests', 'NoDriveDeviceSyncTests.swift'),
+    ('NextcloudUITests', 'NextcloudUITests', 'NoDriveDeviceSyncUITests.swift'),
 ]
 # Our own source folders of the app target, each a new group inside its parent group:
 # (target, folder, parent group name). Every .swift file of the folder is added.
@@ -138,6 +140,7 @@ APP_SOURCE_FOLDERS = [
     ('Nextcloud', 'iOSClient/NoAgenda', 'iOSClient'),
     ('Nextcloud', 'iOSClient/NoAgendaEdit', 'iOSClient'),
     ('Nextcloud', 'iOSClient/NoAgendaTimeline', 'iOSClient'),
+    ('Nextcloud', 'iOSClient/DeviceSync', 'iOSClient'),
 ]
 # Product of the UI-test target. Its runner app ("<product>-Runner") sits on the simulator's home
 # screen during the screenshot walk, so it must not carry the Nextcloud name. The target name
@@ -709,6 +712,9 @@ def brand_swift(st, base):
     # Smart conflicts: the experimental PhotoKit background upload would replace same-name files without asking
     insert_after(st, rel, '    var disable_crash_service: Bool = true\n',
                  '    var disable_background_upload_extension: Bool = true // NoDrive: iOSClient/SmartConflicts, see NCPreferences\n')
+    # Device sync: NoDrive's own profile (with its own app password) replaces upstream's, which has no password
+    sub_regex(st, rel, r'^([ \t]*var disable_mobileconfig: Bool = )(?:false|true)[ \t]*(?://[^\n]*)?$',
+              r"\1true // NoDrive: our own profile with its own password replaces upstream's (iOSClient/DeviceSync, D1)")
     s('disable_show_more_nextcloud_apps_in_settings', 'Bool', 'true')
     s('disable_source_code_in_settings', 'Bool', 'true')
     # Nextcloud's push proxy is never set (it is only set when brand == "Nextcloud"; blank it anyway).
@@ -1315,6 +1321,19 @@ def acknowledgements(st):
 
 
 # --------------------------------------------------------------------------
+def device_sync(st):
+    """Hooks of the feature "Device calendar and contacts sync" (iOSClient/DeviceSync). D1 is the brand option
+    `disable_mobileconfig` in brand_swift. Each hook is one call and one `// NoDrive:` line."""
+    insert_before(st, 'iOSClient/Settings/Settings/NCSettingsView.swift',
+                  '            // Calender & Contacts\n',
+                  '            // NoDrive: "Add to iPhone Calendar & Contacts" with its own password (iOSClient/DeviceSync, D2)\n'
+                  '            NCDeviceSyncSection(controller: model.controller)\n')
+    insert_after(st, 'iOSClient/Account/NCAccount.swift',
+                 '        await NCAgendaStore.forget(account: account)\n',
+                 '        // NoDrive: tell how to remove the profile from this iPhone (iOSClient/DeviceSync, D3)\n'
+                 '        await NCDeviceSyncRemoval.accountRemoved(account: account)\n')
+
+
 def run(st, base):
     brand_swift(st, base)
     intro_swift(st)
@@ -1322,6 +1341,7 @@ def run(st, base):
     smart_conflicts(st)
     problem_reports(st)
     noagenda(st)
+    device_sync(st)
     plists(st, base)
     project(st, base)
     storyboards(st)

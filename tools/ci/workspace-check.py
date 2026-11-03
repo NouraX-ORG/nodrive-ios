@@ -324,7 +324,11 @@ def scan_secret(dirs):
     password = os.environ.get('NODRIVE_WS_APP_PASSWORD', '')
     if not password:
         return ['NODRIVE_WS_APP_PASSWORD is not set']
-    needle = password.encode()
+    needles = [password.encode()]
+    # the separate password of the device-sync shard (the stand-in hands it out; it exists only in that shard)
+    device_password = os.environ.get('NODRIVE_DS_APP_PASSWORD', '')
+    if device_password:
+        needles.append(device_password.encode())
     problems, scanned = [], 0
     for top in dirs:
         for root, _, files in os.walk(top):
@@ -336,8 +340,9 @@ def scan_secret(dirs):
                 except OSError:
                     continue
                 scanned += 1
-                if needle in data:
-                    problems.append(f'the throwaway password is in {p}')
+                for needle in needles:
+                    if needle in data:
+                        problems.append(f'a throwaway password is in {p}')
     print(f'scanned {scanned} files')
     return problems
 

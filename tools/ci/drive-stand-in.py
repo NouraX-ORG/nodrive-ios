@@ -54,6 +54,18 @@ problem reports:
 Every one of these is logged by name and fact only (event, file name, size, headers named, share type, permissions,
 share target, path): never a header value, a cookie or a password.
 
+With --device-sync (needs --workspace; NODRIVE_DS_APP_PASSWORD in the environment, never on the command line) it also
+plays the server's Login Flow v2 for the iPhone's Calendar and Contacts profile (the app's "Add to iPhone Calendar &
+Contacts"). A start with the user agent "NoDrive Calendar & Contacts (iPhone)" gets its own flow:
+
+  POST /index.php/login/v2        (that user agent) -> its own token, flow page and poll endpoint
+  GET  /login/v2/flow/<its token> remembers that the page was opened ("browser-opened-device-flow")
+  POST /login/v2/poll             404 until the page was opened, 404 again for the first poll after that, then
+                                  {server, loginName, appPassword} (the throwaway device password; event "device-grant")
+  DELETE /ocs/v2.php/core/apppassword   Basic with the device password -> 200 and the password is revoked
+                                  (event "device-apppassword-revoked"); anything else 401
+Only names and facts are logged, never the password or the poll token.
+
   sudo python3 tools/ci/drive-stand-in.py --cert leaf.pem --key leaf.key --log stand-in.jsonl [--workspace]
 """
 
@@ -86,6 +98,9 @@ LOGIN_V2 = {
     'poll': {'token': POLL_TOKEN, 'endpoint': f'https://{HOST}/login/v2/poll'},
     'login': f'https://{HOST}/login/v2/flow/{FLOW_TOKEN}',
 }
+DEVICE_USER_AGENT = 'NoDrive Calendar & Contacts (iPhone)'
+DEVICE_FLOW_TOKEN = 'nodrive-ci-device-flow-token'
+DEVICE_POLL_TOKEN = 'nodrive-ci-device-poll-token'
 FOREIGN_HOST = 'foreign.nodrive-ci.test'
 PASSPHRASE = 'oc_sessionPassphrase'
 SESSION_COOKIE = 'ocstandin01'
@@ -430,6 +445,51 @@ class Handler(BaseHTTPRequestHandler):
         return False
 
     # --- reports mode: the "Problem reports" folder, the zips and the shares ---------------------------------
+    def _device(self):
+        ws = self.server.workspace
+        return ws.get('device') if ws else None
+
+    def _device_poll(self):
+        """The poll of the device flow: 404 until the flow page was opened, 404 for the first poll after that (the person
+        is still on the page), then the grant."""
+        device = self._device()
+        if not device['flow_opened']:
+            self._record(404, {'event': 'device-poll', 'granted': False})
+            self._json(404, [])
+            return
+        device['polls_after_open'] += 1
+        if device['polls_after_open'] < 2:
+            self._record(404, {'event': 'device-poll', 'granted': False})
+            self._json(404, [])
+            return
+        device['revoked'] = False
+        device['grants'] += 1
+        self._record(200, {'event': 'device-grant', 'granted': True, 'grants': device['grants']})
+        self._json(200, {'server': f'https://{HOST}', 'loginName': self.server.workspace['user'],
+                         'appPassword': device['password']})
+
+    def _device_revoke(self):
+        """DELETE ocs/v2.php/core/apppassword: the server revokes the app password the request was made with."""
+        device = self._device()
+        header = self.headers.get('Authorization') or ''
+        ok = False
+        if header.startswith('Basic '):
+            try:
+                user, _, password = base64.b64decode(header[6:]).decode('utf-8').partition(':')
+                ok = hmac.compare_digest(user, self.server.workspace['user']) and \
+                    hmac.compare_digest(password, device['password']) and not device['revoked']
+            except Exception:   # noqa: BLE001
+                ok = False
+        extra = {'event': 'device-apppassword-revoked' if ok else 'device-apppassword-refused',
+                 'ocs_api_request': self.headers.get('OCS-APIRequest') == 'true'}
+        if ok:
+            device['revoked'] = True
+            self._record(200, extra)
+            self._json(200, self._ocs(200, []))
+        else:
+            self._record(401, extra)
+            self._json(401, self._ocs(401, []))
+
     def _body(self):
         """The request body: by Content-Length, or chunked."""
         if (self.headers.get('Transfer-Encoding') or '').lower() == 'chunked':
@@ -494,6 +554,9 @@ class Handler(BaseHTTPRequestHandler):
         body = self._body()
         path = urlsplit(self.path).path
         if self.server.agenda and agenda_stand_in.handle(self, 'DELETE', path, body):
+            return
+        if self._device() and path in ('/ocs/v2.php/core/apppassword', '/index.php/ocs/v2.php/core/apppassword'):
+            self._device_revoke()
             return
         self._record(404)
         self._json(404, {'message': 'not served by the CI stand-in'})
@@ -578,7 +641,12 @@ class Handler(BaseHTTPRequestHandler):
             self._record(200)
             self._json(200, STATUS)
         elif path.startswith('/login/v2/flow/') or path.startswith('/index.php/login/v2/flow/'):
-            self._record(200, {'event': 'browser-opened-login-page'})
+            device = self._device()
+            if device and path.rstrip('/').endswith(DEVICE_FLOW_TOKEN):
+                device['flow_opened'] = True
+                self._record(200, {'event': 'browser-opened-device-flow'})
+            else:
+                self._record(200, {'event': 'browser-opened-login-page'})
             self._send(200, FLOW_PAGE, 'text/html; charset=utf-8')
         elif self.server.agenda and agenda_stand_in.handle(self, 'GET', path, b''):
             return
@@ -625,9 +693,19 @@ class Handler(BaseHTTPRequestHandler):
             reports.update(folder=False, files=set(), share_posts=0, shares=[], count=0, variant=variant)
             self._record(200, {'event': 'reports-reset', 'variant': variant})
             self._json(200, {'ok': True})
+        elif path in ('/index.php/login/v2', '/login/v2') and self._device() and \
+                self.headers.get('User-Agent', '') == DEVICE_USER_AGENT:
+            device = self._device()
+            device.update(flow_opened=False, polls_after_open=0, started=device['started'] + 1)
+            self._record(200, {'event': 'device-flow-start'})
+            self._json(200, {'poll': {'token': DEVICE_POLL_TOKEN, 'endpoint': f'https://{HOST}/login/v2/poll'},
+                             'login': f'https://{HOST}/login/v2/flow/{DEVICE_FLOW_TOKEN}'})
         elif path in ('/index.php/login/v2', '/login/v2'):
             self._record(200, {'event': 'login-flow-v2-start'})
             self._json(200, LOGIN_V2)
+        elif path in ('/login/v2/poll', '/index.php/login/v2/poll') and self._device() and \
+                parse_qs(body.decode('utf-8', 'replace')).get('token') == [DEVICE_POLL_TOKEN]:
+            self._device_poll()
         elif path in ('/login/v2/poll', '/index.php/login/v2/poll'):
             self._record(404, {'event': 'login-flow-v2-poll'})
             self._json(404, [])
@@ -704,6 +782,9 @@ def main():
                     help='also keep the "Problem reports" folder (needs --workspace); uploaded zips are saved under DIR/<variant>/')
     ap.add_argument('--workspace', action='store_true',
                     help='also answer for a signed-in account (NODRIVE_WS_USER, NODRIVE_WS_APP_PASSWORD in the environment)')
+    ap.add_argument('--device-sync', action='store_true',
+                    help="also play Login Flow v2 for the iPhone's Calendar and Contacts profile (needs --workspace; "
+                         'NODRIVE_DS_APP_PASSWORD in the environment)')
     ap.add_argument('--agenda', metavar='SNAPSHOT',
                     help='also replay the NoAgenda reads from this snapshot (needs --workspace; tools/ci/agenda_stand_in.py)')
     args = ap.parse_args()
@@ -720,6 +801,14 @@ def main():
                                     'shares': [], 'count': 0, 'variant': 'run'}
     elif args.reports_uploads:
         sys.exit('drive-stand-in: --reports-uploads needs --workspace')
+    if args.device_sync:
+        if not workspace:
+            sys.exit('drive-stand-in: --device-sync needs --workspace')
+        device_password = os.environ.get('NODRIVE_DS_APP_PASSWORD', '')
+        if not device_password:
+            sys.exit('drive-stand-in: --device-sync needs NODRIVE_DS_APP_PASSWORD in the environment')
+        workspace['device'] = {'password': device_password, 'flow_opened': False, 'polls_after_open': 0,
+                               'grants': 0, 'revoked': False, 'started': 0}
     if args.agenda:
         if not workspace:
             sys.exit('drive-stand-in: --agenda needs --workspace')

@@ -139,6 +139,8 @@ struct NCSettingsView: View {
                     }
                 }
             })
+            // NoDrive: "Add to iPhone Calendar & Contacts" with its own password (iOSClient/DeviceSync, D2)
+            NCDeviceSyncSection(controller: model.controller)
             // Calender & Contacts
             if !NCBrandOptions.shared.disable_mobileconfig {
                 Section(content: {

@@ -1,0 +1,26 @@
+/* NoDrive: texts of "Add to iPhone Calendar & Contacts" (iOSClient/DeviceSync). English only; translations are a to-do. */
+"_nodrive_devicesync_header_" = "Calendar and contacts";
+"_nodrive_devicesync_button_" = "Add to iPhone Calendar & Contacts";
+"_nodrive_devicesync_footer_" = "Use your NoDrive calendars, reminders and contacts in the Calendar, Reminders and Contacts apps. This step needs Safari as your default browser.";
+"_nodrive_devicesync_signin_first_" = "Sign in to NoDrive first.";
+"_nodrive_devicesync_step1_title_" = "Add to iPhone Calendar & Contacts";
+"_nodrive_devicesync_step1_" = "NoDrive will open a sign-in page. Allow access there to create a separate password for your iPhone's Calendar, Reminders and Contacts. You won't see it, and NoDrive doesn't keep it.";
+"_nodrive_devicesync_continue_" = "Continue";
+"_nodrive_devicesync_waiting_" = "Waiting for you to allow access…";
+"_nodrive_devicesync_reopen_" = "Open the sign-in page again";
+"_nodrive_devicesync_timeout_" = "The sign-in took too long. Try again.";
+"_nodrive_devicesync_refused_" = "The server didn't create a password. Ask your administrator.";
+"_nodrive_devicesync_failed_" = "This didn't work. Check your connection and try again.";
+"_nodrive_devicesync_try_again_" = "Try again";
+"_nodrive_devicesync_opening_" = "Opening Safari to download the profile…";
+"_nodrive_devicesync_install_title_" = "Install the profile";
+"_nodrive_devicesync_install_steps_" = "Open Settings, tap Profile Downloaded, then Install. Do this within 8 minutes. If iOS asks you to turn off Stolen Device Protection, follow its steps.";
+"_nodrive_devicesync_installed_" = "Installed";
+"_nodrive_devicesync_didnt_work_" = "It didn't work";
+"_nodrive_devicesync_open_safari_" = "Open Safari again";
+"_nodrive_devicesync_done_" = "Your NoDrive calendars and contacts will appear in Calendar, Reminders and Contacts in a few minutes.";
+"_nodrive_devicesync_done_button_" = "Done";
+"_nodrive_devicesync_expired_" = "The profile was not installed in time. iOS removes a profile that is not installed within 8 minutes. Try again.";
+"_nodrive_devicesync_undone_" = "Nothing was installed, and the separate password was removed. You can try again.";
+"_nodrive_devicesync_removal_title_" = "Remove NoDrive from this iPhone";
+"_nodrive_devicesync_removal_message_" = "To remove NoDrive calendars, reminders and contacts from this iPhone, open Settings › General › VPN & Device Management, tap NoDrive Calendar & Contacts, then Remove Profile. You can also remove its password in your NoDrive security settings on the web.";

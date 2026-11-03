@@ -162,6 +162,8 @@ class NCAccount: NSObject {
         await NCWorkspaceWeb.shared.forget(account: account, urlBase: tblAccount?.urlBase ?? "")
         // NoDrive: NoAgenda forgets its cache and settings of this account (iOSClient/NoAgenda, A6)
         await NCAgendaStore.forget(account: account)
+        // NoDrive: tell how to remove the profile from this iPhone (iOSClient/DeviceSync, D3)
+        await NCDeviceSyncRemoval.accountRemoved(account: account)
         // Remove session in NextcloudKit
         NextcloudKit.shared.nkCommonInstance.nksessions.remove(account: account)
         // Remove session

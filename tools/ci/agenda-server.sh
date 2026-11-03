@@ -14,6 +14,8 @@
 #   snapshot   tools/ci/agenda-snapshot.py (the real answers the app reads, per user, no secret)
 #   facts      tools/ci/server_agenda_edit_facts.py (the conditional headers, NoGantt's refusals, Deck's full replace)
 #   webedit    tools/ci/agenda-webedit.py (does the agent survive an edit in the Calendar and Tasks pages?)
+#   devicesync tools/ci/agenda-devicesync.py (phase device-sync: Login Flow v2 for the iPhone profile, the new password on CalDAV and
+#              CardDAV, its revocation, the server's own Apple profile as evidence; needs Playwright)
 #   replay     tools/ci/agenda-replay.py (the requests of the Swift writers, sent to this server; needs $AGENDA_REQUESTS)
 #   stop       remove the container.
 set -euo pipefail
@@ -137,7 +139,8 @@ case "${1:-}" in
         python3 tools/ci/agenda-webedit.py --out "$OUT" || status=$?
         if [ -n "${GITHUB_STEP_SUMMARY:-}" ] && [ -f "$OUT/agenda-webedit.md" ]; then cat "$OUT/agenda-webedit.md" >> "$GITHUB_STEP_SUMMARY"; fi
         exit "$status" ;;
+    devicesync) python3 tools/ci/agenda-devicesync.py --out "$OUT" ;;
     replay) python3 tools/ci/agenda-replay.py --requests "${AGENDA_REQUESTS:?AGENDA_REQUESTS is not set}" --snapshot "$OUT/agenda-snapshot.json" --seed "$OUT/seed.json" --out "$OUT" ;;
     stop) docker rm -f "$NAME" > /dev/null 2>&1 || true ;;
-    *) echo "usage: $0 start|apps|discover|seed|check|snapshot|facts|webedit|replay|stop"; exit 2 ;;
+    *) echo "usage: $0 start|apps|discover|seed|check|snapshot|facts|webedit|devicesync|replay|stop"; exit 2 ;;
 esac

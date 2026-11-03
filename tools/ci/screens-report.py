@@ -132,7 +132,9 @@ def main():
             if 'intro-slide' in name and info['cobalt_matches'] < 8:
                 problems.append(f'{variant}/{name}: background is not Nourax cobalt '
                                 f'({info["cobalt_matches"]}/10 samples match; samples {info["background_samples"]})')
-            if 'intro-slide' in name or 'workspace' in name or variant.startswith(('reports', 'conflicts', 'agenda')):
+            apple_own = variant.startswith('devicesync') and name[:2] in ('10', '11', '12', '13', '14')   # Safari's and Settings' own screens
+            if ('intro-slide' in name or 'workspace' in name
+                    or variant.startswith(('reports', 'conflicts', 'agenda', 'devicesync'))) and not apple_own:
                 if info['nextcloud_blue_fraction'] > 0.001:
                     problems.append(f'{variant}/{name}: Nextcloud blue on {info["nextcloud_blue_fraction"]:.2%} of the screen')
             v['screenshots'][name] = info
