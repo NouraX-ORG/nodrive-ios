@@ -493,14 +493,14 @@ private final class FlowFixture {
                 NCDeviceSyncProfile.Account(base: base, userId: "ali", loginName: loginName, accountKey: "ali https://drive.nourax.org")
             },
             bundleIdentifier: "org.nourax.nodrive",
-            presentSignIn: { [unowned self] _, _ in self.signInOpened += 1 },
-            dismissSignIn: { [unowned self] in self.signInDismissed += 1 },
-            startServer: { [unowned self] profile in
+            presentSignIn: { _, _ in self.signInOpened += 1 },
+            dismissSignIn: { self.signInDismissed += 1 },
+            startServer: { profile in
                 let created = NCDeviceSyncProfileServer(profile: profile)
                 self.servers.append(created)
                 return (URL(string: "http://127.0.0.1:1/test.mobileconfig")!, created)
             },
-            openInSafari: { [unowned self] url in
+            openInSafari: { url in
                 self.safariOpened.append(url)
                 return self.safariResult
             },
@@ -508,14 +508,14 @@ private final class FlowFixture {
             pollInterval: 0.001,
             pollTimeout: 0.01,
             installWindow: 600,
-            sleep: { [unowned self] seconds in
+            sleep: { seconds in
                 if seconds >= 100 {
                     try await Task.sleep(nanoseconds: self.fastInstallWindow ? 100_000_000 : 3_600_000_000_000)
                 } else {
                     try await Task.sleep(nanoseconds: 1_000_000)
                 }
             },
-            profileBuilt: { [unowned self] data in self.built.append(data) })
+            profileBuilt: { data in self.built.append(data) })
         return NCDeviceSyncFlow(dependencies: dependencies)
     }
 
