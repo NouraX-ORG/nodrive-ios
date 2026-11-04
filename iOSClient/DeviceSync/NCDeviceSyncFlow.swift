@@ -341,6 +341,8 @@ final class NCDeviceSyncFlow {
     /// Anything else (offline, 401, 5xx, a client that is gone, an OCS error): `.notRemoved`, still holding the password.
     private func removeGrant(then next: Phase?) async {
         afterRemoval = next
+        // The profile and the server are not needed any more; only the password stays until the server confirmed.
+        forget(keepGrant: true)
         guard let granted = grant else {
             finishRemoval(next)
             return
