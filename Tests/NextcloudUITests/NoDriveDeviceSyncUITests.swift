@@ -176,23 +176,20 @@ final class NoDriveDeviceSyncUITests: XCTestCase {
         if safari.wait(for: .runningForeground, timeout: 30) {
             apple["safari-foreground"] = "PASS"
             save("10-safari")
-            var found = safari.alerts.firstMatch.waitForExistence(timeout: 30)
-            // After the 30 s: what Safari shows now (its address bar, an error page or a prompt), and its element tree, so
-            // a missing prompt can be explained. devicesync-server.jsonl says whether Safari's request reached the app.
+            // Safari's question is a dialog of its own (SFDialogView), not a system alert: found by its text. Run 41841023389 showed
+            // it in both variants: "This website is trying to download a configuration profile. Do you want to allow this?",
+            // Ignore / Allow. devicesync-server.jsonl says whether Safari's request reached the app.
+            let question = safari.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] 'configuration profile'")).firstMatch
+            let found = question.waitForExistence(timeout: 30)
+            // After the wait: what Safari shows now, and its element tree, so a missing prompt can be explained.
             save("15-safari-after-wait")
             if let dir = outputDir {
                 append(safari.debugDescription + "\n", to: dir.appendingPathComponent("15-safari-after-wait.tree.log"))
             }
-            var alert = safari.alerts.firstMatch
-            if !found, springboard.alerts.firstMatch.exists {
-                found = true
-                alert = springboard.alerts.firstMatch
-            }
             if found {
-                let text = alert.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " | ")
-                apple["safari-prompt"] = text.range(of: "configuration profile", options: .caseInsensitive) != nil ? "PASS" : "NOT VERIFIED (other prompt)"
+                apple["safari-prompt"] = "PASS"
                 save("11-safari-prompt")
-                let allow = alert.buttons.matching(NSPredicate(format: "label == 'Allow'")).firstMatch
+                let allow = safari.buttons.matching(NSPredicate(format: "label == 'Allow'")).firstMatch
                 if allow.exists {
                     allow.tap()
                     apple["safari-allow"] = "PASS"

@@ -382,6 +382,11 @@ run 41716741376 on a flake of the account injection (the intro stayed on screen 
 | No Nextcloud text in the device-sync screens; the accent is the app's | CI | pass | `check-branding.py` 0 unclassified; `screens-report` ok |
 | Install the profile on a real iPhone: Settings, NoDrive, Calendar and contacts, Add to iPhone Calendar & Contacts, Continue, allow in the sign-in sheet, allow the download in Safari, Settings, Profile Downloaded, Install; then events, reminders (to-do lists) and contacts of your account show in Calendar, Reminders and Contacts, both ways | owner | pending | real iPhone (the simulator cannot install a profile) |
 | The new password is listed as "NoDrive Calendar & Contacts (iPhone)" under Security on drive.nourax.org; remove the NoDrive account in the app: the message names the steps to remove the profile (Settings, General, VPN & Device Management) | owner | pending | real iPhone and the web security settings |
+| An alarm fires: make an event in NoAgenda or NoCalendar with an alarm a few minutes ahead, wait for it on the iPhone | owner | pending | real iPhone, after the install; Apple's Calendar app plays the alarm (plan 5.7 row 4) |
+| Design 4.2, the agent survives the iPhone: set an agent on an event in NoAgenda, change the event's title in the iPhone Calendar app, open the event in NoAgenda again. The agent is still shown. If it is gone but the event still carries the agent's tag (the `CATEGORIES` value), write that down: Apple's client dropped `X-NOURAX-AGENT-ID` and the tag is the fallback. If both are gone, tell the NoAgenda session (that would be a loss of data) | owner | pending | real iPhone, a test event; the answer decides plan risk E4 / S6 ("iPhone Calendar may drop `X-NOURAX-AGENT-ID`") |
+| Wrong user: in the sign-in sheet allow access as another NoDrive user than the one signed in to the app: NoDrive says "You allowed access as another user...", no profile is offered, and the other user's Security list does not keep a "NoDrive Calendar & Contacts (iPhone)" entry | owner | pending | needs a second account; the CI proof is the unit tests and the stand-in |
+| "It didn't work" with flight mode on (after Safari opened): it says "The separate password could not be removed" and names it; switch flight mode off, Try again: "The separate password was removed", and the entry is gone from Security on the web | owner | pending | real iPhone |
+| Apple's Calendar app lists NoGantt's one-way task-copy calendar (if NoGantt's copy is on) and Deck's board calendars; edit one there and watch it be overwritten. Suggestion: switch NoGantt's copy off in NoGantt's settings. Each run of the flow makes a new password, and a reinstall replaces the profile but leaves the older password valid: remove old entries named "NoDrive Calendar & Contacts (iPhone)" under Security on the web | owner | pending | explains what you may see after the install; nothing is deleted by NoDrive |
 
 ## Owner test steps (Mac)
 
@@ -465,8 +470,15 @@ run 41716741376 on a flake of the account injection (the intro stayed on screen 
    1. A sheet that explains the steps. Continue opens the sign-in sheet: allow access. Safari opens and iOS asks to allow a configuration profile download; then
       Settings, Profile Downloaded, Install (within 8 minutes; the profile says "Not Verified" because it is not signed yet).
    2. Calendar, Reminders and Contacts show your NoDrive calendars, to-do lists and contacts; a change on the iPhone shows on the web and the other way.
-   3. The password was never shown. On drive.nourax.org, Settings, Security lists "NoDrive Calendar & Contacts (iPhone)". "It didn't work" removes it again.
+   3. The password was never shown. On drive.nourax.org, Settings, Security lists "NoDrive Calendar & Contacts (iPhone)". "It didn't work" removes it again and says so only when the
+      server confirmed it; with no connection it says it could not remove it, and Try again does.
    4. Remove the NoDrive account in the app: the message tells how to remove the profile (Settings, General, VPN & Device Management). Nothing is deleted from the iPhone or the Drive.
+   5. An alarm: make an event with an alarm a few minutes ahead in NoAgenda or NoCalendar. It fires on the iPhone.
+   6. The agent (design 4.2, plan risk E4): set an agent on an event in NoAgenda, change the event's title in the iPhone Calendar app, open the event in NoAgenda. The agent is still
+      shown. If only the `CATEGORIES` tag is left, note it: Apple's client dropped `X-NOURAX-AGENT-ID`. If both are gone, tell the NoAgenda session.
+   7. In the sign-in sheet, allow access as a different user than the one signed in: NoDrive says "You allowed access as another user" and offers no profile.
+   8. Apple's apps may also show NoGantt's task-copy calendar and Deck's board calendars; changes made there are overwritten. Suggestion: switch NoGantt's copy off. Every run makes a new
+      password and a reinstall leaves the older one valid: remove old "NoDrive Calendar & Contacts (iPhone)" entries under Security on the web.
 12. Go through the "owner" rows above, then read back the device name shown under
    Settings → Security on drive.nourax.org.
 

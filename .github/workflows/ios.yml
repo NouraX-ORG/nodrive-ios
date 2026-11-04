@@ -783,11 +783,11 @@ jobs:
           bash tools/ci/screens.sh switch "$UDID" en en_US dark
           bash tools/ci/screens.sh device-sync "$UDID" devicesync-dark
 
-      - name: Device sync checks (only drive.nourax.org, the sign-in, the revocation, the redacted profile)
+      - name: Device sync checks (only drive.nourax.org, the sign-in, the identity question, the revocation, the redacted profile, Safari fetched the profile)
         if: ${{ !cancelled() && steps.sim.outcome == 'success' && matrix.shard == 'device-sync' }}
         run: |
           python3 tools/ci/devicesync-check.py --log "$RESULTS/stand-in.jsonl" --walk "$SHOTS" \
-            --variants devicesync-light devicesync-dark --json "$RESULTS/devicesync-check.json"
+            --variants devicesync-light devicesync-dark --require-safari-fetch --json "$RESULTS/devicesync-check.json"
 
       # ----- shard agenda -----
       - name: Download the NoAgenda snapshot (the real server's recorded answers; agenda-server job)

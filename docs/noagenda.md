@@ -313,8 +313,22 @@ appear in Reminders.
   app password** that is never shown, logged or saved ("NoDrive Calendar & Contacts (iPhone)" in the web security settings); (3) NoDrive builds a profile with a CalDAV and a
   CardDAV account and opens it in Safari; iOS asks to allow the download; (4) the install steps (Settings, Profile Downloaded, Install, within 8 minutes, Stolen Device
   Protection) with **Installed**, **It didn't work** and **Open Safari again**.
-- **It didn't work** sends `DELETE ocs/v2.php/core/apppassword` with that password (the server revokes the password the request was made with), then forgets it.
-  Installed, the 10-minute window and Cancel forget the password and the profile bytes; Cancel before Safari also revokes it (it was never used).
+- **Whose password it is.** The sign-in sheet is not tied to the account, so the person can allow access as anyone. Before a profile is built the app asks
+  `GET ocs/v2.php/cloud/user?format=json` with the new password and compares the returned `id` with the signed-in account's id. Another user, or an answer that cannot be read,
+  removes the new password again and shows "You allowed access as another user..." (or the failure text); no profile is built and Safari is not opened.
+- **It didn't work** sends `DELETE ocs/v2.php/core/apppassword` with that password (the server revokes the password the request was made with). The screen says "The separate
+  password was removed" only when the server confirmed it (HTTP 200 and, when the answer has a body, OCS status 100 or 200). If the device is offline or the server refuses, it says
+  "The separate password could not be removed", names it ("NoDrive Calendar & Contacts (iPhone)" in the web security settings) and offers **Try again**, which sends the removal
+  again while the app still holds the password. The text does not claim that nothing was installed (the app cannot know); it says to remove the profile in Settings if it was.
+  Installed and the 10-minute window forget the password and the profile bytes (the password stays valid: it is in use on the phone).
+- **Cancel** before Safari removes the new password (it was never used) and the sheet waits for the server's answer; if the answer is "no", the sheet stays with "could not be
+  removed" and Try again, and Close gives the password up (the text names where to remove it on the web). A Cancel that comes while the poll answer or the loopback server is
+  still on its way is honoured too: a password that arrives after Cancel is removed again (three tries) and wiped, and a loopback server that starts after Cancel never reaches
+  Safari and leaves the state alone.
+- **Every run makes a new app password.** A reinstall replaces the profile (same identifier) but leaves the older password valid on the server until the person removes it
+  under Settings, Security on the web. Apple's Calendar and Reminders will also show what NoDrive's other apps put on the server's calendar list: NoGantt's one-way task-copy
+  calendar (when it is on) and Deck's board calendars, which NoAgenda hides on purpose. A change made there on the iPhone is overwritten by NoGantt or Deck, so the owner steps
+  suggest switching NoGantt's copy off in the NoGantt settings.
 - **Removing the NoDrive account** (hook D3) says how to remove the profile: Settings › General › VPN & Device Management › NoDrive Calendar & Contacts › Remove Profile,
   and that the password can be removed in the NoDrive security settings on the web. Shown only when a profile was offered to this iPhone.
 
@@ -330,7 +344,10 @@ appear in Reminders.
   (`application/x-apple-aspen-config`, `no-store`), closed after the serve, after 2 minutes or on Cancel; 404 for anything else. It runs inside a `beginBackgroundTask` while
   Safari is in front. `SFSafariViewController` is not used (Apple documents no profile download there).
 - `NCDeviceSyncFlow.swift` / `NCDeviceSyncFlowView.swift` / `NCDeviceSyncSection.swift`: the steps and screens. `NCDeviceSyncState.swift`: the only thing kept per account is
-  `profileOffered` (no secret). The password and the profile bytes live in memory as bytes (`NCDeviceSyncSecret`) and are overwritten with zeros on every way out.
+  `profileOffered` (no secret). The password and the profile bytes live in memory as bytes (`NCDeviceSyncSecret`) and are overwritten with zeros on every way out. This is
+  **best effort**: the password also passes through a Swift `String`, the property list dictionary and the request header, copies that Swift does not let the code overwrite;
+  the flow zeroes the profile `Data` it built and drops every reference.
+  A generation counter (`begin()` and `cancel()` start a new one) makes every step that was in flight when the person cancelled stop where it is.
 - Hooks (function `device_sync(st)` in `tools/rebrand.py`): D1 `disable_mobileconfig = true`, D2 the section in `NCSettingsView`, D3 the removal message in `NCAccount.deleteAccount`.
   The Sources button is one line in NoAgenda's own file.
 
@@ -339,18 +356,30 @@ appear in Reminders.
 - Unit tests (`NoDriveDeviceSyncTests`): the profile (read back, exactly Apple's keys, principal URL with percent-encoding, stable identifier, new UUIDs, no upstream name, https
   only, the redacted copy); the loopback server (127.0.0.1 only, another address of the device does not reach it, a random 32-byte path, served once with the content type, a wrong
   path is 404 and does not use up the serve, closes after its lifetime and on cancel, a wiped profile is never served); the sign-in with a fake transport (user agent, other origin
-  stops, 404 keeps polling, a mismatching server is refused and revoked, timeout, DELETE with the Basic header of the new password); the flow (happy path, Open Safari again,
-  It didn't work, cancel, timeout, refusal, Safari cannot open, install window); secrecy (a planted password is in the served bytes only: not in the log, the defaults, the files
+  stops, 404 keeps polling, a mismatching server is refused and revoked, timeout, DELETE with the Basic header of the new password, a removal counts as done only on HTTP 200
+  with OCS 100/200: not on 401, 5xx, an OCS error, a page, no answer; the owner question GET cloud/user); the flow (happy path, Open Safari again, It didn't work, cancel,
+  timeout, refusal, Safari cannot open, install window; a grant for another user and an unknown owner: DELETE, no profile, no Safari; "It didn't work" with 401, with no answer and
+  with an OCS error: the state "could not be removed", the password kept, Try again works; Cancel while the poll answer is on its way and while the loopback server starts:
+  DELETE, no Safari, no profile, no offered flag, phase stays Cancel's); secrecy (a planted password is in the served bytes only: not in the log, the defaults, the files
   or the test copy); the removal message only when a profile was offered; the texts.
 - UI tests (`NoDriveDeviceSyncUITests`, shard `device-sync`, light and dark, against the stand-in with `--device-sync`): the section and its footer, step 1, the waiting step, the
   hand-over to Safari, the install steps, Installed and the done text; "It didn't work" (the stand-in must see the DELETE); the account removal and its message. Apple's own screens
   (Safari's "trying to download a configuration profile", Settings "Profile Downloaded", the install screen, Install) are tried and reported as PASS or NOT VERIFIED in
   `apple-screens.json`, never failing. The app writes a copy of the profile with the passwords replaced (`<redacted>`, Debug builds only) and `devicesync-check.py` checks it
   (property list, key set, host, principal URL, no upstream name, `plutil -lint`), the stand-in log (only drive.nourax.org, the device user agent, grant only after the page was
-  opened, one revocation per variant, nothing refused) and the password scan of the shard (the throwaway password is in no screenshot, log or result).
+  opened, one identity question per grant, one revocation per variant, nothing refused), the loopback server's records and the password scan of the shard (the throwaway password is in no screenshot, log or result).
 - `agenda-server` (phase `device-sync`, real Nextcloud 35.0.2): Login Flow v2 with the device user agent, a browser signs in as Ali and allows access, the poll answers
   `{server, loginName, appPassword}`, `occ user:auth-tokens:list` shows the token name, the new password does a CalDAV, a CardDAV and a principals PROPFIND (207), DELETE of
-  the app password revokes it (200) and the same PROPFINDs are then 401, the token is gone, and the server's own profile is recorded as evidence.
+  the app password revokes it (200, OCS status 100 or 200) and the same PROPFINDs are then 401, the token is gone, `GET ocs/v2.php/cloud/user` with the new password names Ali,
+  and the server's own profile is recorded as evidence.
+
+- **Safari's hand-off is proven up to the install screen.** In the Debug build the app writes `devicesync-server.jsonl` (method, status and byte count of each request the loopback
+  server got; never a path, a header or the profile). In run 41841023389 (both variants, both sign-ins) Safari fetched the profile: `GET`, answered 200, 2584 bytes served, the
+  server closed right after. Safari then shows its own dialog (an `SFDialogView`, not a system alert): "This website is trying to download a configuration profile. Do you want to allow
+  this?" with **Ignore** and **Allow**. So `Content-Disposition: attachment`, Safari's https upgrade and the app's background state are not a problem in the simulator. The earlier
+  "no prompt seen" came from the test looking for a system alert only; the test now finds the dialog by its text and taps Allow. `devicesync-check.py --require-safari-fetch` makes a variant
+  without a served profile fail. What the simulator still cannot show is the install itself: Settings has no "Profile Downloaded" row there (reported as NOT VERIFIED); the install on a
+  real iPhone is an owner row.
 
 ### Server-side notes (not done here)
 
