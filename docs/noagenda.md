@@ -373,13 +373,15 @@ appear in Reminders.
   the app password revokes it (200, OCS status 100 or 200) and the same PROPFINDs are then 401, the token is gone, `GET ocs/v2.php/cloud/user` with the new password names Ali,
   and the server's own profile is recorded as evidence.
 
-- **Safari's hand-off is proven up to the install screen.** In the Debug build the app writes `devicesync-server.jsonl` (method, status and byte count of each request the loopback
-  server got; never a path, a header or the profile). In run 41841023389 (both variants, both sign-ins) Safari fetched the profile: `GET`, answered 200, 2584 bytes served, the
-  server closed right after. Safari then shows its own dialog (an `SFDialogView`, not a system alert): "This website is trying to download a configuration profile. Do you want to allow
-  this?" with **Ignore** and **Allow**. So `Content-Disposition: attachment`, Safari's https upgrade and the app's background state are not a problem in the simulator. The earlier
-  "no prompt seen" came from the test looking for a system alert only; the test now finds the dialog by its text and taps Allow. `devicesync-check.py --require-safari-fetch` makes a variant
-  without a served profile fail. What the simulator still cannot show is the install itself: Settings has no "Profile Downloaded" row there (reported as NOT VERIFIED); the install on a
-  real iPhone is an owner row.
+- **Safari's hand-off is proven in the simulator, up to the install screen.** In the Debug build the app writes `devicesync-server.jsonl` (method, status and byte count of each
+  request the loopback server got; never a path, a header or the profile). In run 41883507135 (both variants, both sign-ins) Safari fetched the profile: `GET`, answered 200, 2584 bytes
+  served, the server closed right after. So `Content-Disposition: attachment`, Safari's https upgrade and the app's background state are not a problem there. Safari then shows its own
+  dialog (an `SFDialogView`, not a system alert): "This website is trying to download a configuration profile. Do you want to allow this?" with Ignore and Allow. The test finds it by its
+  text and taps Allow; Settings then shows "Profile Downloaded", its install screen names "NoDrive Calendar & Contacts" (Nourax, "Not Signed", contains a CalDAV and a CardDAV account),
+  and Install leads to the warning "The profile is not signed." All of these are PASS in `apple-screens.json` in both variants (screenshots `devicesync-10` to `-15`). The test stops there:
+  it does not confirm the unsigned-profile warning, so the profile is never installed in the simulator and the Calendar and Contacts apps are not checked. The earlier "no prompt seen"
+  (run 41803357182) was the test looking for a system alert only. `devicesync-check.py --require-safari-fetch` is now on in the workflow: a variant without a served profile fails.
+  What stays an owner test is the real install, the "Not Verified" text until the profile is signed, and the sync itself.
 
 ### Server-side notes (not done here)
 
@@ -388,7 +390,8 @@ appear in Reminders.
 
 ### Choices and status
 
-- **Status.** Code commit `dae5859691`; run [41730256912](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41730256912) is green in all 18 jobs on the first attempt. Rows for the owner: "Device calendar and contacts sync" in `docs/testing.md`.
+- **Status.** Round 2 of the fixes (review findings S1 to S5 and the nits): code commit `aac0632825`; run [41883507135](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41883507135) is green in all 18 jobs.
+  The docs-and-merge stage cites the final head commit and its run. Rows for the owner: "Device calendar and contacts sync" in `docs/testing.md`.
 - **UI test flake.** In run 41716741376 the account injection of the first launch left the intro on screen for 300 s (the stand-in had seen the account) in 6 shards. A second launch
   of the same run restores the main screen in about 8 s, so every NoDrive UI test that signs in now waits 90 s, relaunches the app once and then waits up to 200 s. Test code only; the app is unchanged.
 - **Open owner to-dos.** Sign the profile with a real certificate (it shows "Not Verified"); translations of `DeviceSync.strings` (English only); the install on a real iPhone.
