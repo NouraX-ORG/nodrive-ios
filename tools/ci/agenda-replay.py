@@ -303,7 +303,10 @@ def run(target, requests, seed, delta, mutate_seed_card):
             after = tasks_now().get(ids['banner'], {})
             check('timeline-move: the start is a week later and the end a week later or the working day before it',
                   day_of(banner1, 'start_date') and day_of(after, 'start_date') and day_of(banner1, 'end_date') and day_of(after, 'end_date')
-                  and (day_of(after, 'start_date') - day_of(banner1, 'start_date')).days == 7
+                  # NoGantt keeps a start off the weekend: a seeded start that falls on a Saturday or Sunday (it depends on the day the CI runs) moves
+                  # a week later and then on to the Monday
+                  and (7 <= (day_of(after, 'start_date') - day_of(banner1, 'start_date')).days <= 9)
+                  and ((day_of(after, 'start_date') - day_of(banner1, 'start_date')).days == 7 or day_of(after, 'start_date').weekday() == 0)
                   and 5 <= (day_of(after, 'end_date') - day_of(banner1, 'end_date')).days <= 7,   # NoGantt may keep an end off the weekend
                   '%s..%s -> %s..%s' % (banner1.get('start_date'), banner1.get('end_date'), after.get('start_date'), after.get('end_date')))
             check('timeline-move: the dependent task moved too',
