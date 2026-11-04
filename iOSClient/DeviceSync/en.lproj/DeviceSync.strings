@@ -21,6 +21,9 @@
 "_nodrive_devicesync_done_" = "Your NoDrive calendars and contacts will appear in Calendar, Reminders and Contacts in a few minutes.";
 "_nodrive_devicesync_done_button_" = "Done";
 "_nodrive_devicesync_expired_" = "The profile was not installed in time. iOS removes a profile that is not installed within 8 minutes. Try again.";
-"_nodrive_devicesync_undone_" = "Nothing was installed, and the separate password was removed. You can try again.";
+"_nodrive_devicesync_undone_" = "The separate password was removed. If you installed the profile, remove it in Settings › General › VPN & Device Management. You can try again.";
+"_nodrive_devicesync_otheruser_" = "You allowed access as another user, so the separate password was removed again. Allow access with the account you use in NoDrive on this iPhone, and try again.";
+"_nodrive_devicesync_removing_" = "Removing the separate password…";
+"_nodrive_devicesync_not_removed_" = "The separate password could not be removed. Try again, or remove \"NoDrive Calendar & Contacts (iPhone)\" in your NoDrive security settings on the web.";
 "_nodrive_devicesync_removal_title_" = "Remove NoDrive from this iPhone";
 "_nodrive_devicesync_removal_message_" = "To remove NoDrive calendars, reminders and contacts from this iPhone, open Settings › General › VPN & Device Management, tap NoDrive Calendar & Contacts, then Remove Profile. You can also remove its password in your NoDrive security settings on the web.";

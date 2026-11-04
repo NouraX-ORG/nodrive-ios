@@ -62,6 +62,8 @@ Contacts"). A start with the user agent "NoDrive Calendar & Contacts (iPhone)" g
   GET  /login/v2/flow/<its token> remembers that the page was opened ("browser-opened-device-flow")
   POST /login/v2/poll             404 until the page was opened, 404 again for the first poll after that, then
                                   {server, loginName, appPassword} (the throwaway device password; event "device-grant")
+  GET  /ocs/v2.php/cloud/user     Basic with the device password -> 200 and the user the password belongs to (event
+                                  "device-identity-check"): the app proves whose password it got before it builds the profile
   DELETE /ocs/v2.php/core/apppassword   Basic with the device password -> 200 and the password is revoked
                                   (event "device-apppassword-revoked"); anything else 401
 Only names and facts are logged, never the password or the poll token.
@@ -336,6 +338,12 @@ class Handler(BaseHTTPRequestHandler):
                                             'groups': [], 'quota': {'free': 1 << 30, 'used': 0, 'total': 1 << 30,
                                                                     'relative': 0, 'quota': -3}}))
             return True
+        if path == '/ocs/v2.php/cloud/user' and self._device_basic_ok():
+            # The device password asking who it belongs to: no session cookies, and not the app's own account setup
+            self._record(200, {'event': 'device-identity-check', 'ocs_api_request': self.headers.get('OCS-APIRequest') == 'true'})
+            self._json(200, self._ocs(200, {'id': ws['user'], 'enabled': True, 'display-name': 'Demo User', 'email': '',
+                                            'language': 'en', 'locale': 'en_US', 'groups': []}))
+            return True
         if path == '/ocs/v2.php/cloud/user':
             if not self._basic_ok():
                 self._record(401)
@@ -467,6 +475,18 @@ class Handler(BaseHTTPRequestHandler):
         self._record(200, {'event': 'device-grant', 'granted': True, 'grants': device['grants']})
         self._json(200, {'server': f'https://{HOST}', 'loginName': self.server.workspace['user'],
                          'appPassword': device['password']})
+
+    def _device_basic_ok(self):
+        """Basic auth with the device password of a flow that was not revoked."""
+        device = self._device()
+        header = self.headers.get('Authorization') or ''
+        if not device or not header.startswith('Basic ') or device['revoked']:
+            return False
+        try:
+            user, _, password = base64.b64decode(header[6:]).decode('utf-8').partition(':')
+        except Exception:   # noqa: BLE001
+            return False
+        return hmac.compare_digest(user, self.server.workspace['user']) and hmac.compare_digest(password, device['password'])
 
     def _device_revoke(self):
         """DELETE ocs/v2.php/core/apppassword: the server revokes the app password the request was made with."""

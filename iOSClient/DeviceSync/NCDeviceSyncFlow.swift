@@ -26,10 +26,16 @@ final class NCDeviceSyncFlow {
         /// The install steps, with Installed / It didn't work / Open Safari again.
         case installSteps
         case done
-        /// "It didn't work": the separate password was removed.
+        /// "It didn't work": the server confirmed that the separate password was removed.
         case undone
         /// Apple deletes a profile that is not installed within 8 minutes; the flow forgot it too.
         case expired
+        /// The person allowed access as another user than the signed-in account: the new password was removed again.
+        case otherUser
+        /// Waiting for the server to remove the separate password.
+        case removing
+        /// The server did not confirm the removal. The flow still holds the password, so "Try again" can retry.
+        case notRemoved
     }
 
     /// Everything the flow touches outside itself, so the unit tests run it with fakes.
@@ -75,12 +81,17 @@ final class NCDeviceSyncFlow {
                         server.cancel()
                     }
                     server.onClosed = {
+                        NCDeviceSyncUITestHooks.serverRecord("profile-server-closed")
                         Task { @MainActor in
                             background.end()
                         }
                     }
+                    server.onRequest = { method, status, bytes in
+                        NCDeviceSyncUITestHooks.profileRequest(method: method, status: status, bytes: bytes)
+                    }
                     do {
                         let url = try await server.start()
+                        NCDeviceSyncUITestHooks.serverRecord("profile-server-listening")
                         return (url, server)
                     } catch {
                         server.cancel()
@@ -114,6 +125,8 @@ final class NCDeviceSyncFlow {
     }
 
     private(set) var phase: Phase = .intro
+    /// True once Cancel or Close ended the flow and the sheet may close (after a removal that it waited for).
+    private(set) var closed = false
     let dependencies: Dependencies
 
     private var flow: NCDeviceAppPasswordClient.Flow?
@@ -124,6 +137,11 @@ final class NCDeviceSyncFlow {
     private var installTimer: Task<Void, Never>?
     /// True once the profile was handed to Safari: from then on the password may be in use on the phone.
     private var offered = false
+    /// Counts the runs of the flow. `begin()` and `cancel()` start a new one, so a step that was in flight when the person
+    /// cancelled (a poll answer, the loopback server starting) sees that it is out of date and stops.
+    private var generation = 0
+    /// Where the flow goes once a removal that failed worked on a retry: a phase, or nil to close the sheet.
+    private var afterRemoval: Phase?
 
     init(dependencies: Dependencies) {
         self.dependencies = dependencies
@@ -133,29 +151,42 @@ final class NCDeviceSyncFlow {
 
     /// "Continue": starts the sign-in.
     func begin() {
-        guard phase == .intro || phase == .timedOut || phase == .refused || phase == .failed || phase == .undone || phase == .expired else { return }
+        guard phase == .intro || phase == .timedOut || phase == .refused || phase == .failed || phase == .undone
+                || phase == .expired || phase == .otherUser else { return }
+        generation += 1
+        closed = false
         phase = .waiting
         signInTask?.cancel()
+        let mine = generation
         signInTask = Task { [weak self] in
-            await self?.signIn()
+            await self?.signIn(mine)
         }
     }
 
-    private func signIn() async {
+    private func signIn(_ mine: Int) async {
         guard let client = dependencies.client() else {
             phase = .failed
             return
         }
         do {
             let started = try await client.start()
+            guard mine == generation else { return }
             flow = started
             dependencies.presentSignIn(started.loginURL) { }
             let granted = try await client.waitForGrant(started, interval: dependencies.pollInterval,
                                                         timeout: dependencies.pollTimeout, sleep: dependencies.sleep)
+            guard mine == generation else {
+                // Cancelled while the answer was on its way: the password exists on the server, so it goes again.
+                await discard(granted)
+                return
+            }
             dependencies.dismissSignIn()
             grant = granted
-            await hand(granted)
+            // A new password has not been offered yet, whatever an earlier run of this flow did.
+            offered = false
+            await hand(granted, mine)
         } catch let error as NCDeviceAppPasswordError {
+            guard mine == generation else { return }
             dependencies.dismissSignIn()
             switch error {
             case .timedOut: phase = .timedOut
@@ -164,8 +195,9 @@ final class NCDeviceSyncFlow {
             default: phase = .failed
             }
         } catch {
+            guard mine == generation else { return }
             dependencies.dismissSignIn()
-            if !Task.isCancelled { phase = .failed }
+            phase = .failed
         }
     }
 
@@ -177,23 +209,35 @@ final class NCDeviceSyncFlow {
 
     // MARK: Step 3
 
-    private func hand(_ granted: NCDeviceAppPasswordClient.Grant) async {
+    private func hand(_ granted: NCDeviceAppPasswordClient.Grant, _ mine: Int) async {
         phase = .opening
         guard let account = dependencies.profileAccount(granted.loginName),
               let password = granted.secret.string() else {
-            phase = .failed
-            await withdraw()
+            await removeGrant(then: .failed)
+            return
+        }
+        // The sign-in sheet is not tied to this account: prove whose password this is before it goes into a profile.
+        let owner = await dependencies.client()?.ownerId(of: granted)
+        guard mine == generation else { return }
+        guard owner == account.userId else {
+            NCDeviceSyncLog.log(owner == nil ? "identity-unknown" : "identity-other-user")
+            await removeGrant(then: owner == nil ? .failed : .otherUser)
             return
         }
         do {
             var data = try NCDeviceSyncProfile.build(account: account, password: password, bundleIdentifier: dependencies.bundleIdentifier)
             dependencies.profileBuilt(data)
             profile = NCDeviceSyncSecret(data: data)
+            // Best effort: the plist dictionary and the String above are copies this code cannot reach.
+            data.withUnsafeMutableBytes { buffer in
+                if let base = buffer.baseAddress, buffer.count > 0 {
+                    memset_s(base, buffer.count, 0, buffer.count)
+                }
+            }
             data.removeAll()
         } catch {
             NCDeviceSyncLog.log("profile-build-failed")
-            phase = .failed
-            await withdraw()
+            await removeGrant(then: .failed)
             return
         }
         await openSafari()
@@ -202,18 +246,24 @@ final class NCDeviceSyncFlow {
     /// Starts a new one-time server for the profile in memory and opens it in Safari. Also "Open Safari again".
     func openSafari() async {
         guard let profile, !profile.isWiped else { return }
+        let mine = generation
         server?.cancel()
         server = nil
         phase = .opening
         do {
             let started = try await dependencies.startServer(profile)
+            // Cancelled meanwhile: no Safari, and nothing of the flow is touched (cancel() did its work already).
+            guard mine == generation else {
+                started.server.cancel()
+                return
+            }
             server = started.server
             let opened = await dependencies.openInSafari(started.url)
+            guard mine == generation else { return }
             NCDeviceSyncLog.log("safari-open", status: opened ? 1 : 0)
             guard opened else {
                 // Nothing reached Safari, so the password was never used: remove it again.
-                phase = .failed
-                await withdraw()
+                await removeGrant(then: .failed)
                 return
             }
             offered = true
@@ -221,9 +271,9 @@ final class NCDeviceSyncFlow {
             phase = .installSteps
             startInstallTimer()
         } catch {
+            guard mine == generation else { return }
             NCDeviceSyncLog.log("profile-server-failed")
-            phase = .failed
-            await withdraw()
+            await removeGrant(then: .failed)
         }
     }
 
@@ -246,49 +296,91 @@ final class NCDeviceSyncFlow {
         phase = .done
     }
 
-    /// "It didn't work": the separate password is removed on the server, then forgotten.
+    /// "It didn't work": the separate password is removed on the server. Only when the server confirms is it forgotten and
+    /// the "removed" text shown; otherwise the flow keeps it and offers "Try again".
     func didntWork() {
-        let client = dependencies.client()
-        let granted = grant
+        guard phase == .installSteps else { return }
         forget(keepGrant: true)
-        phase = .undone
+        phase = .removing
         Task { [weak self] in
-            if let client, let granted {
-                await client.revoke(granted)
-            }
-            granted?.secret.wipe()
-            self?.grant = nil
+            await self?.removeGrant(then: .undone)
+        }
+    }
+
+    /// "Try again" after the removal failed.
+    func retryRemoval() {
+        guard phase == .notRemoved else { return }
+        let next = afterRemoval
+        phase = .removing
+        Task { [weak self] in
+            await self?.removeGrant(then: next)
         }
     }
 
     /// Cancel or closing the sheet. Before the profile was offered the password was never used, so it is removed on the
-    /// server too; after that it may be in use on the phone, so it stays.
+    /// server too (the sheet waits for the server's answer); after that it may be in use on the phone, so it stays.
     func cancel() {
-        guard phase != .done, phase != .undone else {
-            forget()
-            return
-        }
+        guard phase != .removing else { return }
+        generation += 1
         signInTask?.cancel()
         dependencies.dismissSignIn()
-        let client = dependencies.client()
-        let granted = grant
-        let unused = !offered
-        forget(keepGrant: unused)
-        if unused, let client, let granted {
+        if grant != nil, !offered, phase != .notRemoved {
+            forget(keepGrant: true)
+            phase = .removing
             Task { [weak self] in
-                await client.revoke(granted)
-                granted.secret.wipe()
-                self?.grant = nil
+                await self?.removeGrant(then: nil)
             }
-        }
-        if phase != .intro { phase = .intro }
-    }
-
-    private func withdraw() async {
-        if let client = dependencies.client(), let granted = grant {
-            await client.revoke(granted)
+            return
         }
         forget()
+        phase = .intro
+        closed = true
+    }
+
+    /// Removes the new password on the server. Success: it is wiped and the flow goes on to `next` (nil: the sheet closes).
+    /// Anything else (offline, 401, 5xx, a client that is gone, an OCS error): `.notRemoved`, still holding the password.
+    private func removeGrant(then next: Phase?) async {
+        afterRemoval = next
+        guard let granted = grant else {
+            finishRemoval(next)
+            return
+        }
+        phase = .removing
+        let removed = await dependencies.client()?.revoke(granted) ?? false
+        guard grant?.secret === granted.secret else {
+            granted.secret.wipe()
+            return
+        }
+        if removed {
+            granted.secret.wipe()
+            grant = nil
+            finishRemoval(next)
+        } else {
+            phase = .notRemoved
+        }
+    }
+
+    private func finishRemoval(_ next: Phase?) {
+        afterRemoval = nil
+        if let next {
+            phase = next
+        } else {
+            phase = .intro
+            closed = true
+        }
+    }
+
+    /// A password nobody looks at any more (the person cancelled while the answer was on its way): a few tries, then wiped.
+    private func discard(_ granted: NCDeviceAppPasswordClient.Grant) async {
+        var removed = false
+        if let client = dependencies.client() {
+            for attempt in 0..<3 where !removed {
+                if attempt > 0 { try? await dependencies.sleep(2) }
+                removed = await client.revoke(granted)
+            }
+        }
+        if !removed { NCDeviceSyncLog.log("revoke-gave-up") }
+        granted.secret.wipe()
     }
 
     /// Wipes the profile bytes and the password and stops the server and the timers.

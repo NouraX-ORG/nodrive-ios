@@ -26,14 +26,18 @@ struct NCDeviceSyncFlowView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(NSLocalizedString(closeIsDone ? "_close_" : "_cancel_", comment: "")) {
+                        // After a removal that is still to be confirmed the sheet stays until the flow says it may close.
                         flow.cancel()
-                        dismiss()
+                        if flow.closed { dismiss() }
                     }
                     .accessibilityIdentifier("devicesyncCancel")
                 }
             }
         }
-        .interactiveDismissDisabled(flow.phase == .waiting || flow.phase == .opening)
+        .interactiveDismissDisabled(flow.phase == .waiting || flow.phase == .opening || flow.phase == .removing)
+        .onChange(of: flow.closed) { _, closed in
+            if closed { dismiss() }
+        }
         .onDisappear {
             // The system's sign-in sheet covers this one while the flow waits: that is not a close.
             if flow.phase == .intro || flow.phase == .installSteps {
@@ -43,7 +47,7 @@ struct NCDeviceSyncFlowView: View {
     }
 
     private var closeIsDone: Bool {
-        flow.phase == .done || flow.phase == .undone
+        flow.phase == .done || flow.phase == .undone || flow.phase == .otherUser || flow.phase == .notRemoved
     }
 
     private var title: String {
@@ -102,6 +106,19 @@ struct NCDeviceSyncFlowView: View {
         case .expired:
             message("_nodrive_devicesync_expired_", id: "devicesyncExpired")
             primary("_nodrive_devicesync_try_again_", id: "devicesyncTryAgain") { flow.begin() }
+        case .otherUser:
+            message("_nodrive_devicesync_otheruser_", id: "devicesyncOtherUser")
+            primary("_nodrive_devicesync_try_again_", id: "devicesyncTryAgain") { flow.begin() }
+        case .removing:
+            HStack(spacing: 12) {
+                ProgressView()
+                Text(NCDeviceSync.text("_nodrive_devicesync_removing_"))
+                    .font(.body)
+                    .accessibilityIdentifier("devicesyncRemoving")
+            }
+        case .notRemoved:
+            message("_nodrive_devicesync_not_removed_", id: "devicesyncNotRemoved")
+            primary("_nodrive_devicesync_try_again_", id: "devicesyncRetryRemoval") { flow.retryRemoval() }
         }
     }
 

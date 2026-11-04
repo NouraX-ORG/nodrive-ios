@@ -144,18 +144,53 @@ struct NCDeviceAppPasswordClient {
         throw NCDeviceAppPasswordError.timedOut
     }
 
+    /// `GET <base>/ocs/v2.php/cloud/user?format=json` with the new password: the id of the user the password belongs to, or
+    /// nil when that cannot be told (offline, refused, another kind of answer). The sign-in sheet is not tied to the
+    /// account, so the person may have allowed access as someone else: the flow compares this id with the account's.
+    func ownerId(of grant: Grant) async -> String? {
+        guard let password = grant.secret.string(),
+              let url = URL(string: base.trimmingSlashes + "/ocs/v2.php/cloud/user?format=json"),
+              NCWorkspaceOrigin.isSameOrigin(url.absoluteString, base: base),
+              let basic = "\(grant.loginName):\(password)".data(using: .utf8) else { return nil }
+        var identity = request("GET", url)
+        identity.setValue("Basic " + basic.base64EncodedString(), forHTTPHeaderField: "Authorization")
+        identity.setValue("true", forHTTPHeaderField: "OCS-APIRequest")
+        let result = try? await transport(identity)
+        NCDeviceSyncLog.log("identity", status: result?.1.statusCode)
+        guard let (data, response) = result, response.statusCode == 200,
+              let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let ocs = root["ocs"] as? [String: Any],
+              let user = ocs["data"] as? [String: Any],
+              let id = user["id"] as? String, !id.isEmpty else { return nil }
+        return id
+    }
+
     /// `DELETE <base>/ocs/v2.php/core/apppassword` with the new password: the server revokes the password the request was
     /// made with, so it removes itself. Always sent to the account's own server, never to a server a reply named.
-    func revoke(_ grant: Grant) async {
+    /// True only when the server said so: HTTP 200 and, when there is an answer body, an OCS status of 100 or 200.
+    @discardableResult
+    func revoke(_ grant: Grant) async -> Bool {
         guard let password = grant.secret.string(),
               let url = URL(string: base.trimmingSlashes + "/ocs/v2.php/core/apppassword"),
               NCWorkspaceOrigin.isSameOrigin(url.absoluteString, base: base),
-              let basic = "\(grant.loginName):\(password)".data(using: .utf8) else { return }
+              let basic = "\(grant.loginName):\(password)".data(using: .utf8) else { return false }
         var revoke = request("DELETE", url)
         revoke.setValue("Basic " + basic.base64EncodedString(), forHTTPHeaderField: "Authorization")
         revoke.setValue("true", forHTTPHeaderField: "OCS-APIRequest")
-        let status = (try? await transport(revoke))?.1.statusCode
-        NCDeviceSyncLog.log("revoke", status: status)
+        let result = try? await transport(revoke)
+        NCDeviceSyncLog.log("revoke", status: result?.1.statusCode)
+        guard let (data, response) = result, response.statusCode == 200 else { return false }
+        return Self.ocsSucceeded(data)
+    }
+
+    /// An empty answer is fine (the HTTP status said 200); otherwise the OCS status must be 100 or 200.
+    static func ocsSucceeded(_ data: Data) -> Bool {
+        guard !data.isEmpty else { return true }
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let ocs = root["ocs"] as? [String: Any],
+              let meta = ocs["meta"] as? [String: Any],
+              let code = meta["statuscode"] as? Int else { return false }
+        return code == 100 || code == 200
     }
 
     /// The answer's `server` is the account's own server: same origin and the same path, case of the host ignored.

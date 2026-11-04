@@ -123,7 +123,8 @@ final class NoDriveDeviceSyncUITests: XCTestCase {
         didnt.tap()
         let undone = app.descendants(matching: .any)["devicesyncUndone"].firstMatch
         XCTAssertTrue(waitFor(undone, in: app, timeout: 60), "the \"password removed\" text did not show")
-        XCTAssertTrue(undone.label.contains("the separate password was removed"), "wrong text: \(undone.label)")
+        XCTAssertTrue(undone.label.contains("The separate password was removed."), "wrong text: \(undone.label)")
+        XCTAssertFalse(undone.label.contains("Nothing was installed"), "the text claims what the app cannot know: \(undone.label)")
         save("06-didnt-work")
         saveTexts(app, "06-didnt-work")
         record("didnt-work", [:])
@@ -176,6 +177,12 @@ final class NoDriveDeviceSyncUITests: XCTestCase {
             apple["safari-foreground"] = "PASS"
             save("10-safari")
             var found = safari.alerts.firstMatch.waitForExistence(timeout: 30)
+            // After the 30 s: what Safari shows now (its address bar, an error page or a prompt), and its element tree, so
+            // a missing prompt can be explained. devicesync-server.jsonl says whether Safari's request reached the app.
+            save("15-safari-after-wait")
+            if let dir = outputDir {
+                append(safari.debugDescription + "\n", to: dir.appendingPathComponent("15-safari-after-wait.tree.log"))
+            }
             var alert = safari.alerts.firstMatch
             if !found, springboard.alerts.firstMatch.exists {
                 found = true

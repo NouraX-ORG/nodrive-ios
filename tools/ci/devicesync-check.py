@@ -23,6 +23,11 @@ throwaway password or the poll token. The checks:
      replaced, the host and principal of the account, no name of the upstream product; `plutil -lint` agrees when it exists
   f  the UI test's own records: profile checked, "It didn't work" shown, removal steps shown; Apple's own screens are
      reported (PASS or NOT VERIFIED), never failing
+  g  before any profile was built, the app asked who the new password belongs to: one GET ocs/v2.php/cloud/user per grant,
+     with Basic auth of the new password and OCS-APIRequest, answered 200, right after the grant
+  h  the loopback server's own records (devicesync-server.jsonl, written by the app's Debug hook: method, status and byte
+     count only): per variant, whether Safari's request reached the server and got 200 with the profile. Always reported;
+     with --require-safari-fetch (on once the simulator's Safari is known to fetch) a variant without a served profile fails
 """
 import argparse
 import json
@@ -61,6 +66,7 @@ def check_log(events, variants):
     grants = [e for e in device if e['event'] == 'device-grant']
     revoked = [e for e in device if e['event'] == 'device-apppassword-revoked']
     refused = [e for e in device if e['event'] == 'device-apppassword-refused']
+    identity = [e for e in device if e['event'] == 'device-identity-check']
     expected = 2 * len(variants)
     # a
     for e in device:
@@ -109,8 +115,29 @@ def check_log(events, variants):
             problems.append(f"d: the revocation came with the user agent {e.get('user_agent')!r}")
     if refused:
         problems.append(f'd: {len(refused)} revocation(s) were refused')
+    # g
+    if len(identity) != len(grants):
+        problems.append(f'g: {len(identity)} identity checks for {len(grants)} grants')
+    for e in identity:
+        if e.get('method') != 'GET' or e.get('path') != '/ocs/v2.php/cloud/user':
+            problems.append(f"g: the identity check was {e.get('method')} {e.get('path')}")
+        if not e.get('has_authorization') or not e.get('ocs_api_request'):
+            problems.append('g: the identity check lacked its Basic header or OCS-APIRequest')
+        if e.get('status') != 200:
+            problems.append(f"g: the identity check was answered {e.get('status')}")
+        if e.get('user_agent') != DEVICE_UA:
+            problems.append(f"g: the identity check came with the user agent {e.get('user_agent')!r}")
+    waiting = False
+    for e in device:
+        if e['event'] == 'device-grant':
+            waiting = True
+        elif e['event'] == 'device-identity-check':
+            waiting = False
+        elif e['event'] in ('device-flow-start', 'device-apppassword-revoked') and waiting:
+            problems.append('g: a grant was not followed by its identity check')
+            waiting = False
     return problems, {'starts': len(starts), 'pages': len(pages), 'polls': len(polls), 'grants': len(grants),
-                      'revocations': len(revoked)}
+                      'revocations': len(revoked), 'identity_checks': len(identity)}
 
 
 def check_profile(path, label, lint=True):
@@ -168,7 +195,35 @@ def read_records(path):
     return records
 
 
-def check_variant(walk, variant, lint=True):
+def check_server_records(records, label, require_fetch=False):
+    """The loopback server's records of one variant (two sign-ins): did Safari's request reach it, was the profile served?"""
+    problems = []
+    listening = [r for r in records if r.get('event') == 'profile-server-listening']
+    requests = [r for r in records if r.get('event') == 'profile-request']
+    served = [r for r in records if r.get('event') == 'profile-served']
+    ok = [r for r in requests if r.get('status') == 200]
+    facts = {'listening': len(listening), 'requests': len(requests), 'requests_200': len(ok), 'served': len(served),
+             'methods': sorted({str(r.get('method')) for r in requests}), 'bytes': [r.get('count') for r in served]}
+    if not records:
+        problems.append(f'h: {label}: the app wrote no records of the loopback server (the Debug hook did not run)')
+        return problems, facts
+    if not listening:
+        problems.append(f'h: {label}: the loopback server never reported that it listens')
+    if len(ok) != len(served):
+        problems.append(f'h: {label}: {len(ok)} requests answered 200 but {len(served)} profile-served records')
+    for r in served:
+        if not isinstance(r.get('count'), int) or r['count'] <= 0:
+            problems.append(f"h: {label}: a served profile had the byte count {r.get('count')!r}")
+    for r in requests:
+        if set(r) - {'event', 'method', 'status', 't'}:
+            problems.append(f'h: {label}: a request record holds more than the method and the status')
+    if require_fetch and not served:
+        problems.append(f'h: {label}: Safari never fetched the profile from the loopback server '
+                        f'(listening {len(listening)}, requests {len(requests)})')
+    return problems, facts
+
+
+def check_variant(walk, variant, lint=True, require_fetch=False):
     problems, facts = [], {}
     folder = os.path.join(walk, variant)
     p, f = check_profile(os.path.join(folder, 'devicesync-profile-redacted.mobileconfig'), variant, lint)
@@ -179,6 +234,9 @@ def check_variant(walk, variant, lint=True):
                        ('removal', 'the removal steps were shown'), ('waiting', 'the waiting step was shown')):
         if step not in steps:
             problems.append(f'f: {variant}: the UI test did not record that {what}')
+    p, f = check_server_records(read_records(os.path.join(folder, 'devicesync-server.jsonl')), variant, require_fetch)
+    problems += p
+    facts['loopback'] = f
     try:
         with open(os.path.join(folder, 'apple-screens.json'), encoding='utf-8') as fh:
             facts['apple'] = json.load(fh)
@@ -187,12 +245,12 @@ def check_variant(walk, variant, lint=True):
     return problems, facts
 
 
-def run(log, walk, variants, lint=True):
+def run(log, walk, variants, lint=True, require_fetch=False):
     events = load_log(log)
     problems, facts = check_log(events, variants)
     per_variant = {}
     for variant in variants:
-        p, f = check_variant(walk, variant, lint)
+        p, f = check_variant(walk, variant, lint, require_fetch)
         problems += p
         per_variant[variant] = f
     facts['variants'] = per_variant
@@ -211,6 +269,8 @@ def _good_log(variants):
                 {'event': 'browser-opened-device-flow', 'method': 'GET', 'path': '/login/v2/flow/x', 'host': DRIVE, 'user_agent': 'Mozilla', 'status': 200},
                 {'event': 'device-poll', 'host': DRIVE, 'user_agent': ua, 'status': 404},
                 {'event': 'device-grant', 'host': DRIVE, 'user_agent': ua, 'status': 200},
+                {'event': 'device-identity-check', 'method': 'GET', 'path': '/ocs/v2.php/cloud/user', 'host': DRIVE,
+                 'user_agent': ua, 'has_authorization': True, 'ocs_api_request': True, 'status': 200},
             ]
             if n == 1:
                 events.append({'event': 'device-apppassword-revoked', 'method': 'DELETE', 'path': '/ocs/v2.php/core/apppassword', 'host': DRIVE,
@@ -244,7 +304,14 @@ def self_test():
         assert any(p.startswith(letter + ':') for p in found), (letter, found)
         bad += 1
 
+    def identity(ev):
+        return [e for e in ev if e['event'] == 'device-identity-check']
+
     expect(lambda ev: ev[0].update(host='evil.example.com'), 'a')
+    expect(lambda ev: ev.remove(identity(ev)[0]), 'g')
+    expect(lambda ev: identity(ev)[0].update(ocs_api_request=False), 'g')
+    expect(lambda ev: identity(ev)[0].update(status=401), 'g')
+    expect(lambda ev: identity(ev)[0].update(path='/ocs/v2.php/cloud/users/ali'), 'g')
     expect(lambda ev: ev[0].update(user_agent='Mozilla'), 'b')
     expect(lambda ev: ev[0].update(has_authorization=True), 'b')
     expect(lambda ev: ev.pop(0), 'b')
@@ -253,6 +320,24 @@ def self_test():
     expect(lambda ev: [e for e in ev if e['event'] == 'device-apppassword-revoked'][0].update(has_authorization=False), 'd')
     expect(lambda ev: ev.remove([e for e in ev if e['event'] == 'device-apppassword-revoked'][0]), 'd')
     expect(lambda ev: ev.append({'event': 'device-apppassword-refused', 'host': DRIVE, 'user_agent': DEVICE_UA}), 'd')
+
+    good_records = [{'event': 'profile-server-listening'}, {'event': 'profile-request', 'method': 'GET', 'status': 200},
+                    {'event': 'profile-served', 'count': 1500}, {'event': 'profile-server-closed'}]
+    found, facts = check_server_records(good_records, 'good', require_fetch=True)
+    assert not found and facts['served'] == 1, found
+    quiet = [r for r in good_records if r['event'] not in ('profile-request', 'profile-served')]
+    for records, require, what in (
+            ([], False, 'no records'),
+            ([r for r in good_records if r['event'] != 'profile-server-listening'], False, 'never listened'),
+            ([r for r in good_records if r['event'] != 'profile-served'], False, 'a 200 without a served record'),
+            ([dict(r, count=0) if r['event'] == 'profile-served' else r for r in good_records], False, 'a served profile of 0 bytes'),
+            ([dict(r, path='/x') if r['event'] == 'profile-request' else r for r in good_records], False, 'a path in a request record'),
+            (quiet, True, 'Safari never fetched')):
+        found, _ = check_server_records(records, 'bad', require_fetch=require)
+        assert any(p.startswith('h:') for p in found), what
+        bad += 1
+    found, _ = check_server_records(quiet, 'quiet')
+    assert not found, 'a fetch that is not required is only reported'
 
     tmp = tempfile.mkdtemp()
     try:
@@ -294,6 +379,8 @@ def main():
     ap.add_argument('--walk')
     ap.add_argument('--variants', nargs='+')
     ap.add_argument('--json')
+    ap.add_argument('--require-safari-fetch', action='store_true',
+                    help='a variant in which Safari never fetched the profile from the loopback server fails')
     ap.add_argument('--self-test', action='store_true')
     args = ap.parse_args()
     if args.self_test:
@@ -301,8 +388,12 @@ def main():
         return
     if not (args.log and args.walk and args.variants):
         ap.error('give --log, --walk and --variants (or --self-test)')
-    problems, facts = run(args.log, args.walk, args.variants)
+    problems, facts = run(args.log, args.walk, args.variants, require_fetch=args.require_safari_fetch)
     for variant, f in (facts.get('variants') or {}).items():
+        loop = f.get('loopback') or {}
+        print(f"devicesync-check: {variant}: Safari's request reached the loopback server and the profile was served: "
+              f"{'YES' if loop.get('served') else 'NO'} (listening {loop.get('listening', 0)}, requests {loop.get('requests', 0)}, "
+              f"answered 200 {loop.get('requests_200', 0)}, profile bytes served {loop.get('bytes', [])})")
         for name, result in sorted((f.get('apple') or {}).items()):
             print(f'devicesync-check: {variant}: Apple screen {name}: {result}')
     if args.json:
@@ -313,7 +404,7 @@ def main():
     if problems:
         sys.exit(1)
     print(f"devicesync-check: ok ({facts['starts']} sign-ins, {facts['grants']} grants, {facts['revocations']} revocation(s), "
-          f"{len(args.variants)} variant(s))")
+          f"{facts['identity_checks']} identity check(s), {len(args.variants)} variant(s))")
 
 
 if __name__ == '__main__':

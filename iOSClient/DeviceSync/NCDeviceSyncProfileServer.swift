@@ -31,6 +31,9 @@ final class NCDeviceSyncProfileServer: @unchecked Sendable {
     var onServed: (@Sendable () -> Void)?
     /// Called once when the server closed (after the serve, the lifetime, a cancel or a failure).
     var onClosed: (@Sendable () -> Void)?
+    /// Called for every request that arrived: the method (letters only), the status sent (200 or 404) and the number of
+    /// profile bytes sent (0 for a 404). Never the path, a header or the profile. For the UI tests' records.
+    var onRequest: (@Sendable (_ method: String, _ status: Int, _ bytes: Int) -> Void)?
 
     /// `secret` holds the profile bytes. The server reads them at the moment of the serve, so a wiped secret serves nothing.
     init(profile: NCDeviceSyncSecret, lifetime: TimeInterval = 120) {
@@ -129,6 +132,7 @@ final class NCDeviceSyncProfileServer: @unchecked Sendable {
                 return
             }
             let response = self.answer(to: data)
+            self.onRequest?(Self.method(of: data), response.served ? 200 : 404, response.bytes)
             connection.send(content: response.data, completion: .contentProcessed { _ in
                 connection.cancel()
             })
@@ -140,13 +144,13 @@ final class NCDeviceSyncProfileServer: @unchecked Sendable {
     }
 
     /// The whole answer for one request. A request is served only when it is `GET` of the random path, once.
-    private func answer(to request: Data) -> (data: Data, served: Bool) {
+    private func answer(to request: Data) -> (data: Data, served: Bool, bytes: Int) {
         let head = String(decoding: request.prefix(2048), as: UTF8.self)
         let line = head.split(separator: "\r\n", maxSplits: 1, omittingEmptySubsequences: true).first.map(String.init) ?? ""
         let words = line.split(separator: " ")
         guard words.count >= 2, words[0] == "GET", String(words[1]) == path, !served,
               let profile = secret.data() else {
-            return (Self.notFound, false)
+            return (Self.notFound, false, 0)
         }
         served = true
         var data = Data()
@@ -159,7 +163,13 @@ final class NCDeviceSyncProfileServer: @unchecked Sendable {
         data.append(Data(header.utf8))
         data.append(profile)
         NCDeviceSyncLog.log("profile-served", count: profile.count)
-        return (data, true)
+        return (data, true, profile.count)
+    }
+
+    /// The request method for the records of the UI tests: up to 8 capital letters, else "OTHER". Nothing else of the request.
+    private static func method(of request: Data) -> String {
+        let word = String(decoding: request.prefix(16), as: UTF8.self).split(separator: " ", maxSplits: 1).first.map(String.init) ?? ""
+        return !word.isEmpty && word.count <= 8 && word.allSatisfy({ $0.isASCII && $0.isUppercase }) ? word : "OTHER"
     }
 
     private static let notFound = Data(("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n").utf8)

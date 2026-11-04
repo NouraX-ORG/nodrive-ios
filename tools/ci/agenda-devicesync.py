@@ -11,9 +11,11 @@ iOS are proven here on a real Nextcloud 35, as the first-build checks of the des
   2  a browser (Playwright, the runner's Chrome) plays the person: it signs in as Ali and allows access
   3  the poll answers {server, loginName, appPassword}; the server names the person's account
   4  `occ user:auth-tokens:list ali` shows a token named "NoDrive Calendar & Contacts (iPhone)" (the name in the web security settings)
+  4b GET ocs/v2.php/cloud/user?format=json with the new password answers 200 and names ali: the app compares this id with its own
+     account before it builds the profile (the sign-in sheet is not tied to the account)
   5  the new password does a CalDAV PROPFIND of calendars/ali/ (207), a CardDAV PROPFIND of addressbooks/users/ali/ (207) and a
      PROPFIND of principals/users/ali/ (207, the address the profile names)
-  6  DELETE ocs/v2.php/core/apppassword with that password revokes it (200); the same PROPFINDs are then 401 and the token is gone
+  6  DELETE ocs/v2.php/core/apppassword with that password revokes it (200, OCS status 100 or 200); the same PROPFINDs are then 401 and the token is gone
   7  the server's own Apple profile (/remote.php/dav/provisioning/apple-provisioning.mobileconfig), fetched once with
      overwriteprotocol=https set for that step only: its key names are recorded. It has no CalDAVPassword and no CardDAVPassword,
      so iOS would ask for a password; that is why the app builds its own profile
@@ -201,6 +203,16 @@ def main():
     row('4 occ user:auth-tokens:list shows "%s"' % DEVICE_UA, bool(names) and DEVICE_UA in names,
         'tokens now: %d, before: %d' % (len(names or []), len(before)))
 
+    # 4b whose password it is
+    status, _, data = req('GET', '/ocs/v2.php/cloud/user?format=json', None,
+                          {'OCS-APIRequest': 'true', 'User-Agent': DEVICE_UA, 'Accept': 'application/json'}, auth)
+    try:
+        owner = json.loads(data.decode())['ocs']['data']['id']
+    except (ValueError, KeyError, TypeError):
+        owner = None
+    row('4b GET ocs/v2.php/cloud/user with the new password answers 200 and names ali', status == 200 and owner == 'ali',
+        'status %s' % status)
+
     # 5 the DAV homes the profile names
     for name, path in (('CalDAV calendars/ali/', '/remote.php/dav/calendars/ali/'),
                        ('CardDAV addressbooks/users/ali/', '/remote.php/dav/addressbooks/users/ali/'),
@@ -209,9 +221,15 @@ def main():
         row('5 the new password does a PROPFIND of ' + name + ' (207)', status == 207, 'status %s' % status)
 
     # 6 revoke
-    status, _, _ = req('DELETE', '/ocs/v2.php/core/apppassword', None,
-                        {'OCS-APIRequest': 'true', 'User-Agent': DEVICE_UA, 'Accept': 'application/json'}, auth)
+    status, _, data = req('DELETE', '/ocs/v2.php/core/apppassword', None,
+                          {'OCS-APIRequest': 'true', 'User-Agent': DEVICE_UA, 'Accept': 'application/json'}, auth)
     row('6 DELETE ocs/v2.php/core/apppassword with that password revokes it (200)', status == 200, 'status %s' % status)
+    try:
+        ocs_status = json.loads(data.decode())['ocs']['meta']['statuscode']
+    except (ValueError, KeyError, TypeError):
+        ocs_status = None
+    row('6 the OCS status of the answer is 100 or 200 (the app counts the removal as done only then)', ocs_status in (100, 200),
+        'OCS status %s' % ocs_status)
     for name, path in (('CalDAV', '/remote.php/dav/calendars/ali/'), ('CardDAV', '/remote.php/dav/addressbooks/users/ali/')):
         status = propfind(path, auth)
         row('6 after the revocation the %s PROPFIND is 401' % name, status == 401, 'status %s' % status)

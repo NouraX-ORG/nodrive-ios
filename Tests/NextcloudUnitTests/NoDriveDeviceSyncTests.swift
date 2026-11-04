@@ -239,11 +239,12 @@ struct NoDriveDeviceSyncServerTests {
         defer { other.cancel() }
         #expect(otherURL.lastPathComponent != name)
 
-        // another address of this device does not reach it
-        if let address = otherIPv4(), let port = url.port {
-            let reached = await rawRequest(host: address, port: UInt16(port), path: url.path, timeout: 3)
-            #expect(reached == nil, "the server answered on \(address)")
-        }
+        // another address of this device does not reach it. The check must run: a machine (the CI runner) without any other
+        // IPv4 address fails here instead of passing without having checked.
+        let address = try #require(otherIPv4(), "this machine has no IPv4 address besides 127.0.0.1, so the check could not run")
+        let port = try #require(url.port)
+        let reached = await rawRequest(host: address, port: UInt16(port), path: url.path, timeout: 3)
+        #expect(reached == nil, "the server answered on \(address)")
     }
 
     @Test("The right path is served once, with the profile content type, then it is gone")
@@ -339,9 +340,21 @@ private final class FakeServer: @unchecked Sendable {
     var pollAnswers: [(Int, String)] = [(404, "[]")]
     var startAnswer: (Int, String) = (200, #"{"poll":{"token":"POLL-TOKEN-1234","endpoint":"https://drive.nourax.org/login/v2/poll"},"login":"https://drive.nourax.org/login/v2/flow/FLOW-1"}"#)
     var revokeStatus = 200
+    /// The body of the answer to the removal: the server's OCS answer.
+    var revokeBody = #"{"ocs":{"meta":{"status":"ok","statuscode":200,"message":"OK"},"data":[]}}"#
+    /// The removal fails like a request that never got an answer (offline, timeout).
+    var revokeThrows = false
+    /// The user the new password belongs to (the answer to GET cloud/user), or an HTTP status that is not 200.
+    var ownerId = "ali"
+    var ownerStatus = 200
+    /// When set, every poll waits here before it is answered, so a test can cancel while the answer is on its way.
+    var pollGate: Latch?
     private var polls = 0
 
     func transport(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        if request.httpMethod == "POST", request.url?.path.hasSuffix("/login/v2/poll") == true, let gate = pollGate {
+            await gate.pass()
+        }
         lock.lock()
         defer { lock.unlock() }
         let url = request.url!
@@ -352,14 +365,43 @@ private final class FakeServer: @unchecked Sendable {
         func answer(_ status: Int, _ text: String) -> (Data, HTTPURLResponse) {
             (Data(text.utf8), HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!)
         }
-        if request.httpMethod == "DELETE" { return answer(revokeStatus, "{}") }
+        if request.httpMethod == "DELETE" {
+            if revokeThrows { throw URLError(.notConnectedToInternet) }
+            return answer(revokeStatus, revokeBody)
+        }
         if url.path.hasSuffix("/index.php/login/v2") { return answer(startAnswer.0, startAnswer.1) }
+        if url.path.hasSuffix("/ocs/v2.php/cloud/user") {
+            return answer(ownerStatus, #"{"ocs":{"meta":{"status":"ok","statuscode":200,"message":"OK"},"data":{"id":"\#(ownerId)","enabled":true}}}"#)
+        }
         let index = min(polls, pollAnswers.count - 1)
         polls += 1
         return answer(pollAnswers[index].0, pollAnswers[index].1)
     }
 
     func methods() -> [String] { lock.lock(); defer { lock.unlock() }; return seen.map(\.method) }
+}
+
+/// A step of a test that waits until the test lets it go, and says that it arrived.
+private final class Latch: @unchecked Sendable {
+    private let lock = NSLock()
+    private var opened = false
+    private var arrivals = 0
+
+    var arrived: Bool { lock.lock(); defer { lock.unlock() }; return arrivals > 0 }
+
+    func open() { lock.lock(); opened = true; lock.unlock() }
+
+    private func arrive() { lock.lock(); arrivals += 1; lock.unlock() }
+
+    private var isOpen: Bool { lock.lock(); defer { lock.unlock() }; return opened }
+
+    func pass() async {
+        arrive()
+        while !isOpen {
+            // a cancelled task's sleep throws at once: yield so that the wait does not spin
+            if (try? await Task.sleep(for: .milliseconds(5))) == nil { await Task.yield() }
+        }
+    }
 }
 
 private func grantJSON(server: String = base, loginName: String = "ali", password: String = planted) -> String {
@@ -458,12 +500,59 @@ struct NoDriveDeviceSyncSignInTests {
     func revoke() async throws {
         let server = FakeServer()
         let c = client(server)
-        await c.revoke(NCDeviceAppPasswordClient.Grant(loginName: "ali", secret: NCDeviceSyncSecret(planted)))
+        let removed = await c.revoke(NCDeviceAppPasswordClient.Grant(loginName: "ali", secret: NCDeviceSyncSecret(planted)))
+        #expect(removed)
         let request = try #require(server.seen.first)
         #expect(request.method == "DELETE")
         #expect(request.url == "https://drive.nourax.org/ocs/v2.php/core/apppassword")
         let expected = "Basic " + Data("ali:\(planted)".utf8).base64EncodedString()
         #expect(request.authorization == expected)
+    }
+
+    @Test("Revoking counts as done only when the server says so: not on 401, 5xx, an OCS error, an unreadable answer or no answer")
+    func revokeResult() async {
+        let grant = { NCDeviceAppPasswordClient.Grant(loginName: "ali", secret: NCDeviceSyncSecret(planted)) }
+        for status in [401, 403, 404, 500, 503] {
+            let server = FakeServer()
+            server.revokeStatus = status
+            #expect(await client(server).revoke(grant()) == false, "HTTP \(status)")
+        }
+        let ocsError = FakeServer()
+        ocsError.revokeBody = #"{"ocs":{"meta":{"status":"failure","statuscode":997,"message":"Unauthorised"},"data":[]}}"#
+        #expect(await client(ocsError).revoke(grant()) == false)
+        let page = FakeServer()
+        page.revokeBody = "<html>Sign in to the Wi-Fi</html>"
+        #expect(await client(page).revoke(grant()) == false)
+        let offline = FakeServer()
+        offline.revokeThrows = true
+        #expect(await client(offline).revoke(grant()) == false)
+        let wiped = grant()
+        wiped.secret.wipe()
+        #expect(await client(FakeServer()).revoke(wiped) == false)
+        // an empty body is fine when the HTTP status is 200; OCS 100 (v1 style) counts too
+        let empty = FakeServer()
+        empty.revokeBody = ""
+        #expect(await client(empty).revoke(grant()))
+        let v1 = FakeServer()
+        v1.revokeBody = #"{"ocs":{"meta":{"status":"ok","statuscode":100,"message":"OK"},"data":[]}}"#
+        #expect(await client(v1).revoke(grant()))
+    }
+
+    @Test("The owner of a new password is asked with GET cloud/user and that password, on the account's own server")
+    func owner() async throws {
+        let server = FakeServer()
+        server.ownerId = "bob"
+        let c = client(server)
+        let id = await c.ownerId(of: NCDeviceAppPasswordClient.Grant(loginName: "bob", secret: NCDeviceSyncSecret(planted)))
+        #expect(id == "bob")
+        let request = try #require(server.seen.first)
+        #expect(request.method == "GET")
+        #expect(request.url == "https://drive.nourax.org/ocs/v2.php/cloud/user?format=json")
+        #expect(request.authorization == "Basic " + Data("bob:\(planted)".utf8).base64EncodedString())
+        // anything but a clear answer is "unknown"
+        let refused = FakeServer()
+        refused.ownerStatus = 401
+        #expect(await client(refused).ownerId(of: NCDeviceAppPasswordClient.Grant(loginName: "bob", secret: NCDeviceSyncSecret(planted))) == nil)
     }
 }
 
@@ -482,6 +571,10 @@ private final class FlowFixture {
     var servers: [NCDeviceSyncProfileServer] = []
     /// The install window is an hour for the fake sleep, unless a test wants it to end.
     var fastInstallWindow = false
+    /// The id of the signed-in account.
+    var accountUserId = "ali"
+    /// When set, starting the loopback server waits here, so a test can cancel while it starts.
+    var startGate: Latch?
 
     func flow() -> NCDeviceSyncFlow {
         let state = NCDeviceSyncState(defaults: defaults)
@@ -490,12 +583,13 @@ private final class FlowFixture {
             account: "ali https://drive.nourax.org",
             client: { NCDeviceAppPasswordClient(base: base, transport: { try await fake.transport($0) }) },
             profileAccount: { loginName in
-                NCDeviceSyncProfile.Account(base: base, userId: "ali", loginName: loginName, accountKey: "ali https://drive.nourax.org")
+                NCDeviceSyncProfile.Account(base: base, userId: self.accountUserId, loginName: loginName, accountKey: "ali https://drive.nourax.org")
             },
             bundleIdentifier: "org.nourax.nodrive",
             presentSignIn: { _, _ in self.signInOpened += 1 },
             dismissSignIn: { self.signInDismissed += 1 },
             startServer: { profile in
+                if let gate = self.startGate { await gate.pass() }
                 let created = NCDeviceSyncProfileServer(profile: profile)
                 self.servers.append(created)
                 return (URL(string: "http://127.0.0.1:1/test.mobileconfig")!, created)
@@ -581,17 +675,244 @@ struct NoDriveDeviceSyncFlowTests {
         flow.begin()
         #expect(await fixture.waitFor(flow, .installSteps))
         flow.didntWork()
-        #expect(flow.phase == .undone)
-        for _ in 0..<200 where !fixture.server.methods().contains("DELETE") {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        // the "removed" text only after the server confirmed
+        #expect(await fixture.waitFor(flow, .undone))
         let revoke = try #require(fixture.server.seen.last)
         #expect(revoke.method == "DELETE")
         #expect(revoke.url == "https://drive.nourax.org/ocs/v2.php/core/apppassword")
         #expect(revoke.authorization == "Basic " + Data("ali:\(planted)".utf8).base64EncodedString())
-        for _ in 0..<200 where flow.holdsSecret {
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        #expect(!flow.holdsSecret)
+    }
+
+    @Test("It didn't work, but the server answers 401: not 'removed', the password is kept for Try again, and Try again works")
+    func didntWorkRefused() async throws {
+        let fixture = FlowFixture()
+        fixture.server.pollAnswers = [(200, grantJSON())]
+        let flow = fixture.flow()
+        flow.begin()
+        #expect(await fixture.waitFor(flow, .installSteps))
+        fixture.server.revokeStatus = 401
+        flow.didntWork()
+        #expect(await fixture.waitFor(flow, .notRemoved))
+        #expect(flow.phase != .undone)
+        #expect(flow.holdsSecret, "the password must be kept so that Try again can remove it")
+        // the server comes back
+        fixture.server.revokeStatus = 200
+        flow.retryRemoval()
+        #expect(await fixture.waitFor(flow, .undone))
+        #expect(!flow.holdsSecret)
+        #expect(fixture.server.methods().filter { $0 == "DELETE" }.count == 2)
+    }
+
+    @Test("It didn't work with no connection: the same, and the Close button gives the password up")
+    func didntWorkOffline() async throws {
+        let fixture = FlowFixture()
+        fixture.server.pollAnswers = [(200, grantJSON())]
+        let flow = fixture.flow()
+        flow.begin()
+        #expect(await fixture.waitFor(flow, .installSteps))
+        fixture.server.revokeThrows = true
+        flow.didntWork()
+        #expect(await fixture.waitFor(flow, .notRemoved))
+        #expect(flow.holdsSecret)
+        flow.retryRemoval()
+        #expect(await fixture.waitFor(flow, .notRemoved))
+        flow.cancel()
+        #expect(flow.closed)
+        #expect(flow.phase == .intro)
+        #expect(!flow.holdsSecret)
+    }
+
+    @Test("An OCS error in a 200 answer is not 'removed' either")
+    func didntWorkOcsError() async throws {
+        let fixture = FlowFixture()
+        fixture.server.pollAnswers = [(200, grantJSON())]
+        let flow = fixture.flow()
+        flow.begin()
+        #expect(await fixture.waitFor(flow, .installSteps))
+        fixture.server.revokeBody = #"{"ocs":{"meta":{"status":"failure","statuscode":997,"message":"x"},"data":[]}}"#
+        flow.didntWork()
+        #expect(await fixture.waitFor(flow, .notRemoved))
+    }
+
+    @Test("A grant for another user than the signed-in account: DELETE, no profile, no Safari")
+    func otherUser() async throws {
+        let fixture = FlowFixture()
+        fixture.server.pollAnswers = [(200, grantJSON(loginName: "bob"))]
+        fixture.server.ownerId = "bob"
+        let flow = fixture.flow()
+        flow.begin()
+        #expect(await fixture.waitFor(flow, .otherUser))
+        let methods = fixture.server.methods()
+        #expect(methods.contains("DELETE"))
+        // the password of the other user went to nothing but the identity question and its removal, on our own server
+        #expect(fixture.server.seen.allSatisfy { $0.url.hasPrefix("https://drive.nourax.org/") })
+        let revoke = try #require(fixture.server.seen.last)
+        #expect(revoke.method == "DELETE")
+        #expect(revoke.authorization == "Basic " + Data("bob:\(planted)".utf8).base64EncodedString())
+        #expect(fixture.built.isEmpty, "a profile was built for another user's password")
+        #expect(fixture.servers.isEmpty)
+        #expect(fixture.safariOpened.isEmpty)
+        #expect(!NCDeviceSyncState(defaults: fixture.defaults).profileOffered(account: "ali https://drive.nourax.org"))
+        #expect(!flow.holdsSecret)
+        // the same loginName but another id on the server counts as another user too
+        let renamed = FlowFixture()
+        renamed.server.pollAnswers = [(200, grantJSON())]
+        renamed.server.ownerId = "ali2"
+        let second = renamed.flow()
+        second.begin()
+        #expect(await renamed.waitFor(second, .otherUser))
+        #expect(renamed.built.isEmpty)
+    }
+
+    @Test("A grant for another user whose removal fails is kept for Try again, and says so")
+    func otherUserNotRemoved() async throws {
+        let fixture = FlowFixture()
+        fixture.server.pollAnswers = [(200, grantJSON(loginName: "bob"))]
+        fixture.server.ownerId = "bob"
+        fixture.server.revokeStatus = 500
+        let flow = fixture.flow()
+        flow.begin()
+        #expect(await fixture.waitFor(flow, .notRemoved))
+        #expect(flow.holdsSecret)
+        fixture.server.revokeStatus = 200
+        flow.retryRemoval()
+        #expect(await fixture.waitFor(flow, .otherUser))
+        #expect(!flow.holdsSecret)
+    }
+
+    @Test("A password whose owner cannot be told is removed again, and no profile is built")
+    func ownerUnknown() async throws {
+        let fixture = FlowFixture()
+        fixture.server.pollAnswers = [(200, grantJSON())]
+        fixture.server.ownerStatus = 401
+        let flow = fixture.flow()
+        flow.begin()
+        #expect(await fixture.waitFor(flow, .failed))
+        #expect(fixture.server.methods().contains("DELETE"))
+        #expect(fixture.built.isEmpty)
+        #expect(fixture.safariOpened.isEmpty)
+        #expect(!flow.holdsSecret)
+    }
+
+    @Test("The right user (and the identity asked first) goes on to the profile")
+    func ownerIsAccount() async throws {
+        let fixture = FlowFixture()
+        fixture.server.pollAnswers = [(200, grantJSON())]
+        let flow = fixture.flow()
+        flow.begin()
+        #expect(await fixture.waitFor(flow, .installSteps))
+        let urls = fixture.server.seen.map(\.url)
+        let identity = try #require(urls.firstIndex(of: "https://drive.nourax.org/ocs/v2.php/cloud/user?format=json"))
+        let grantPoll = try #require(urls.lastIndex { $0.hasSuffix("/login/v2/poll") })
+        #expect(identity > grantPoll)
+        #expect(fixture.built.count == 1)
+        flow.installed()
+    }
+
+    @Test("Cancel while a successful poll is on its way: the new password is removed, no profile, no Safari")
+    func cancelDuringPoll() async throws {
+        let fixture = FlowFixture()
+        fixture.server.pollAnswers = [(200, grantJSON())]
+        let gate = Latch()
+        fixture.server.pollGate = gate
+        let flow = fixture.flow()
+        flow.begin()
+        for _ in 0..<500 where !gate.arrived { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(gate.arrived, "the poll never started")
+        flow.cancel()
+        #expect(flow.phase == .intro)
+        #expect(flow.closed)
+        gate.open()
+        for _ in 0..<500 where !fixture.server.methods().contains("DELETE") { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(fixture.server.methods().contains("DELETE"), "the password that arrived after Cancel was not removed")
+        for _ in 0..<500 where flow.holdsSecret { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(!flow.holdsSecret)
+        // give a wrong continuation time to show itself
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(fixture.safariOpened.isEmpty)
+        #expect(fixture.servers.isEmpty)
+        #expect(fixture.built.isEmpty)
+        #expect(flow.phase == .intro)
+        #expect(!NCDeviceSyncState(defaults: fixture.defaults).profileOffered(account: "ali https://drive.nourax.org"))
+        #expect(!fixture.server.seen.contains { $0.url.contains("/cloud/user") }, "the identity was asked for a cancelled flow")
+    }
+
+    @Test("Cancel while the loopback server starts: the password is removed, Safari stays closed, the phase stays Cancel's")
+    func cancelWhileOpening() async throws {
+        let fixture = FlowFixture()
+        fixture.server.pollAnswers = [(200, grantJSON())]
+        let gate = Latch()
+        fixture.startGate = gate
+        let flow = fixture.flow()
+        flow.begin()
+        for _ in 0..<500 where !gate.arrived { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(gate.arrived, "the loopback server never started")
+        #expect(flow.phase == .opening)
+        flow.cancel()
+        gate.open()
+        #expect(await fixture.waitFor(flow, .intro))
+        #expect(flow.closed)
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(fixture.server.methods().contains("DELETE"))
+        #expect(fixture.safariOpened.isEmpty, "Safari was opened after Cancel")
+        #expect(flow.phase == .intro, "a dismissed sheet moved on to \(flow.phase)")
+        #expect(!NCDeviceSyncState(defaults: fixture.defaults).profileOffered(account: "ali https://drive.nourax.org"))
+        #expect(!flow.holdsSecret)
+    }
+
+    @Test("Cancel with a removal the server does not confirm: the sheet stays with 'could not be removed'")
+    func cancelNotRemoved() async throws {
+        let fixture = FlowFixture()
+        fixture.server.pollAnswers = [(200, grantJSON())]
+        let gate = Latch()
+        fixture.startGate = gate
+        fixture.server.revokeStatus = 503
+        let flow = fixture.flow()
+        flow.begin()
+        for _ in 0..<500 where !gate.arrived { try await Task.sleep(for: .milliseconds(10)) }
+        flow.cancel()
+        gate.open()
+        #expect(await fixture.waitFor(flow, .notRemoved))
+        #expect(!flow.closed)
+        fixture.server.revokeStatus = 200
+        flow.retryRemoval()
+        #expect(await fixture.waitFor(flow, .intro))
+        #expect(flow.closed)
+        #expect(!flow.holdsSecret)
+    }
+
+    @Test("Try again after a removal starts a clean run: a later Cancel removes the new password, and a retry never touches it")
+    func newRunAfterRemoval() async throws {
+        let fixture = FlowFixture()
+        fixture.server.pollAnswers = [(200, grantJSON())]
+        let flow = fixture.flow()
+        flow.begin()
+        #expect(await fixture.waitFor(flow, .installSteps))
+        fixture.server.revokeStatus = 401
+        flow.didntWork()
+        #expect(await fixture.waitFor(flow, .notRemoved))
+        // the removal of the old password worked on the retry; then a new sign-in takes a new password
+        fixture.server.revokeStatus = 200
+        flow.retryRemoval()
+        #expect(await fixture.waitFor(flow, .undone))
+        flow.begin()
+        #expect(await fixture.waitFor(flow, .installSteps))
+        #expect(flow.holdsSecret)
+        flow.didntWork()
+        #expect(await fixture.waitFor(flow, .undone))
+        #expect(!flow.holdsSecret)
+
+        // the third run is cancelled before Safari: the profile of the first run was offered, this password was not
+        let gate = Latch()
+        fixture.startGate = gate
+        let deletes = fixture.server.methods().filter { $0 == "DELETE" }.count
+        flow.begin()
+        for _ in 0..<500 where !gate.arrived { try await Task.sleep(for: .milliseconds(10)) }
+        flow.cancel()
+        gate.open()
+        #expect(await fixture.waitFor(flow, .intro))
+        #expect(fixture.server.methods().filter { $0 == "DELETE" }.count == deletes + 1, "the unused password was not removed")
         #expect(!flow.holdsSecret)
     }
 
@@ -790,7 +1111,8 @@ struct NoDriveDeviceSyncTextTests {
     func texts() {
         let keys = ["header", "button", "footer", "signin_first", "step1_title", "step1", "continue", "waiting", "reopen", "timeout",
                     "refused", "failed", "try_again", "opening", "install_title", "install_steps", "installed", "didnt_work",
-                    "open_safari", "done", "done_button", "undone", "expired", "removal_title", "removal_message"]
+                    "open_safari", "done", "done_button", "undone", "expired", "otheruser", "removing", "not_removed",
+                    "removal_title", "removal_message"]
         for key in keys {
             let full = "_nodrive_devicesync_\(key)_"
             let text = NCDeviceSync.text(full)
@@ -801,6 +1123,9 @@ struct NoDriveDeviceSyncTextTests {
         #expect(NCDeviceSync.text("_nodrive_devicesync_button_") == "Add to iPhone Calendar & Contacts")
         #expect(NCDeviceSync.text("_nodrive_devicesync_installed_") == "Installed")
         #expect(NCDeviceSync.text("_nodrive_devicesync_didnt_work_") == "It didn't work")
+        // the "removed" text does not claim what the app cannot know, and the failure text names the password's web name
+        #expect(!NCDeviceSync.text("_nodrive_devicesync_undone_").contains("Nothing was installed"))
+        #expect(NCDeviceSync.text("_nodrive_devicesync_not_removed_").contains("NoDrive Calendar & Contacts (iPhone)"))
     }
 
     @Test("Upstream's profile entry is switched off")
