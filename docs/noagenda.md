@@ -356,3 +356,10 @@ appear in Reminders.
 
 - Section 11 items stay with the Workspace session. For device sync: Login Flow v2 and app passwords must stay on for `drive.nourax.org` (a person who signs in with "Log in
   with Nourax" gets the separate password through the same flow); the calendar trash bin keeps deleted events, but address books have no trash bin (plan notes 11 and 12).
+
+### Choices and status
+
+- **Status.** Code commit `dae5859691`; run [41730256912](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41730256912) is green in all 18 jobs on the first attempt. Rows for the owner: "Device calendar and contacts sync" in `docs/testing.md`.
+- **UI test flake.** In run 41716741376 the account injection of the first launch left the intro on screen for 300 s (the stand-in had seen the account) in 6 shards. A second launch
+  of the same run restores the main screen in about 8 s, so every NoDrive UI test that signs in now waits 90 s, relaunches the app once and then waits up to 200 s. Test code only; the app is unchanged.
+- **Open owner to-dos.** Sign the profile with a real certificate (it shows "Not Verified"); translations of `DeviceSync.strings` (English only); the install on a real iPhone.

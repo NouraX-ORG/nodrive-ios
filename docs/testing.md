@@ -365,6 +365,24 @@ Nextcloud's name, logo, colours and links: none; the accent is cobalt.
 | Timeline on the real account: side menu, NoAgenda, Timeline: your tasks as bars under their project and phase with the % filled, to-dos with two dates, milestones and dated cards as diamonds, an arrow where one task follows another, your busy time shaded | owner | pending | drive.nourax.org, your own account; compare with NoGantt on the web |
 | Timeline: tap a task, Edit, Move by +1 day, Save: NoGantt on the web shows the new dates and the tasks that follow moved; Undo in the toast puts them back | owner | pending | a project you manage, a test task |
 
+## Device calendar and contacts sync (step 4)
+
+See `docs/noagenda.md` ("Device calendar and contacts sync"). Screenshots in `docs/screenshots/ios/devicesync-light/` and `devicesync-dark/` (1200 px copies from run
+[41730256912](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41730256912), iPhone 17, iOS 27.0, the app against the CI stand-in that plays Login Flow v2). Looked at for Nextcloud's name, logo, colours and links: none.
+The branch head code is `dae5859691` (all 18 jobs green on the first attempt of that run). Earlier runs of the branch failed on test details that later commits repaired, and in
+run 41716741376 on a flake of the account injection (the intro stayed on screen for 300 s in 6 shards, device-sync among them); the UI tests now relaunch once, see "Choices and status" in `docs/noagenda.md`.
+
+| Check | Who | Result | Evidence |
+|---|---|---|---|
+| Device sync unit tests: the profile (Apple's keys, principal URL, stable identifier, new UUIDs, no upstream name, https only, redacted copy), the loopback server (127.0.0.1 only, random path, served once, closes), the sign-in with a fake transport (user agent, other origin stops, mismatching server refused and revoked, timeout, DELETE with the new password), the flow steps, secrecy (the password is in the served bytes only), the removal message, the texts | CI | pass | run [41730256912](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41730256912), job "Build and unit tests": the 7 suites `NoDrive device sync ...` (profile, secret, loopback server, sign-in, flow, removal, texts) passed |
+| Login Flow v2 for the profile on a real Nextcloud 35.0.2: a separate app password named "NoDrive Calendar & Contacts (iPhone)", it does CalDAV, CardDAV and principals PROPFIND (207), its revocation by DELETE works (200) and the same requests are then 401, the token is gone | CI | pass (throwaway server) | job "NoAgenda server", `devicesync.md`: every check PASS |
+| The server's own Apple profile is not usable: no `CalDAVPassword`/`CardDAVPassword`, and it names the server's theme ("Nextcloud"), so the app builds its own and switches the upstream entry off (`disable_mobileconfig`) | CI | pass (recorded) | same file, check 7 |
+| Add to iPhone Calendar & Contacts in the simulator, light and dark (3 tests each): the section and its footer, step 1, the waiting step, the hand-over to Safari, the install steps, Installed and the done text; "It didn't work" revokes the password (the stand-in sees the DELETE); removing the account shows how to remove the profile | CI | pass (stand-in) | shard `device-sync`: `passed tests 3` in light and in dark; `devicesync-check.py` ok: 4 grants, 2 revocations, only drive.nourax.org, the grant only after the page was opened, 2 payloads in each redacted profile (`<redacted>` passwords), no throwaway password in any screenshot, log or result |
+| Apple's own screens (Safari's download question, Settings "Profile Downloaded", the install screen): tried by the test, reported but never failing | CI | Safari in front: PASS; the other two NOT VERIFIED (not reachable by the simulator test) | `apple-screens.json` in the shard |
+| No Nextcloud text in the device-sync screens; the accent is the app's | CI | pass | `check-branding.py` 0 unclassified; `screens-report` ok |
+| Install the profile on a real iPhone: Settings, NoDrive, Calendar and contacts, Add to iPhone Calendar & Contacts, Continue, allow in the sign-in sheet, allow the download in Safari, Settings, Profile Downloaded, Install; then events, reminders (to-do lists) and contacts of your account show in Calendar, Reminders and Contacts, both ways | owner | pending | real iPhone (the simulator cannot install a profile) |
+| The new password is listed as "NoDrive Calendar & Contacts (iPhone)" under Security on drive.nourax.org; remove the NoDrive account in the app: the message names the steps to remove the profile (Settings, General, VPN & Device Management) | owner | pending | real iPhone and the web security settings |
+
 ## Owner test steps (Mac)
 
 1. Install Xcode 27.1 from the Mac App Store (macOS Tahoe 26.6 or newer), open it once and let it
@@ -443,7 +461,13 @@ Nextcloud's name, logo, colours and links: none; the accent is cobalt.
    5. A task of a project you may only view is locked with its reason. A task with only a start date is a one-day bar.
    6. Arabic: the chart stays left to right on purpose; the controls and sheets follow the language (not yet checked by a screenshot).
    Nothing is deleted from the Timeline.
-11. Go through the "owner" rows above, then read back the device name shown under
+11. Device calendar and contacts sync (same app, real iPhone, Safari as the default browser): Settings, "Add to iPhone Calendar & Contacts" (the same button is at the bottom of NoAgenda's Sources). Expect:
+   1. A sheet that explains the steps. Continue opens the sign-in sheet: allow access. Safari opens and iOS asks to allow a configuration profile download; then
+      Settings, Profile Downloaded, Install (within 8 minutes; the profile says "Not Verified" because it is not signed yet).
+   2. Calendar, Reminders and Contacts show your NoDrive calendars, to-do lists and contacts; a change on the iPhone shows on the web and the other way.
+   3. The password was never shown. On drive.nourax.org, Settings, Security lists "NoDrive Calendar & Contacts (iPhone)". "It didn't work" removes it again.
+   4. Remove the NoDrive account in the app: the message tells how to remove the profile (Settings, General, VPN & Device Management). Nothing is deleted from the iPhone or the Drive.
+12. Go through the "owner" rows above, then read back the device name shown under
    Settings → Security on drive.nourax.org.
 
 Building and the iPhone steps: [build.md](build.md).
