@@ -375,7 +375,7 @@ appear in Reminders.
   and the server's own profile is recorded as evidence.
 
 - **Safari's hand-off is proven in the simulator, up to the install screen.** In the Debug build the app writes `devicesync-server.jsonl` (method, status and byte count of each
-  request the loopback server got; never a path, a header or the profile). In run 41883507135 (both variants, both sign-ins) Safari fetched the profile: `GET`, answered 200, 2584 bytes
+  request the loopback server got; never a path, a header or the profile). In runs 41883507135 and 41969655176 (both variants, both sign-ins) Safari fetched the profile: `GET`, answered 200, 2584 bytes
   served, the server closed right after. So `Content-Disposition: attachment`, Safari's https upgrade and the app's background state are not a problem there. Safari then shows its own
   dialog (an `SFDialogView`, not a system alert): "This website is trying to download a configuration profile. Do you want to allow this?" with Ignore and Allow. The test finds it by its
   text and taps Allow; Settings then shows "Profile Downloaded", its install screen names "NoDrive Calendar & Contacts" (Nourax, "Not Signed", contains a CalDAV and a CardDAV account),
@@ -391,8 +391,9 @@ appear in Reminders.
 
 ### Choices and status
 
-- **Status.** Round 3 of the fixes (review of round 2): the removal after Cancel in a task of its own, the last poll on Cancel, the Cancel button off during a removal, the tests' callbacks set before the server starts, CRLF docs. Round 2: code commit `aac0632825`, run [41883507135](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41883507135) green in all 18 jobs.
-  The docs-and-merge stage cites the final head commit and its run. Rows for the owner: "Device calendar and contacts sync" in `docs/testing.md`.
+- **Status.** Merged into `main` after the independent final review approved it. Final code head `a22f4c68da`, run [41969655176](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41969655176) green in all 18 jobs on attempt 1. Round 3 of the fixes (review of round 2): the removal after Cancel in a task of its own, the last poll on Cancel, the Cancel button off during a removal, the tests' callbacks set before the server starts, CRLF docs. Round 2: code commit `aac0632825`, run [41883507135](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41883507135) green in all 18 jobs (the screenshots are from it).
+  A mutation check (commit `82b05428d3`, reverted by `a22f4c68da`) proved that the `cancelDuringPoll` test fails without the fix; the broken commit stays in the history. Rows for the owner: "Device calendar and contacts sync" in `docs/testing.md`.
+- **Open nits (tests, optional).** `cancelWaitingAfterAllow` checks that a DELETE was sent but not that it was exactly one; `cancelWaiting` checks "no DELETE" right after `cancel()`, before the extra poll's task can run. A short wait and a count check in both would close this.
 - **UI test flake.** In run 41716741376 the account injection of the first launch left the intro on screen for 300 s (the stand-in had seen the account) in 6 shards. A second launch
   of the same run restores the main screen in about 8 s, so every NoDrive UI test that signs in now waits 90 s, relaunches the app once and then waits up to 200 s. Test code only; the app is unchanged.
 - **Open owner to-dos.** Sign the profile with a real certificate (it shows "Not Signed"); translations of `DeviceSync.strings` (English only); the install on a real iPhone.
