@@ -101,5 +101,5 @@ NoAgenda Timeline (`agenda-timeline-light/`, `agenda-timeline-dark/`): from run 
 `feature/noagenda-timeline` (commit `e90ceb88b0`; the light copy of "moved" is from this run, the others from the cancelled run 41562291822 of `067f488940`, the UI tests `NoDriveAgendaTimelineUITests`). The names are in `docs/testing.md`, section
 "NoAgenda Timeline (step 3)".
 
-Device calendar and contacts sync (`devicesync-light/`, `devicesync-dark/`): from run [41730256912](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41730256912) on `feature/device-calendar-sync` (commit `dae5859691`, the UI tests
-`NoDriveDeviceSyncUITests`). The names are in `docs/testing.md`, section "Device calendar and contacts sync (step 4)".
+Device calendar and contacts sync (`devicesync-light/`, `devicesync-dark/`): shots 01 to 07 from run [41730256912](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41730256912) on `feature/device-calendar-sync` (commit `dae5859691`), shots 11 to 14 from the later runs of that branch that added Safari's own screens (the last one is cited in `docs/testing.md`); the UI tests are
+`NoDriveDeviceSyncUITests`. The names are in `docs/testing.md`, section "Device calendar and contacts sync (step 4)".

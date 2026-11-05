@@ -355,8 +355,17 @@ private final class FakeServer: @unchecked Sendable {
         // Like URLSession: a request made by a task that was cancelled fails at once. Placed before the gate, so a poll that
         // is already on its way when the person cancels still gets its answer.
         try Task.checkCancellation()
-        if request.httpMethod == "POST", request.url?.path.hasSuffix("/login/v2/poll") == true, let gate = pollGate {
-            await gate.pass()
+        // A poll takes its answer when it arrives, before it waits at the gate: the poll that was on its way first gets the
+        // first answer, whatever order the gate lets them go in. A test hands out a grant once, as Nextcloud does (the 200 of
+        // a Login Flow v2 poll comes only once; later polls get 404).
+        var pollIndex = 0
+        let isPoll = request.httpMethod == "POST" && request.url?.path.hasSuffix("/login/v2/poll") == true
+        if isPoll {
+            lock.lock()
+            pollIndex = min(polls, pollAnswers.count - 1)
+            polls += 1
+            lock.unlock()
+            if let gate = pollGate { await gate.pass() }
         }
         lock.lock()
         defer { lock.unlock() }
@@ -376,9 +385,7 @@ private final class FakeServer: @unchecked Sendable {
         if url.path.hasSuffix("/ocs/v2.php/cloud/user") {
             return answer(ownerStatus, #"{"ocs":{"meta":{"status":"ok","statuscode":200,"message":"OK"},"data":{"id":"\#(ownerId)","enabled":true}}}"#)
         }
-        let index = min(polls, pollAnswers.count - 1)
-        polls += 1
-        return answer(pollAnswers[index].0, pollAnswers[index].1)
+        return answer(pollAnswers[pollIndex].0, pollAnswers[pollIndex].1)
     }
 
     func methods() -> [String] { lock.lock(); defer { lock.unlock() }; return seen.map(\.method) }
@@ -816,7 +823,7 @@ struct NoDriveDeviceSyncFlowTests {
     @Test("Cancel while a successful poll is on its way: the new password is removed, no profile, no Safari")
     func cancelDuringPoll() async throws {
         let fixture = FlowFixture()
-        fixture.server.pollAnswers = [(200, grantJSON())]
+        fixture.server.pollAnswers = [(200, grantJSON()), (404, "[]")]
         let gate = Latch()
         fixture.server.pollGate = gate
         let flow = fixture.flow()
@@ -829,6 +836,9 @@ struct NoDriveDeviceSyncFlowTests {
         gate.open()
         for _ in 0..<500 where !fixture.server.methods().contains("DELETE") { try await Task.sleep(for: .milliseconds(10)) }
         #expect(fixture.server.methods().contains("DELETE"), "the password that arrived after Cancel was not removed")
+        // the extra poll of Cancel got 404 (the 200 comes only once), so the one removal is the held poll's own
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(fixture.server.methods().filter { $0 == "DELETE" }.count == 1, "exactly one removal is expected")
         for _ in 0..<500 where flow.holdsSecret { try await Task.sleep(for: .milliseconds(10)) }
         #expect(!flow.holdsSecret)
         // give a wrong continuation time to show itself
@@ -844,8 +854,9 @@ struct NoDriveDeviceSyncFlowTests {
     @Test("Cancel while waiting: a password the person allowed in the last seconds is removed too")
     func cancelWaitingAfterAllow() async throws {
         let fixture = FlowFixture()
-        // the server made the password when the person allowed access; the app's own poll only sees it later
-        fixture.server.pollAnswers = [(404, "[]"), (200, grantJSON())]
+        // the server made the password when the person allowed access; the app's own poll (held, answered first) still sees
+        // 404, and only the extra poll that Cancel sends gets the 200, once
+        fixture.server.pollAnswers = [(404, "[]"), (200, grantJSON()), (404, "[]")]
         let gate = Latch()
         fixture.server.pollGate = gate
         let flow = fixture.flow()
