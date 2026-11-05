@@ -323,7 +323,8 @@ appear in Reminders.
   Installed and the 10-minute window forget the password and the profile bytes (the password stays valid: it is in use on the phone).
 - **Cancel** before Safari removes the new password (it was never used) and the sheet waits for the server's answer; if the answer is "no", the sheet stays with "could not be
   removed" and Try again, and Close gives the password up (the text names where to remove it on the web). A Cancel that comes while the poll answer or the loopback server is
-  still on its way is honoured too: a password that arrives after Cancel is removed again (three tries) and wiped, and a loopback server that starts after Cancel never reaches
+  still on its way is honoured too: a password that arrives after Cancel is removed again (three tries, in a task of its own: the task that Cancel stopped cannot send the request) and wiped; Cancel while waiting polls once more, so a password the person allowed in the last seconds is removed too (one case stays: a poll answer that URLSession drops because Cancel stopped it, which the app cannot see; the password is then listed under "NoDrive Calendar & Contacts (iPhone)" in the web security settings);
+  the Cancel button is off while a removal runs; and a loopback server that starts after Cancel never reaches
   Safari and leaves the state alone.
 - **Every run makes a new app password.** A reinstall replaces the profile (same identifier) but leaves the older password valid on the server until the person removes it
   under Settings, Security on the web. Apple's Calendar and Reminders will also show what NoDrive's other apps put on the server's calendar list: NoGantt's one-way task-copy
@@ -339,7 +340,7 @@ appear in Reminders.
   password is revoked and dropped. The sign-in page opens in `ASWebAuthenticationSession` (ephemeral, like the app's own sign-in).
 - `NCDeviceSyncProfile.swift`: the profile as XML property list (Apple's keys: `PayloadType` Configuration; `com.apple.caldav.account` and `com.apple.carddav.account` with
   host, port 443, SSL, user name, password and the principal URL). `PayloadIdentifier` is stable per account (a second install replaces the first); the UUIDs are new each time.
-  The profile is **unsigned**: iOS shows "Not Verified" (owner to-do: sign it with a real certificate later).
+  The profile is **unsigned**: iOS shows "Not Signed" (owner to-do: sign it with a real certificate later).
 - `NCDeviceSyncProfileServer.swift`: a one-time server on **127.0.0.1 only** (`NWListener`, `requiredLocalEndpoint`), a random port, a path of 32 random bytes, served once
   (`application/x-apple-aspen-config`, `no-store`), closed after the serve, after 2 minutes or on Cancel; 404 for anything else. It runs inside a `beginBackgroundTask` while
   Safari is in front. `SFSafariViewController` is not used (Apple documents no profile download there).
@@ -359,8 +360,8 @@ appear in Reminders.
   stops, 404 keeps polling, a mismatching server is refused and revoked, timeout, DELETE with the Basic header of the new password, a removal counts as done only on HTTP 200
   with OCS 100/200: not on 401, 5xx, an OCS error, a page, no answer; the owner question GET cloud/user); the flow (happy path, Open Safari again, It didn't work, cancel,
   timeout, refusal, Safari cannot open, install window; a grant for another user and an unknown owner: DELETE, no profile, no Safari; "It didn't work" with 401, with no answer and
-  with an OCS error: the state "could not be removed", the password kept, Try again works; Cancel while the poll answer is on its way and while the loopback server starts:
-  DELETE, no Safari, no profile, no offered flag, phase stays Cancel's); secrecy (a planted password is in the served bytes only: not in the log, the defaults, the files
+  with an OCS error: the state "could not be removed", the password kept, Try again works; Cancel while the poll answer is on its way, while waiting after the person allowed, and while the loopback server starts:
+  DELETE, no Safari, no profile, no offered flag, phase stays Cancel's; the fake transport fails a request of a cancelled task like URLSession does); secrecy (a planted password is in the served bytes only: not in the log, the defaults, the files
   or the test copy); the removal message only when a profile was offered; the texts.
 - UI tests (`NoDriveDeviceSyncUITests`, shard `device-sync`, light and dark, against the stand-in with `--device-sync`): the section and its footer, step 1, the waiting step, the
   hand-over to Safari, the install steps, Installed and the done text; "It didn't work" (the stand-in must see the DELETE); the account removal and its message. Apple's own screens
@@ -378,10 +379,10 @@ appear in Reminders.
   served, the server closed right after. So `Content-Disposition: attachment`, Safari's https upgrade and the app's background state are not a problem there. Safari then shows its own
   dialog (an `SFDialogView`, not a system alert): "This website is trying to download a configuration profile. Do you want to allow this?" with Ignore and Allow. The test finds it by its
   text and taps Allow; Settings then shows "Profile Downloaded", its install screen names "NoDrive Calendar & Contacts" (Nourax, "Not Signed", contains a CalDAV and a CardDAV account),
-  and Install leads to the warning "The profile is not signed." All of these are PASS in `apple-screens.json` in both variants (screenshots `devicesync-10` to `-15`). The test stops there:
+  and Install leads to the warning "The profile is not signed." All of these are PASS in `apple-screens.json` in both variants (screenshots `devicesync-11` to `-14`). The test stops there:
   it does not confirm the unsigned-profile warning, so the profile is never installed in the simulator and the Calendar and Contacts apps are not checked. The earlier "no prompt seen"
   (run 41803357182) was the test looking for a system alert only. `devicesync-check.py --require-safari-fetch` is now on in the workflow: a variant without a served profile fails.
-  What stays an owner test is the real install, the "Not Verified" text until the profile is signed, and the sync itself.
+  What stays an owner test is the real install, the "Not Signed" text until the profile is signed, and the sync itself.
 
 ### Server-side notes (not done here)
 
@@ -390,8 +391,8 @@ appear in Reminders.
 
 ### Choices and status
 
-- **Status.** Round 2 of the fixes (review findings S1 to S5 and the nits): code commit `aac0632825`; run [41883507135](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41883507135) is green in all 18 jobs.
+- **Status.** Round 3 of the fixes (review of round 2): the removal after Cancel in a task of its own, the last poll on Cancel, the Cancel button off during a removal, the tests' callbacks set before the server starts, CRLF docs. Round 2: code commit `aac0632825`, run [41883507135](https://github.com/NouraX-ORG/nodrive-ios/actions/runs/41883507135) green in all 18 jobs.
   The docs-and-merge stage cites the final head commit and its run. Rows for the owner: "Device calendar and contacts sync" in `docs/testing.md`.
 - **UI test flake.** In run 41716741376 the account injection of the first launch left the intro on screen for 300 s (the stand-in had seen the account) in 6 shards. A second launch
   of the same run restores the main screen in about 8 s, so every NoDrive UI test that signs in now waits 90 s, relaunches the app once and then waits up to 200 s. Test code only; the app is unchanged.
-- **Open owner to-dos.** Sign the profile with a real certificate (it shows "Not Verified"); translations of `DeviceSync.strings` (English only); the install on a real iPhone.
+- **Open owner to-dos.** Sign the profile with a real certificate (it shows "Not Signed"); translations of `DeviceSync.strings` (English only); the install on a real iPhone.

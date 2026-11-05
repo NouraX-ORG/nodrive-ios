@@ -175,14 +175,17 @@ final class NoDriveDeviceSyncUITests: XCTestCase {
         let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
         if safari.wait(for: .runningForeground, timeout: 30) {
             apple["safari-foreground"] = "PASS"
+            // Safari needs a moment to draw: a shot taken at once was a black frame (dark) or the same picture as the prompt's.
+            Thread.sleep(forTimeInterval: 3)
             save("10-safari")
             // Safari's question is a dialog of its own (SFDialogView), not a system alert: found by its text. Run 41841023389 showed
             // it in both variants: "This website is trying to download a configuration profile. Do you want to allow this?",
             // Ignore / Allow. devicesync-server.jsonl says whether Safari's request reached the app.
             let question = safari.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS[c] 'configuration profile'")).firstMatch
             let found = question.waitForExistence(timeout: 30)
-            // After the wait: what Safari shows now, and its element tree, so a missing prompt can be explained.
-            save("15-safari-after-wait")
+            // After the wait: what Safari shows now, and its element tree, so a missing prompt can be explained. With the
+            // prompt on screen shot 11 shows the same, so the extra picture is only taken when it is missing.
+            if !found { save("15-safari-after-wait") }
             if let dir = outputDir {
                 append(safari.debugDescription + "\n", to: dir.appendingPathComponent("15-safari-after-wait.tree.log"))
             }

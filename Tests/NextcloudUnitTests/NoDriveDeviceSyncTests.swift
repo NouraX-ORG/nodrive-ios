@@ -217,9 +217,12 @@ private func otherIPv4() -> String? {
 
 @Suite("NoDrive device sync loopback server", .serialized)
 struct NoDriveDeviceSyncServerTests {
-    private func start(lifetime: TimeInterval = 120, profile: String = "PROFILE-BYTES") async throws -> (NCDeviceSyncProfileServer, URL, NCDeviceSyncSecret) {
+    /// `configure` runs before the listener starts, so a callback never misses an event.
+    private func start(lifetime: TimeInterval = 120, profile: String = "PROFILE-BYTES",
+                       configure: (NCDeviceSyncProfileServer) -> Void = { _ in }) async throws -> (NCDeviceSyncProfileServer, URL, NCDeviceSyncSecret) {
         let secret = NCDeviceSyncSecret(profile)
         let server = NCDeviceSyncProfileServer(profile: secret, lifetime: lifetime)
+        configure(server)
         let url = try await server.start()
         return (server, url, secret)
     }
@@ -249,11 +252,10 @@ struct NoDriveDeviceSyncServerTests {
 
     @Test("The right path is served once, with the profile content type, then it is gone")
     func servesOnce() async throws {
-        let (server, url, _) = try await start(profile: "THE-PROFILE")
+        let served = Counter()
+        let (server, url, _) = try await start(profile: "THE-PROFILE") { $0.onServed = { served.add() } }
         defer { server.cancel() }
         let port = UInt16(try #require(url.port))
-        let served = Counter()
-        server.onServed = { served.add() }
         let first = try #require(await rawRequest(host: "127.0.0.1", port: port, path: url.path))
         let parts = split(first)
         #expect(parts.head.hasPrefix("HTTP/1.1 200"))
@@ -285,10 +287,9 @@ struct NoDriveDeviceSyncServerTests {
 
     @Test("It closes after its lifetime")
     func lifetime() async throws {
-        let (server, url, _) = try await start(lifetime: 1)
-        defer { server.cancel() }
         let closed = Counter()
-        server.onClosed = { closed.add() }
+        let (server, url, _) = try await start(lifetime: 1) { $0.onClosed = { closed.add() } }
+        defer { server.cancel() }
         let port = UInt16(try #require(url.port))
         try await Task.sleep(for: .seconds(2.5))
         #expect(closed.value == 1)
@@ -298,9 +299,8 @@ struct NoDriveDeviceSyncServerTests {
 
     @Test("It closes on cancel, and a wiped profile is never served")
     func cancelAndWipe() async throws {
-        let (server, url, _) = try await start()
         let closed = Counter()
-        server.onClosed = { closed.add() }
+        let (server, url, _) = try await start { $0.onClosed = { closed.add() } }
         server.cancel()
         try await Task.sleep(for: .seconds(0.5))
         #expect(closed.value == 1)
@@ -352,6 +352,9 @@ private final class FakeServer: @unchecked Sendable {
     private var polls = 0
 
     func transport(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        // Like URLSession: a request made by a task that was cancelled fails at once. Placed before the gate, so a poll that
+        // is already on its way when the person cancels still gets its answer.
+        try Task.checkCancellation()
         if request.httpMethod == "POST", request.url?.path.hasSuffix("/login/v2/poll") == true, let gate = pollGate {
             await gate.pass()
         }
@@ -836,6 +839,29 @@ struct NoDriveDeviceSyncFlowTests {
         #expect(flow.phase == .intro)
         #expect(!NCDeviceSyncState(defaults: fixture.defaults).profileOffered(account: "ali https://drive.nourax.org"))
         #expect(!fixture.server.seen.contains { $0.url.contains("/cloud/user") }, "the identity was asked for a cancelled flow")
+    }
+
+    @Test("Cancel while waiting: a password the person allowed in the last seconds is removed too")
+    func cancelWaitingAfterAllow() async throws {
+        let fixture = FlowFixture()
+        // the server made the password when the person allowed access; the app's own poll only sees it later
+        fixture.server.pollAnswers = [(404, "[]"), (200, grantJSON())]
+        let gate = Latch()
+        fixture.server.pollGate = gate
+        let flow = fixture.flow()
+        flow.begin()
+        for _ in 0..<500 where !gate.arrived { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(gate.arrived, "the poll never started")
+        #expect(flow.phase == .waiting)
+        flow.cancel()
+        gate.open()
+        for _ in 0..<500 where !fixture.server.methods().contains("DELETE") { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(fixture.server.methods().contains("DELETE"), "the password allowed just before Cancel was left on the server")
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(fixture.safariOpened.isEmpty)
+        #expect(fixture.built.isEmpty)
+        #expect(flow.phase == .intro)
+        #expect(!flow.holdsSecret)
     }
 
     @Test("Cancel while the loopback server starts: the password is removed, Safari stays closed, the phase stays Cancel's")

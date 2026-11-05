@@ -176,8 +176,10 @@ final class NCDeviceSyncFlow {
             let granted = try await client.waitForGrant(started, interval: dependencies.pollInterval,
                                                         timeout: dependencies.pollTimeout, sleep: dependencies.sleep)
             guard mine == generation else {
-                // Cancelled while the answer was on its way: the password exists on the server, so it goes again.
-                await discard(granted)
+                // Cancelled while the answer was on its way: the password exists on the server, so it goes again. This task
+                // was cancelled by cancel(), and URLSession fails a request of a cancelled task at once: the removal runs in
+                // a task of its own, which does not inherit the cancellation.
+                discardInFreshTask(granted)
                 return
             }
             dependencies.dismissSignIn()
@@ -324,6 +326,12 @@ final class NCDeviceSyncFlow {
         generation += 1
         signInTask?.cancel()
         dependencies.dismissSignIn()
+        // The server creates the password when the person allows access, not when the app polls: a Cancel in the
+        // seconds before the next poll would leave a password the app never sees. One more poll in a task of its own
+        // (the sign-in task is cancelled) picks it up and removes it. The flow is read here, before forget() drops it.
+        if phase == .waiting, grant == nil, let flow {
+            Task { await self.pollOnceAndDiscard(flow) }
+        }
         if grant != nil, !offered, phase != .notRemoved {
             forget(keepGrant: true)
             phase = .removing
@@ -373,6 +381,17 @@ final class NCDeviceSyncFlow {
     }
 
     /// A password nobody looks at any more (the person cancelled while the answer was on its way): a few tries, then wiped.
+    /// Starts in a task that does not inherit the cancellation of the sign-in task.
+    private func discardInFreshTask(_ granted: NCDeviceAppPasswordClient.Grant) {
+        Task { await self.discard(granted) }
+    }
+
+    /// The last poll after Cancel in `.waiting`: a password the person allowed meanwhile is removed at once.
+    private func pollOnceAndDiscard(_ flow: NCDeviceAppPasswordClient.Flow) async {
+        guard let client = dependencies.client(), let granted = try? await client.poll(flow) else { return }
+        await discard(granted)
+    }
+
     private func discard(_ granted: NCDeviceAppPasswordClient.Grant) async {
         var removed = false
         if let client = dependencies.client() {

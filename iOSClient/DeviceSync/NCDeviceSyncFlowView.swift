@@ -30,6 +30,7 @@ struct NCDeviceSyncFlowView: View {
                         flow.cancel()
                         if flow.closed { dismiss() }
                     }
+                    .disabled(flow.phase == .removing)
                     .accessibilityIdentifier("devicesyncCancel")
                 }
             }
