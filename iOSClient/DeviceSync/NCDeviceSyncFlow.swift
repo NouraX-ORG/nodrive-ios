@@ -179,7 +179,7 @@ final class NCDeviceSyncFlow {
                 // Cancelled while the answer was on its way: the password exists on the server, so it goes again. This task
                 // was cancelled by cancel(), and URLSession fails a request of a cancelled task at once: the removal runs in
                 // a task of its own, which does not inherit the cancellation.
-                await discard(granted)
+                discardInFreshTask(granted)
                 return
             }
             dependencies.dismissSignIn()
